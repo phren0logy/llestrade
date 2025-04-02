@@ -26,6 +26,7 @@ class LLMClient:
         timeout: float = 60.0,
         max_retries: int = 2,
         thinking_budget_tokens: int = 16000,
+        default_system_prompt: Optional[str] = None,
     ):
         """
         Initialize the LLM client wrapper.
@@ -34,6 +35,7 @@ class LLMClient:
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries for API requests
             thinking_budget_tokens: Budget for "thinking" tokens in extended thinking mode
+            default_system_prompt: Default system prompt to use when none is provided
 
         Raises:
             ValueError: If the ANTHROPIC_API_KEY environment variable is not set
@@ -41,6 +43,13 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.thinking_budget_tokens = thinking_budget_tokens
+        
+        # Set default system prompt if not provided
+        if default_system_prompt is None:
+            self.default_system_prompt = "You are an advanced assistant designed to help a forensic psychiatrist. Your task is to analyze and objectively document case information in a formal clinical style, maintaining professional psychiatric documentation standards. Distinguish between information from the subject and objective findings. Report specific details such as dates, frequencies, dosages, and other relevant clinical data. Document without emotional language or judgment."
+        else:
+            self.default_system_prompt = default_system_prompt
+        
         self.client = self._get_client()
 
     def _get_client(self) -> anthropic.Anthropic:
@@ -108,7 +117,10 @@ class LLMClient:
                 "messages": [{"role": "user", "content": prompt_text}],
             }
 
-            if system_prompt:
+            # Use the default system prompt if none is provided
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
                 message_params["system"] = system_prompt
 
             # Create the message
@@ -180,12 +192,7 @@ class LLMClient:
             system_prompt: Optional system prompt to set context
 
         Returns:
-            Dictionary with response information:
-                - success: Boolean indicating success
-                - content: Response content if successful
-                - error: Error message if unsuccessful
-                - usage: Token usage information if available
-                - thinking: Thinking process output if available
+            Dictionary with response information
         """
         try:
             # Verify the PDF file exists
@@ -219,11 +226,11 @@ class LLMClient:
                 ],
             }
 
-            if system_prompt:
+            # Use the default system prompt if none is provided
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
                 message_params["system"] = system_prompt
-
-            # Set up for capturing thinking output if budget allows
-            thinking_output = ""
 
             # Create the message
             response = self.client.messages.create(
@@ -286,12 +293,7 @@ class LLMClient:
             thinking_budget_tokens: Override for thinking token budget (defaults to instance setting)
 
         Returns:
-            Dictionary with response information:
-                - success: Boolean indicating success
-                - content: Response content if successful
-                - error: Error message if unsuccessful
-                - thinking: Extended thinking output if successful
-                - usage: Token usage information if available
+            Dictionary with response information including thinking and final response
         """
         try:
             # Use instance default if not specified
@@ -314,8 +316,14 @@ class LLMClient:
                 "messages": [{"role": "user", "content": prompt_text}],
             }
 
-            if system_prompt:
+            # Use the default system prompt if none is provided
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
                 message_params["system"] = system_prompt
+
+            # Set up for capturing thinking output if budget allows
+            thinking_output = ""
 
             # Create the message
             response = self.client.messages.create(
@@ -400,12 +408,7 @@ class LLMClient:
             thinking_budget_tokens: Override for thinking token budget (defaults to instance setting)
 
         Returns:
-            Dictionary with response information:
-                - success: Boolean indicating success
-                - content: Response content if successful
-                - error: Error message if unsuccessful
-                - thinking: Extended thinking process if available
-                - usage: Token usage information if available
+            Dictionary with response information including thinking and final response
         """
         try:
             # Use instance default if not specified
@@ -451,7 +454,10 @@ class LLMClient:
                 ],
             }
 
-            if system_prompt:
+            # Use the default system prompt if none is provided
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
                 message_params["system"] = system_prompt
 
             # Create the message
@@ -541,7 +547,10 @@ class LLMClient:
                 "messages": conversation_history,
             }
 
-            if system_prompt:
+            # Use the default system prompt if none is provided
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
                 message_params["system"] = system_prompt
 
             # Create the message
@@ -613,9 +622,13 @@ class LLMClient:
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "messages": [{"role": "user", "content": prompt}],
+                "stream": True,
             }
 
-            if system_prompt:
+            # Use the default system prompt if none is provided
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
                 message_params["system"] = system_prompt
 
             # Set up streaming connection
@@ -711,7 +724,10 @@ class LLMClient:
                 "tools": tools,
             }
 
-            if system_prompt:
+            # Use the default system prompt if none is provided
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
                 message_params["system"] = system_prompt
 
             # Create the message

@@ -3,6 +3,7 @@ Worker thread for summarizing markdown files with Claude.
 """
 
 import os
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from llm_utils import LLMClient
@@ -164,12 +165,14 @@ Please analyze the following document and provide a comprehensive summary that i
 - Key facts and information about the subject
 - Significant events and dates mentioned
 - Family relationships and social history
-- Educational or employment history
+- Relevant family history or relationships
+- Educational history
+- Employment history
+- Military career history
 - Legal issues or encounters with law enforcement
 - Substance use and treatment history
 - Medical and psychiatric history
 - Any notable statements or quotes
-- Relevant family history or relationships
 - Notable patterns of behavior
 - Adverse life events
 - A timeline of events in a markdown table format with columns for Date, Event, and Significance

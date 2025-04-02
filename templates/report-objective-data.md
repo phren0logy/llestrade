@@ -84,7 +84,7 @@ This section addresses the subject's desired future course, including willingnes
 
 # Mental Status Examination
 
-This part of the report provides information about the subject's mental status, including any cognitive, emotional, and behavioral symptoms. It should include information about:
+This part of the report provides information about the subject's mental status, including any cognitive, emotional, and behavioral symptoms. It is divided into sections. The Mental Status Examination section should include information about:
 
 - Mood (current mood, past symptoms of depression or mania)
 - Speech characteristics (rate, volume, prosody)
@@ -93,26 +93,30 @@ This part of the report provides information about the subject's mental status, 
 - Perceptual disturbances (including hallucinations or delusions)
 - Orientation assessment
 - Cognitive functioning (attention, memory, executive function)
-- Insight and judgment regarding current situation 
+- Insight and judgment regarding current situation
 
-Note absence of these symptoms if they are not reported by the subject. Do not comment on appearance or other elements not present in the transcript.
+Note absence of these symptoms if they are not reported by the subject. Do not comment on appearance or other elements of a mental status exam that are not present in the transcript.
 
 ## Mood Symptoms
+
 This section documents the subject's report of symptoms that could be related to a DSM-5 depressive episode. This includes distinct time periods with changes in sleep, appetite, the ability to enjoy pleasureable activities, and changes in mood.
 
 Address symptom patterns, including frequency, intensity, duration, triggers, and alleviating factors.
 
 ## Anxiety Symptoms
+
 This section documents the subject's report of symptoms that could be related to a DSM-5 anxiety disorder. This includes excessive fear and anxiety about routine stressors, somatic manifestations of stress such as muscle tension or panic attacks, and the effect of these symptoms on daily functioning.
 
 Address symptom patterns, including frequency, intensity, duration, triggers, and alleviating factors.
 
 ## Psychotic Symptoms
+
 This section documents the subject's report of symptoms that could be related to a DSM-5 psychotic disorder. This includes hallucinations, delusions, and other psychotic symptoms.
 
 Address symptom patterns, including frequency, intensity, duration, triggers, and alleviating factors.
 
 ## Trauma-Related Symptoms
-This section documents the subject's report of symptoms that could be related to a DSM-5 trauma-related disorder. This includes re-experiencing symptoms, avoidance symptoms, negative alterations in cognition and mood, and hyperarousal symptoms. 
+
+This section documents the subject's report of symptoms that could be related to a DSM-5 trauma-related disorder. This includes re-experiencing symptoms, avoidance symptoms, negative alterations in cognition and mood, and hyperarousal symptoms.
 
 Address symptom patterns, including frequency, intensity, duration, triggers, and alleviating factors.
