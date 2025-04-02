@@ -140,7 +140,7 @@ class RecordReviewTab(BaseTab):
         subject_group.setLayout(subject_layout)
         layout.addWidget(subject_group)
 
-        # Add PDF directory selector
+        # Add PDF file selector
         self.pdf_selector = FileSelector(
             title="PDF File Selection",
             button_text="Select PDF Files",
@@ -150,6 +150,18 @@ class RecordReviewTab(BaseTab):
             callback=self.on_pdf_files_selected
         )
         layout.addWidget(self.pdf_selector)
+        
+        # Add PDF folder selector (for recursive selection)
+        self.pdf_folder_selector = FileSelector(
+            title="PDF Folder Selection (Recursive)",
+            button_text="Select Folder with PDFs",
+            file_mode=QFileDialog.FileMode.Directory,
+            file_filter="PDF Files (*.pdf)",
+            placeholder_text="No folder selected",
+            callback=self.on_pdf_files_selected,
+            recursive_selection=True
+        )
+        layout.addWidget(self.pdf_folder_selector)
 
         # Add output directory selector
         self.output_selector = FileSelector(
@@ -407,17 +419,30 @@ class RecordReviewTab(BaseTab):
         # Update workflow indicators
         self.update_workflow_indicators()
 
-    def on_pdf_files_selected(self, files):
-        """Handle PDF file selection."""
+    def on_pdf_files_selected(self, files, recursive=False):
+        """
+        Handle PDF file selection.
+        
+        Args:
+            files: List of selected file paths or single directory path
+            recursive: If True, files is actually a directory to search recursively
+        """
         try:
-            # Validate files
             valid_files = []
-            for file_path in files:
-                # Check if the file exists and is a PDF
-                if os.path.exists(file_path) and file_path.lower().endswith('.pdf'):
-                    valid_files.append(file_path)
-                else:
-                    self.show_status(f"Warning: {os.path.basename(file_path)} is not a valid PDF file or doesn't exist")
+            
+            if recursive:
+                # If recursive is True, files is actually a single directory path
+                directory = files
+                self.show_status(f"Searching for PDF files in {directory} and subdirectories...")
+                valid_files = self.find_pdf_files_recursively(directory)
+            else:
+                # Regular file selection
+                for file_path in files:
+                    # Check if the file exists and is a PDF
+                    if os.path.exists(file_path) and file_path.lower().endswith('.pdf'):
+                        valid_files.append(file_path)
+                    else:
+                        self.show_status(f"Warning: {os.path.basename(file_path)} is not a valid PDF file or doesn't exist")
             
             self.pdf_files = valid_files
             
@@ -427,9 +452,36 @@ class RecordReviewTab(BaseTab):
                 self.check_ready_state()
                 self.workflow_indicator.update_status(0, [], f"{len(valid_files)} PDF files selected")
             else:
-                self.show_status("No valid PDF files were selected")
+                self.show_status("No valid PDF files were found")
         except Exception as e:
             self.show_status(f"Error selecting PDF files: {str(e)}")
+    
+    def find_pdf_files_recursively(self, directory):
+        """
+        Find all PDF files in a directory and its subdirectories.
+        
+        Args:
+            directory: Directory path to search
+            
+        Returns:
+            List of paths to PDF files
+        """
+        pdf_files = []
+        
+        try:
+            for root, dirs, files in os.walk(directory):
+                for file in files:
+                    if file.lower().endswith('.pdf'):
+                        file_path = os.path.join(root, file)
+                        pdf_files.append(file_path)
+                        # Log when we find a PDF
+                        self.append_status(f"Found PDF: {file_path}")
+            
+            self.show_status(f"Found {len(pdf_files)} PDF files in {directory} and subdirectories")
+        except Exception as e:
+            self.show_status(f"Error searching for PDF files: {str(e)}")
+        
+        return pdf_files
 
     def on_output_directory_selected(self, directory):
         """Handle output directory selection."""
@@ -449,119 +501,169 @@ class RecordReviewTab(BaseTab):
 
     def refresh_file_list(self):
         """Refresh the file selector with the current PDF files."""
-        # Clear the tree
-        self.results_viewer.clear_tree()
+        try:
+            if hasattr(self, 'results_viewer') and self.results_viewer:
+                # Clear existing items
+                self.results_viewer.clear()
+                
+                # Create a root node for the file list
+                self.file_list_text = QTextEdit()
+                self.file_list_text.setReadOnly(True)
+                self.file_list_text.setFont(QFont(DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE))
+                
+                # Selected directory for organizing files
+                base_dir = None
+                if hasattr(self, 'pdf_folder_selector') and self.pdf_folder_selector:
+                    # Use the folder selector path as base directory if available
+                    base_dir = self.pdf_folder_selector.get_selected_path()
+                
+                # Start building the header text
+                header_text = f"=== SELECTED PDF FILES ===\n"
+                header_text += f"Total files: {len(self.pdf_files)}\n\n"
+                if base_dir:
+                    header_text += f"Source Directory: {base_dir}\n\n"
+                
+                self.file_list_text.append(header_text)
+                
+                # Add all PDF files to the file list
+                if self.pdf_files:
+                    for i, file_path in enumerate(self.pdf_files, 1):
+                        display_path = file_path
+                        if base_dir and file_path.startswith(base_dir):
+                            # Show relative path from selected directory
+                            rel_path = os.path.relpath(file_path, base_dir)
+                            display_path = f"{rel_path}"
+                        
+                        # Get file size
+                        file_size = os.path.getsize(file_path)
+                        size_str = self.format_file_size(file_size)
+                        
+                        # Show file in the list
+                        self.file_list_text.append(f"{i}. {display_path}")
+                        self.file_list_text.append(f"   Size: {size_str}\n")
+                        
+                        # Create a tree node for the file
+                        pdf_item = QTreeWidgetItem(self.results_viewer.tree)
+                        pdf_item.setText(0, os.path.basename(file_path))
+                        pdf_item.setText(1, "Selected")
+                        pdf_item.setText(2, size_str)
+                        pdf_item.setData(0, Qt.ItemDataRole.UserRole, file_path)
+                        
+                        # Set a folder structure if there are subfolders
+                        if base_dir and '/' in rel_path:
+                            # Create folder structure
+                            folder_path = os.path.dirname(rel_path)
+                            pdf_item.setText(0, f"{folder_path}/{os.path.basename(file_path)}")
+                else:
+                    self.file_list_text.append("No PDF files selected.")
+                
+                # Set the text area as the detail widget
+                self.results_viewer.set_detail_widget(self.file_list_text)
+                
+                # Show a status message
+                self.show_status(f"Found {len(self.pdf_files)} PDF files.")
+        except Exception as e:
+            self.show_status(f"Error refreshing file list: {str(e)}")
+    
+    def format_file_size(self, size_bytes):
+        """Format file size in a human-readable format.
         
-        if not self.pdf_files:
-            return
+        Args:
+            size_bytes: Size in bytes
             
-        # Add files to the tree
-        for file_path in self.pdf_files:
-            try:
-                # Extract the file name
-                file_name = os.path.basename(file_path)
-                
-                # Check if file exists
-                if not os.path.exists(file_path):
-                    self.results_viewer.add_tree_item(
-                        None, 
-                        file_name, 
-                        data=file_path, 
-                        **{"1": "File not found", "2": "N/A"}
-                    )
-                    continue
-                    
-                file_size = os.path.getsize(file_path)
-                file_size_str = f"{file_size / (1024*1024):.2f} MB"
-                
-                status = "Not processed"
-                if file_path in self.processed_pdf_files:
-                    status = "Processed"
-                    
-                self.results_viewer.add_tree_item(
-                    None, 
-                    file_name, 
-                    data=file_path, 
-                    **{"1": status, "2": file_size_str}
-                )
-            except Exception as e:
-                # Handle any exceptions that might occur
-                self.results_viewer.add_tree_item(
-                    None, 
-                    os.path.basename(file_path), 
-                    data=file_path, 
-                    **{"1": f"Error: {str(e)[:30]}...", "2": "N/A"}
-                )
+        Returns:
+            Formatted size string
+        """
+        # Convert file size to KB, MB, or GB
+        if size_bytes < 1024:
+            return f"{size_bytes} bytes"
+        elif size_bytes < 1024 * 1024:
+            return f"{size_bytes / 1024:.1f} KB"
+        elif size_bytes < 1024 * 1024 * 1024:
+            return f"{size_bytes / (1024 * 1024):.1f} MB"
+        else:
+            return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
     def on_file_tree_item_clicked(self, item, column):
         """Handle file tree item click to show file details."""
+        # Get the full path from the item data
+        file_path = item.data(0, Qt.ItemDataRole.UserRole)
+        if not file_path or not os.path.exists(file_path):
+            return
+        
+        # Show basic file information
+        file_name = os.path.basename(file_path)
+        file_size = os.path.getsize(file_path)
+        size_str = self.format_file_size(file_size)
+        
+        # Create text for file details
+        details = f"=== FILE DETAILS ===\n"
+        details += f"Name: {file_name}\n"
+        details += f"Path: {file_path}\n"
+        details += f"Size: {size_str}\n"
+        
+        # Get creation and modification times
         try:
-            file_path = item.data(0, Qt.ItemDataRole.UserRole)
-            if not file_path or not os.path.exists(file_path):
-                self.results_viewer.set_content(f"File not found: {file_path}")
-                return
-                
-            # Get file information
-            file_name = os.path.basename(file_path)
-            file_size = os.path.getsize(file_path)
-            
-            # Prepare text with file details
-            details_text = f"File: {file_name}\n"
-            details_text += f"Path: {file_path}\n"
-            details_text += f"Size: {file_size / (1024*1024):.2f} MB\n\n"
-            
-            # If it's a PDF, get more info
-            if file_path.lower().endswith('.pdf'):
-                try:
-                    doc = fitz.open(file_path)
-                    page_count = len(doc)
-                    details_text += f"Pages: {page_count}\n"
-                    
-                    # Check if file will need to be split
-                    if page_count > 1750:
-                        parts = (page_count - 1) // 1750 + 1
-                        details_text += f"\n⚠️ This file will be split into {parts} parts of 1750 pages each\n"
-                    
-                    # Close the document to prevent resource leaks
-                    doc.close()
-                    
-                    # Check for related files
-                    if self.output_directory:
-                        details_text += "\nRelated Files:\n"
-                        
-                        # Base name without extension
-                        base_name = os.path.splitext(file_name)[0]
-                        
-                        # Check for markdown file
-                        markdown_dir = os.path.join(self.output_directory, "markdown")
-                        if os.path.exists(markdown_dir):
-                            markdown_file = os.path.join(markdown_dir, f"{base_name}.md")
-                            if os.path.exists(markdown_file):
-                                md_size = os.path.getsize(markdown_file) / 1024  # KB
-                                details_text += f"- Markdown: {base_name}.md ({md_size:.1f} KB)\n"
-                        
-                        # Check for JSON file
-                        json_dir = os.path.join(self.output_directory, "json")
-                        if os.path.exists(json_dir):
-                            json_file = os.path.join(json_dir, f"{base_name}.json")
-                            if os.path.exists(json_file):
-                                json_size = os.path.getsize(json_file) / 1024  # KB
-                                details_text += f"- JSON: {base_name}.json ({json_size:.1f} KB)\n"
-                        
-                        # Check for summary file
-                        summaries_dir = os.path.join(self.output_directory, "summaries")
-                        if os.path.exists(summaries_dir):
-                            summary_file = os.path.join(summaries_dir, f"{base_name}_summary.md")
-                            if os.path.exists(summary_file):
-                                summary_size = os.path.getsize(summary_file) / 1024  # KB
-                                details_text += f"- Summary: {base_name}_summary.md ({summary_size:.1f} KB)\n"
-                except Exception as e:
-                    details_text += f"\nError reading PDF: {str(e)}\n"
-                
-            self.results_viewer.set_content(details_text)
-            
+            created_time = os.path.getctime(file_path)
+            modified_time = os.path.getmtime(file_path)
+            details += f"Created: {datetime.fromtimestamp(created_time).strftime('%Y-%m-%d %H:%M:%S')}\n"
+            details += f"Modified: {datetime.fromtimestamp(modified_time).strftime('%Y-%m-%d %H:%M:%S')}\n"
         except Exception as e:
-            self.results_viewer.set_content(f"Error getting file details: {str(e)}")
+            details += f"Error getting file times: {str(e)}\n"
+        
+        details += "\n"
+        
+        # For PDF files, try to get page count and other metadata
+        if file_path.lower().endswith('.pdf'):
+            try:
+                # Use PyMuPDF (fitz) to get PDF metadata
+                with fitz.open(file_path) as pdf:
+                    page_count = len(pdf)
+                    details += f"Pages: {page_count}\n"
+                    
+                    # Get basic metadata
+                    metadata = pdf.metadata
+                    if metadata:
+                        details += "\nMetadata:\n"
+                        for key, value in metadata.items():
+                            if value:
+                                details += f"  {key}: {value}\n"
+            except Exception as e:
+                details += f"Error reading PDF metadata: {str(e)}\n"
+        
+        # Check for processed versions (if they exist)
+        if self.output_directory:
+            # JSON version
+            json_dir = os.path.join(self.output_directory, "json")
+            base_name = os.path.splitext(file_name)[0]
+            json_path = os.path.join(json_dir, f"{base_name}.json")
+            
+            if os.path.exists(json_path):
+                details += f"\nProcessed with Azure Document Intelligence\n"
+                details += f"  JSON: {json_path}\n"
+            
+            # Markdown version
+            markdown_dir = os.path.join(self.output_directory, "markdown")
+            markdown_path = os.path.join(markdown_dir, f"{base_name}.md")
+            
+            if os.path.exists(markdown_path):
+                details += f"  Markdown: {markdown_path}\n"
+            
+            # Summary version
+            summary_dir = os.path.join(self.output_directory, "summaries")
+            summary_path = os.path.join(summary_dir, f"{base_name}_summary.md")
+            
+            if os.path.exists(summary_path):
+                details += f"  Summary: {summary_path}\n"
+        
+        # Set the detail text
+        detail_text = QTextEdit()
+        detail_text.setReadOnly(True)
+        detail_text.setFont(QFont(DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE))
+        detail_text.setText(details)
+        
+        # Set the detail widget
+        self.results_viewer.set_detail_widget(detail_text)
 
     def check_ready_state(self):
         """Check if all requirements are met to enable the process button."""
@@ -667,6 +769,14 @@ class RecordReviewTab(BaseTab):
         status_message = "Ready to process records" if self.pdf_files else "⏳ Waiting for input: Select PDF files and output directory"
         self.workflow_indicator.update_status(current_step, completed_steps, status_message)
 
+    def on_tab_changed(self, index):
+        """Handle tab change events to update UI state."""
+        # Update button enablement based on the selected tab
+        self.check_ready_state()
+
+        # Update workflow indicators
+        self.update_workflow_indicators()
+
     def process_records(self):
         """Process the selected PDF files."""
         # Get the subject name and case information
@@ -730,10 +840,10 @@ class RecordReviewTab(BaseTab):
 
         # Add the message to the status details
         timestamp = time.strftime("%H:%M:%S")
-        self.status_details.append(f"[{timestamp}] {message}")
+        self.status_panel.append_details(f"[{timestamp}] {message}")
 
         # Also update the status summary
-        self.status_summary.setText(f"Progress: {percent}% - {message}")
+        self.status_panel.update_summary(f"Progress: {percent}% - {message}")
 
         # Process events to keep UI responsive
         from PyQt6.QtCore import QCoreApplication

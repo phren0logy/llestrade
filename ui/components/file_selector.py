@@ -31,6 +31,7 @@ class FileSelector(QGroupBox):
         file_filter="All Files (*)",
         placeholder_text=None,
         callback=None,
+        recursive_selection=False,
     ):
         """
         Initialize the file selector.
@@ -42,6 +43,7 @@ class FileSelector(QGroupBox):
             file_filter: Filter string for file types
             placeholder_text: Placeholder text for the path field
             callback: Function to call when selection changes
+            recursive_selection: For Directory mode, recursively find all files matching filter
         """
         super().__init__(title)
         
@@ -52,6 +54,7 @@ class FileSelector(QGroupBox):
         self.selected_paths = []
         self.placeholder_text = placeholder_text or "No file selected"
         self.button_text = button_text
+        self.recursive_selection = recursive_selection
         
         self.setup_ui()
     
@@ -94,6 +97,11 @@ class FileSelector(QGroupBox):
             )
             if selected_path:
                 self.set_selected_path(selected_path)
+                
+                # If recursive selection is enabled, find all matching files in directory
+                if self.recursive_selection and self.callback:
+                    # Pass the directory path for the callback to handle recursive search
+                    self.callback(selected_path, recursive=True)
         else:
             dialog.setNameFilter(self.file_filter)
             if dialog.exec():

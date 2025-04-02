@@ -123,6 +123,32 @@ class ResultsViewer(QSplitter):
         """Get the current content of the viewer."""
         return self.content_viewer.toPlainText()
     
+    def clear(self):
+        """Clear both the tree and content viewer."""
+        self.clear_tree()
+        self.clear_content()
+    
+    def set_detail_widget(self, widget):
+        """
+        Replace the content viewer with a custom widget.
+        
+        Args:
+            widget: Any QWidget to display in the detail pane
+        """
+        # Remove the current content viewer
+        old_widget = self.widget(1)
+        if old_widget:
+            old_widget.setParent(None)
+        
+        # Add the new widget
+        self.insertWidget(1, widget)
+        
+        # Update the content_viewer reference
+        self.content_viewer = widget
+        
+        # Reset the sizes
+        self.setSizes([300, 500])
+    
     def _on_tree_item_clicked(self, item, column):
         """Handle tree item click events."""
         # Emit the item selected signal
