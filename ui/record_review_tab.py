@@ -131,6 +131,12 @@ class RecordReviewTab(BaseTab):
         self.subject_input.setPlaceholderText("Enter the subject's name")
         subject_layout.addRow("Subject Name:", self.subject_input)
         
+        # Add date of birth field
+        self.dob_input = QLineEdit()
+        self.dob_input.setPlaceholderText("YYYY-MM-DD")
+        self.dob_input.setInputMask("9999-99-99")
+        subject_layout.addRow("Date of Birth:", self.dob_input)
+        
         # Add case information field
         self.case_info_input = QTextEdit()
         self.case_info_input.setPlaceholderText("Enter case information")
@@ -1138,6 +1144,7 @@ class RecordReviewTab(BaseTab):
         """Summarize the markdown files with LLM."""
         # Get the subject name and case information
         subject_name = self.subject_input.text().strip()
+        subject_dob = self.dob_input.text().strip()
         case_info = self.case_info_input.toPlainText().strip()
 
         # Validate required fields
@@ -1146,6 +1153,14 @@ class RecordReviewTab(BaseTab):
                 self,
                 "Missing Information",
                 "Please enter the subject's name before summarizing.",
+            )
+            return
+
+        if not subject_dob:
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please enter the subject's date of birth before summarizing.",
             )
             return
 
@@ -1177,7 +1192,7 @@ class RecordReviewTab(BaseTab):
 
         # Create a worker thread for LLM summarization
         self.llm_thread = LLMSummaryThread(
-            markdown_files, self.output_directory, subject_name, case_info
+            markdown_files, self.output_directory, subject_name, subject_dob, case_info
         )
 
         # Connect signals
@@ -1282,15 +1297,12 @@ class RecordReviewTab(BaseTab):
 
     def combine_summaries(self):
         """Combine all summary markdown files into a single file."""
-        if not self.output_directory:
-            QMessageBox.warning(
-                self,
-                "Missing Output Directory",
-                "Please set an output directory before combining summaries.",
-            )
-            return
-
+        # Get the subject name and case information
         subject_name = self.subject_input.text().strip()
+        subject_dob = self.dob_input.text().strip()
+        case_info = self.case_info_input.toPlainText().strip()
+
+        # Validate required fields
         if not subject_name:
             QMessageBox.warning(
                 self,
@@ -1299,83 +1311,130 @@ class RecordReviewTab(BaseTab):
             )
             return
 
-        # Get the summary files
+        if not subject_dob:
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please enter the subject's date of birth before combining summaries.",
+            )
+            return
+
+        if not case_info:
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please enter case information before combining summaries.",
+            )
+            return
+
+        # Get the summaries directory
         summaries_dir = os.path.join(self.output_directory, "summaries")
+        
+        # Check if the summaries directory exists
         if not os.path.exists(summaries_dir):
             QMessageBox.warning(
                 self,
                 "No Summaries Found",
-                "No summary files found. Please generate summaries first.",
+                "No summaries directory found. Please summarize files first.",
             )
             return
 
         # Find all summary files
         summary_files = []
         for file in os.listdir(summaries_dir):
-            if file.endswith("_summary.md") and os.path.isfile(
-                os.path.join(summaries_dir, file)
-            ):
+            if file.endswith("_summary.md"):
                 summary_files.append(os.path.join(summaries_dir, file))
 
+        # Check if there are any summary files
         if not summary_files:
             QMessageBox.warning(
                 self,
                 "No Summaries Found",
-                "No summary files found. Please generate summaries first.",
+                "No summary files found. Please summarize files first.",
             )
             return
 
-        # Define the output file
+        # Create and start the progress dialog
+        progress_dialog = QProgressDialog(
+            "Combining summaries...", "Cancel", 0, 100, self
+        )
+        progress_dialog.setWindowTitle("Combine Summaries")
+        progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        progress_dialog.setMinimumDuration(0)
+        progress_dialog.setValue(0)
+        progress_dialog.show()
+
+        # Update progress
+        self.update_progress(progress_dialog, 10, "Reading summary files...")
+
+        # Combine summaries into a single file
+        combined_text = f"# Combined Record Review Analysis for {subject_name}\n\n"
+        combined_text += f"**Date of Birth:** {subject_dob}\n\n"
+        combined_text += f"## Case Information\n\n{case_info}\n\n"
+        combined_text += "## Individual Document Summaries\n\n"
+
+        # Add each summary file to the combined text
+        total_files = len(summary_files)
+        
+        # Sort summary files by original document filename
+        summary_files.sort()
+        
+        for i, summary_file in enumerate(summary_files):
+            # Update progress
+            progress_percent = 10 + int((i / total_files) * 70)
+            self.update_progress(
+                progress_dialog, 
+                progress_percent, 
+                f"Processing summary {i+1} of {total_files}: {os.path.basename(summary_file)}"
+            )
+            
+            # Read the summary file
+            with open(summary_file, "r", encoding="utf-8") as f:
+                summary_text = f.read()
+            
+            # Get the original filename from the summary filename
+            original_file = os.path.basename(summary_file).replace("_summary.md", "")
+            
+            # Add a separator and the summary
+            combined_text += f"### {original_file}\n\n"
+            combined_text += summary_text + "\n\n---\n\n"
+            
+            # Check if canceled
+            if progress_dialog.wasCanceled():
+                progress_dialog.close()
+                self.show_status("Combining summaries canceled by user")
+                return
+        
+        # Analyze similarities and patterns
+        self.update_progress(progress_dialog, 80, "Analyzing patterns and similarities...")
+        
+        # Add a combined timeline section
+        combined_text += "## Combined Timeline\n\n"
+        combined_text += "_This section combines all individual timelines from the document summaries._\n\n"
+        
+        # Add a summary section
+        combined_text += "## Integrated Analysis\n\n"
+        combined_text += "_Use the information above to generate a comprehensive and cohesive analysis._\n\n"
+        
+        # Save the combined text to a file
+        self.update_progress(progress_dialog, 90, "Saving combined file...")
         combined_file = os.path.join(self.output_directory, "combined_summary.md")
-
-        try:
-            # Combine the files
-            with open(combined_file, "w", encoding="utf-8") as outfile:
-                # Write the header
-                outfile.write(f"# Combined Document Analysis for {subject_name}\n\n")
-                outfile.write(
-                    f"*Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n"
-                )
-                outfile.write(
-                    "This file contains summaries from multiple documents. Each document is separated by a horizontal rule.\n\n"
-                )
-                outfile.write("---\n\n")
-
-                # Write the content of each summary file
-                for i, file_path in enumerate(summary_files):
-                    file_name = os.path.basename(file_path)
-                    with open(file_path, "r", encoding="utf-8") as infile:
-                        content = infile.read()
-                        outfile.write(f"{content}\n\n")
-
-                    # Add a separator between files (except for the last one)
-                    if i < len(summary_files) - 1:
-                        outfile.write("---\n\n")
-
-            # Update the UI
-            self.file_list_text.append("\n\n=== COMBINED SUMMARY ===\n")
-            self.file_list_text.append(
-                f"Combined {len(summary_files)} summary files into: {os.path.basename(combined_file)}\n"
-            )
-            self.file_list_text.append(f"Output file: {combined_file}\n")
-
-            # Enable the integrate button
-            self.integrate_button.setEnabled(True)
-
-            # Show a message
-            QMessageBox.information(
-                self,
-                "Summaries Combined",
-                f"Successfully combined {len(summary_files)} summary files into:\n{combined_file}",
-            )
-
-        except Exception as e:
-            QMessageBox.critical(
-                self,
-                "Error Combining Summaries",
-                f"An error occurred while combining summaries:\n\n{str(e)}",
-            )
-
+        
+        with open(combined_file, "w", encoding="utf-8") as f:
+            f.write(combined_text)
+        
+        # Close the progress dialog
+        progress_dialog.close()
+        
+        # Show a success message
+        QMessageBox.information(
+            self,
+            "Summaries Combined",
+            f"Successfully combined {total_files} summaries into {combined_file}",
+        )
+        
+        self.show_status(f"Combined {total_files} summaries into {combined_file}")
+    
     def generate_integrated_analysis(self):
         """Generate an integrated analysis using the combined summary file."""
         if not self.output_directory:
@@ -1388,6 +1447,7 @@ class RecordReviewTab(BaseTab):
 
         # Get the subject name and case information
         subject_name = self.subject_input.text().strip()
+        subject_dob = self.dob_input.text().strip()
         case_info = self.case_info_input.toPlainText().strip()
 
         # Validate required fields
@@ -1396,6 +1456,14 @@ class RecordReviewTab(BaseTab):
                 self,
                 "Missing Information",
                 "Please enter the subject's name before generating an integrated analysis.",
+            )
+            return
+            
+        if not subject_dob:
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please enter the subject's date of birth before generating an integrated analysis.",
             )
             return
 
@@ -1429,7 +1497,7 @@ class RecordReviewTab(BaseTab):
 
         # Create a worker thread for integrated analysis
         self.integrated_thread = IntegratedAnalysisThread(
-            combined_file, self.output_directory, subject_name, case_info
+            combined_file, self.output_directory, subject_name, subject_dob, case_info
         )
 
         # Connect signals

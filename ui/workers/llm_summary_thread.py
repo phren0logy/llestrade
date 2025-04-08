@@ -16,12 +16,13 @@ class LLMSummaryThread(QThread):
     finished_signal = pyqtSignal(dict)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, markdown_files, output_dir, subject_name, case_info):
+    def __init__(self, markdown_files, output_dir, subject_name, subject_dob, case_info):
         """Initialize the thread with the markdown files to summarize."""
         super().__init__()
         self.markdown_files = markdown_files
         self.output_dir = output_dir
         self.subject_name = subject_name
+        self.subject_dob = subject_dob
         self.case_info = case_info
         self.llm_client = LLMClient()
 
@@ -121,7 +122,7 @@ class LLMSummaryThread(QThread):
         # Call Claude with the prompt
         response = self.llm_client.generate_response(
             prompt_text=prompt,
-            system_prompt=f"You are analyzing documents for {self.subject_name}. The following case information provides context: {self.case_info}",
+            system_prompt=f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
             temperature=0.1,  # Low temperature for more factual responses
         )
 
@@ -133,7 +134,7 @@ class LLMSummaryThread(QThread):
         # Write the summary to a file
         with open(summary_file, "w", encoding="utf-8") as f:
             f.write(f"# Summary of {document_name}\n\n")
-            f.write(f"## Document Analysis for {self.subject_name}\n\n")
+            f.write(f"## Document Analysis for {self.subject_name} (DOB: {self.subject_dob})\n\n")
             f.write(response["content"])
 
         return summary_file
@@ -150,22 +151,28 @@ class LLMSummaryThread(QThread):
             Prompt string
         """
         return f"""
+## Document Content
+<document-content>
+{markdown_content}
+</document-content>
+
 # Document Analysis Task
 
 ## Document Information
 - **Subject Name**: {self.subject_name}
+- **Date of Birth**: {self.subject_dob}
 - **Document**: {document_name}
 
 ## Case Background
 {self.case_info}
 
 ## Instructions
-Please analyze the following document and provide a comprehensive summary that includes:
+Please analyze the document content above, wrapped in "document-content" tags, and provide a comprehensive summary that includes:
 
 - Key facts and information about the subject
 - Significant events and dates mentioned
-- Family relationships and social history
-- Relevant family history or relationships
+- Family and romantic relationships
+- Early childhood history
 - Educational history
 - Employment history
 - Military career history
@@ -177,10 +184,13 @@ Please analyze the following document and provide a comprehensive summary that i
 - Adverse life events
 - A timeline of events in a markdown table format with columns for Date, Event, and Significance
 
+## Timeline Instructions
+- Create a timeline of events in a markdown table format with columns for Date, Event, and Significance
+- Using the subject's date of birth ({self.subject_dob}), calculate the subject's age at each event when relevant
+- When exact dates aren't provided, estimate years when possible and mark them with "(est.)"
+- Organize the timeline chronologically with the most recent events at the bottom
+- If there are multiple events on the same date, list them in the order they occurred
+- If there are multiple events with the same date and significance, list them in the order they occurred
 
-
-Keep your analysis focused on factual information directly stated in the document. 
-Organize the timeline chronologically with the most recent events at the bottom.
-
-## Document Content
-{markdown_content}"""
+Keep your analysis focused on factual information directly stated in the document.
+"""

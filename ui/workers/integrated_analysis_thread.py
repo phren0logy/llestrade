@@ -16,12 +16,13 @@ class IntegratedAnalysisThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
 
-    def __init__(self, combined_file, output_dir, subject_name, case_info):
+    def __init__(self, combined_file, output_dir, subject_name, subject_dob, case_info):
         """Initialize the thread with the combined summary file."""
         super().__init__()
         self.combined_file = combined_file
         self.output_dir = output_dir
         self.subject_name = subject_name
+        self.subject_dob = subject_dob
         self.case_info = case_info
         self.llm_client = LLMClient()
 
@@ -47,7 +48,7 @@ class IntegratedAnalysisThread(QThread):
             # Call Claude with the prompt and extended thinking
             response = self.llm_client.generate_response(
                 prompt_text=prompt,
-                system_prompt=f"You are analyzing documents for {self.subject_name}. The following case information provides context: {self.case_info}",
+                system_prompt=f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
                 temperature=0.1,  # Low temperature for more factual responses
                 model="claude-3-7-sonnet-20250219",  # Use the latest model with high context
             )
@@ -66,6 +67,7 @@ class IntegratedAnalysisThread(QThread):
             # Write the integrated analysis to a file
             with open(integrated_file, "w", encoding="utf-8") as f:
                 f.write(f"# Integrated Analysis for {self.subject_name}\n\n")
+                f.write(f"**Date of Birth:** {self.subject_dob}\n\n")
                 f.write(f"*Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n")
                 f.write(response["content"])
 
@@ -93,6 +95,7 @@ class IntegratedAnalysisThread(QThread):
 
 ## Subject Information
 - **Subject Name**: {self.subject_name}
+- **Date of Birth**: {self.subject_dob}
 
 ## Case Background
 {self.case_info}
@@ -105,6 +108,7 @@ I'm providing you with multiple document summaries that contain information abou
 2. **Comprehensive Timeline**: Create a single, unified timeline that combines all events from the individual document timelines. The timeline should:
    - Be in chronological order (oldest to newest)
    - Be formatted as a markdown table with columns for Date, Event, Significance, and Source Document Name(s)
+   - Calculate the subject's age at each significant event when relevant (using DOB: {self.subject_dob})
    - Remove duplicate events, preserving multiple Source Document Names
    - Resolve any conflicting information if possible (noting discrepancies) - document all resolved and unresolved discrepancies in a separate section
    - Include source information when possible
