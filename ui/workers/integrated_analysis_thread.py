@@ -4,6 +4,7 @@ Worker thread for generating an integrated analysis with Claude's thinking model
 
 import os
 import time
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from llm_utils import LLMClient
@@ -13,7 +14,7 @@ class IntegratedAnalysisThread(QThread):
     """Worker thread for generating an integrated analysis with Claude's thinking model."""
 
     progress_signal = pyqtSignal(int, str)
-    finished_signal = pyqtSignal(str)
+    finished_signal = pyqtSignal(bool, str, str)  # success, message, file_path
     error_signal = pyqtSignal(str)
 
     def __init__(self, combined_file, output_dir, subject_name, subject_dob, case_info):
@@ -29,6 +30,20 @@ class IntegratedAnalysisThread(QThread):
     def run(self):
         """Run the integrated analysis."""
         try:
+            # Define the output file path
+            integrated_file = os.path.join(self.output_dir, "integrated_analysis.md")
+
+            # Check if the integrated analysis already exists
+            if os.path.exists(integrated_file):
+                self.progress_signal.emit(
+                    100, "Integrated analysis file already exists, skipping generation."
+                )
+                success_message = (
+                    f"Using existing integrated analysis file for {self.subject_name}"
+                )
+                self.finished_signal.emit(True, success_message, integrated_file)
+                return
+
             # Send initial progress
             self.progress_signal.emit(0, "Starting integrated analysis...")
 
@@ -61,9 +76,6 @@ class IntegratedAnalysisThread(QThread):
                     f"LLM processing failed: {response.get('error', 'Unknown error')}"
                 )
 
-            # Define the output file
-            integrated_file = os.path.join(self.output_dir, "integrated_analysis.md")
-
             # Write the integrated analysis to a file
             with open(integrated_file, "w", encoding="utf-8") as f:
                 f.write(f"# Integrated Analysis for {self.subject_name}\n\n")
@@ -75,10 +87,14 @@ class IntegratedAnalysisThread(QThread):
             self.progress_signal.emit(100, "Integrated analysis complete!")
 
             # Signal completion
-            self.finished_signal.emit(integrated_file)
+            success_message = (
+                f"Successfully generated integrated analysis for {self.subject_name}"
+            )
+            self.finished_signal.emit(True, success_message, integrated_file)
 
         except Exception as e:
-            self.error_signal.emit(f"Error during integrated analysis: {str(e)}")
+            error_message = f"Error during integrated analysis: {str(e)}"
+            self.error_signal.emit(error_message)
 
     def create_integrated_prompt(self, combined_content):
         """

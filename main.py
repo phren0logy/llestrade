@@ -28,7 +28,8 @@ from llm_utils import LLMClient
 from ui.prompts_tab import PromptsTab
 from ui.refinement_tab import RefinementTab
 from ui.testing_tab import TestingTab
-from ui.record_review_tab import RecordReviewTab
+from ui.pdf_processing_tab import PDFProcessingTab
+from ui.analysis_tab import AnalysisTab
 
 
 class ForensicReportDrafterApp(QMainWindow):
@@ -72,13 +73,15 @@ class ForensicReportDrafterApp(QMainWindow):
         self.prompts_tab = PromptsTab(self, self.status_bar)
         self.testing_tab = TestingTab(self, self.status_bar)
         self.refinement_tab = RefinementTab(self, self.status_bar)
-        self.record_review_tab = RecordReviewTab(self, self.status_bar)
+        self.pdf_processing_tab = PDFProcessingTab(self, self.status_bar)
+        self.analysis_tab = AnalysisTab(self, self.status_bar)
 
         # Add tabs to tab widget
         self.tab_widget.addTab(self.prompts_tab, "Prompts from Template")
         self.tab_widget.addTab(self.testing_tab, "Apply Prompt to PDF")
         self.tab_widget.addTab(self.refinement_tab, "Report Refinement")
-        self.tab_widget.addTab(self.record_review_tab, "Record Review")
+        self.tab_widget.addTab(self.pdf_processing_tab, "PDF Processing")
+        self.tab_widget.addTab(self.analysis_tab, "Analysis & Integration")
 
         # Add tab widget to layout
         self.central_layout.addWidget(self.tab_widget)

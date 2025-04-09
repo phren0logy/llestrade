@@ -3,10 +3,10 @@ Utility functions and classes for interacting with the Anthropic Claude API.
 Provides a more structured approach to LLM connections and prompt management.
 """
 
+import base64
 import logging
 import os
 import time
-import base64
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -43,13 +43,13 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.thinking_budget_tokens = thinking_budget_tokens
-        
+
         # Set default system prompt if not provided
         if default_system_prompt is None:
             self.default_system_prompt = "You are an advanced assistant designed to help a forensic psychiatrist. Your task is to analyze and objectively document case information in a formal clinical style, maintaining professional psychiatric documentation standards. Distinguish between information from the subject and objective findings. Report specific details such as dates, frequencies, dosages, and other relevant clinical data. Document without emotional language or judgment."
         else:
             self.default_system_prompt = default_system_prompt
-        
+
         self.client = self._get_client()
 
     def _get_client(self) -> anthropic.Anthropic:
@@ -126,7 +126,7 @@ class LLMClient:
             # Create the message
             response = self.client.messages.create(
                 **message_params,
-                timeout=self.timeout  # Explicitly set timeout on API request
+                timeout=self.timeout,  # Explicitly set timeout on API request
             )
 
             # Extract content from response
@@ -134,7 +134,11 @@ class LLMClient:
             has_redacted_thinking = False
 
             for block in response.content:
-                if block.type == "text" and hasattr(block, "text") and block.text is not None:
+                if (
+                    block.type == "text"
+                    and hasattr(block, "text")
+                    and block.text is not None
+                ):
                     content += block.text
                 elif block.type == "redacted_thinking" and hasattr(block, "data"):
                     has_redacted_thinking = True
@@ -235,13 +239,17 @@ class LLMClient:
             # Create the message
             response = self.client.messages.create(
                 **message_params,
-                timeout=self.timeout  # Explicitly set timeout on API request
+                timeout=self.timeout,  # Explicitly set timeout on API request
             )
 
             # Extract the response content
             content = ""
             for block in response.content:
-                if block.type == "text" and hasattr(block, "text") and block.text is not None:
+                if (
+                    block.type == "text"
+                    and hasattr(block, "text")
+                    and block.text is not None
+                ):
                     content += block.text
 
             # Construct the result
@@ -328,7 +336,7 @@ class LLMClient:
             # Create the message
             response = self.client.messages.create(
                 **message_params,
-                timeout=self.timeout  # Explicitly set timeout on API request
+                timeout=self.timeout,  # Explicitly set timeout on API request
             )
 
             # Extract content and thinking from response
@@ -337,9 +345,17 @@ class LLMClient:
             has_redacted_thinking = False
 
             for block in response.content:
-                if block.type == "text" and hasattr(block, "text") and block.text is not None:
+                if (
+                    block.type == "text"
+                    and hasattr(block, "text")
+                    and block.text is not None
+                ):
                     content += block.text
-                elif block.type == "thinking" and hasattr(block, "thinking") and block.thinking is not None:
+                elif (
+                    block.type == "thinking"
+                    and hasattr(block, "thinking")
+                    and block.thinking is not None
+                ):
                     thinking += block.thinking
                 elif block.type == "redacted_thinking" and hasattr(block, "data"):
                     has_redacted_thinking = True
@@ -463,7 +479,7 @@ class LLMClient:
             # Create the message
             response = self.client.messages.create(
                 **message_params,
-                timeout=self.timeout  # Explicitly set timeout on API request
+                timeout=self.timeout,  # Explicitly set timeout on API request
             )
 
             # Extract content and thinking from response
@@ -472,9 +488,17 @@ class LLMClient:
             has_redacted_thinking = False
 
             for block in response.content:
-                if block.type == "text" and hasattr(block, "text") and block.text is not None:
+                if (
+                    block.type == "text"
+                    and hasattr(block, "text")
+                    and block.text is not None
+                ):
                     content += block.text
-                elif block.type == "thinking" and hasattr(block, "thinking") and block.thinking is not None:
+                elif (
+                    block.type == "thinking"
+                    and hasattr(block, "thinking")
+                    and block.thinking is not None
+                ):
                     thinking += block.thinking
                 elif block.type == "redacted_thinking" and hasattr(block, "data"):
                     has_redacted_thinking = True
@@ -556,13 +580,17 @@ class LLMClient:
             # Create the message
             response = self.client.messages.create(
                 **message_params,
-                timeout=self.timeout  # Explicitly set timeout on API request
+                timeout=self.timeout,  # Explicitly set timeout on API request
             )
 
             # Extract the response content with better type handling
             content = ""
             for block in response.content:
-                if block.type == "text" and hasattr(block, "text") and block.text is not None:
+                if (
+                    block.type == "text"
+                    and hasattr(block, "text")
+                    and block.text is not None
+                ):
                     content += block.text
 
             # Construct the result
@@ -687,7 +715,41 @@ class LLMClient:
         """
         try:
             response = self.client.messages.count_tokens(model=model, messages=messages)
-            return {"success": True, "token_count": response.usage.input_tokens}
+            # Fix for newer Anthropic versions (>=0.49.0) where response structure changed
+            # The response is now a MessageTokensCount object with input_tokens directly available
+            if hasattr(response, "input_tokens"):
+                return {"success": True, "token_count": response.input_tokens}
+            # Fallback to older API structure if available
+            elif hasattr(response, "usage") and hasattr(response.usage, "input_tokens"):
+                return {"success": True, "token_count": response.usage.input_tokens}
+            else:
+                # Last resort - try to access as a dictionary
+                try:
+                    if isinstance(response, dict) and "input_tokens" in response:
+                        return {
+                            "success": True,
+                            "token_count": response["input_tokens"],
+                        }
+                    elif (
+                        isinstance(response, dict)
+                        and "usage" in response
+                        and "input_tokens" in response["usage"]
+                    ):
+                        return {
+                            "success": True,
+                            "token_count": response["usage"]["input_tokens"],
+                        }
+                except:
+                    pass
+
+                # Could not determine token count structure
+                logging.error(
+                    f"Could not determine token count from response structure: {response}"
+                )
+                return {
+                    "success": False,
+                    "error": "Unknown response structure for token counting",
+                }
         except Exception as e:
             logging.error(f"Token counting error: {str(e)}")
             return {"success": False, "error": f"Token counting error: {str(e)}"}
@@ -733,7 +795,7 @@ class LLMClient:
             # Create the message
             response = self.client.messages.create(
                 **message_params,
-                timeout=self.timeout  # Explicitly set timeout on API request
+                timeout=self.timeout,  # Explicitly set timeout on API request
             )
 
             # Extract content from response including tool use blocks

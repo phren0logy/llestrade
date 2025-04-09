@@ -178,14 +178,18 @@ class RefinementTab(BaseTab):
         # The layout is already created in BaseTab.__init__
 
         # Create and add the workflow indicator
-        self.workflow_indicator = WorkflowIndicator(
-            title="Report Refinement Workflow",
-            steps=[
-                "Select Report",
-                "Add Instructions",
-                "Refine Report",
-                "Save Results",
-            ],
+        self.workflow_indicator = WorkflowIndicator()
+        self.workflow_indicator.add_step(
+            1, "1. Select Report", "Select a report to refine"
+        )
+        self.workflow_indicator.add_step(
+            2, "2. Add Instructions", "Add refinement instructions"
+        )
+        self.workflow_indicator.add_step(
+            3, "3. Refine Report", "Process the report with LLM"
+        )
+        self.workflow_indicator.add_step(
+            4, "4. Save Results", "Save the refined report"
         )
         self.layout.addWidget(self.workflow_indicator)
 
@@ -289,7 +293,8 @@ class RefinementTab(BaseTab):
         self.current_report_path = file_path
         self.load_report_preview()
         self.check_ready_state()
-        self.workflow_indicator.update_status(0, [], "Report selected")
+        self.workflow_indicator.update_status(1, "complete")
+        self.workflow_indicator.set_status_message("Report selected")
 
     def load_report_preview(self):
         """Load and display a preview of the selected report file."""
@@ -322,24 +327,21 @@ class RefinementTab(BaseTab):
         )
 
         # Update workflow indicator
-        current_step = 0
-        completed_steps = []
-
         if has_report:
-            completed_steps.append(0)
-            current_step = 1
+            self.workflow_indicator.update_status(1, "complete")
+        else:
+            self.workflow_indicator.update_status(1, "not_started")
 
         if has_instructions:
-            completed_steps.append(1)
-            current_step = 2
+            self.workflow_indicator.update_status(2, "complete")
+        else:
+            self.workflow_indicator.update_status(2, "not_started")
 
-        # Update the workflow indicator
+        # Update the status message
         status_message = (
             "Ready to refine" if ready else "Select report and provide instructions"
         )
-        self.workflow_indicator.update_status(
-            current_step, completed_steps, status_message
-        )
+        self.workflow_indicator.set_status_message(status_message)
 
     def refine_report(self):
         """Process the report with Claude's extended thinking."""
@@ -353,7 +355,8 @@ class RefinementTab(BaseTab):
             return
 
         # Update the workflow indicator
-        self.workflow_indicator.update_status(2, [0, 1], "Refining report...")
+        self.workflow_indicator.update_status(3, "in_progress")
+        self.workflow_indicator.set_status_message("Refining report...")
 
         # Create and start the refinement thread
         self.refinement_thread = RefinementThread(
@@ -419,7 +422,8 @@ class RefinementTab(BaseTab):
         self.status_panel.update_summary("Report refinement complete")
 
         # Update workflow indicator
-        self.workflow_indicator.update_status(3, [0, 1, 2], "Refinement complete")
+        self.workflow_indicator.update_status(3, "complete")
+        self.workflow_indicator.set_status_message("Refinement complete")
 
         # Auto-save results
         if hasattr(self, "refined_report"):

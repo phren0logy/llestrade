@@ -4,114 +4,112 @@ Provides a visual representation of workflow steps and their status.
 """
 
 import os
+from enum import Enum
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QVBoxLayout, QLabel
+
+
+class WorkflowStep(Enum):
+    """Enum representing different workflow steps."""
+    SELECT_FILES = "select_files"
+    PROCESS_PDFS = "process_pdfs"
+    SELECT_MARKDOWN = "select_markdown"
+    SUMMARIZE_LLM = "summarize_llm"
+    COMBINE_SUMMARIES = "combine_summaries"
+    INTEGRATE_ANALYSIS = "integrate_analysis"
 
 
 class WorkflowIndicator(QGroupBox):
     """
     A reusable workflow indicator component that visually represents
-    steps in a process and their current status.
+    the current status of a multi-step workflow.
     """
-    
-    # Style definitions
-    STYLES = {
-        "active": "background-color: #4CAF50; color: white; border: 1px solid #388E3C; border-radius: 4px; padding: 8px;",
-        "pending": "background-color: #FFF8E1; color: #795548; border: 1px solid #FFECB3; border-radius: 4px; padding: 8px;",
-        "disabled": "background-color: #F5F5F5; color: #9E9E9E; border: 1px solid #E0E0E0; border-radius: 4px; padding: 8px;",
-        "complete": "background-color: #C8E6C9; color: #2E7D32; border: 1px solid #A5D6A7; border-radius: 4px; padding: 8px;",
-        "arrow": "font-size: 16px; font-weight: bold; padding: 4px;",
-        "arrow_active": "color: #4CAF50; font-size: 16px; font-weight: bold; padding: 4px;",
-        "arrow_disabled": "color: #9E9E9E; font-size: 16px; font-weight: bold; padding: 4px;",
-        "status": "color: #666; font-style: italic; padding: 4px;"
-    }
-    
-    def __init__(self, title="Processing Workflow", steps=None):
-        """
-        Initialize the workflow indicator with steps.
+
+    def __init__(self, parent=None):
+        """Initialize the workflow indicator."""
+        super().__init__("Workflow Progress", parent)
+        
+        # Initialize state variables
+        self.steps = {}
+        self.step_labels = {}
+        self.step_statuses = {}
+        
+        # Setup layout
+        self.main_layout = QHBoxLayout()
+        self.setLayout(self.main_layout)
+        
+    def add_step(self, step_id, title, description=""):
+        """Add a workflow step to the indicator.
         
         Args:
-            title: Title for the group box
-            steps: List of step names to display
+            step_id: Unique identifier for the step
+            title: Display title for the step
+            description: Optional description of the step
         """
-        super().__init__(title)
+        # Create step layout
+        step_layout = QVBoxLayout()
         
-        # If no steps provided, use default
-        self.steps = steps or ["1. Select Files", "2. Process Files", "3. Integration"]
+        # Create step label
+        step_label = QLabel(f"{title}")
+        step_label.setStyleSheet("font-weight: bold;")
+        step_layout.addWidget(step_label)
         
-        # Set up UI
-        self.setup_ui()
+        # Create status label
+        status_label = QLabel("Not Started")
+        status_label.setStyleSheet("color: #888;")
+        step_layout.addWidget(status_label)
         
-    def setup_ui(self):
-        """Set up the UI components for the workflow indicator."""
-        workflow_layout = QHBoxLayout()
+        # Store references
+        self.steps[step_id] = step_layout
+        self.step_labels[step_id] = status_label
+        self.step_statuses[step_id] = "not_started"
         
-        # Create step labels and arrows
-        self.step_labels = []
-        self.arrows = []
+        # Add to main layout
+        self.main_layout.addLayout(step_layout)
         
-        for i, step in enumerate(self.steps):
-            # Create step label
-            label = QLabel(step)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet(self.STYLES["disabled"])
-            self.step_labels.append(label)
+        # Add separator if not the last step
+        if len(self.steps) > 1:
+            separator = QLabel("→")
+            separator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            separator.setStyleSheet("font-weight: bold; font-size: 16px;")
+            self.main_layout.insertWidget(self.main_layout.count()-1, separator)
             
-            # Add to layout
-            workflow_layout.addWidget(label)
-            
-            # Add arrow if not the last step
-            if i < len(self.steps) - 1:
-                arrow = QLabel("→")
-                arrow.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                arrow.setStyleSheet(self.STYLES["arrow_disabled"])
-                self.arrows.append(arrow)
-                workflow_layout.addWidget(arrow)
-        
-        # Add status summary label
-        self.status_label = QLabel("⏳ Waiting for input")
-        self.status_label.setStyleSheet(self.STYLES["status"])
-        
-        # Create main layout
-        main_layout = QVBoxLayout()
-        main_layout.addLayout(workflow_layout)
-        main_layout.addWidget(self.status_label)
-        
-        self.setLayout(main_layout)
-    
-    def update_status(self, current_step, completed_steps=None, status_message=None):
-        """
-        Update the workflow status display.
+    def update_status(self, step_id, status):
+        """Update the status of a workflow step.
         
         Args:
-            current_step: Index of the current active step (0-based)
-            completed_steps: List of indices of completed steps
-            status_message: Optional status message to display
+            step_id: The step ID to update
+            status: New status ("not_started", "in_progress", "complete", "error", "partial")
         """
-        completed_steps = completed_steps or []
+        if step_id not in self.step_labels:
+            print(f"Warning: Step ID {step_id} not found in workflow indicator")
+            return
+            
+        self.step_statuses[step_id] = status
+        status_label = self.step_labels[step_id]
         
-        # Reset all steps to disabled state
-        for i, label in enumerate(self.step_labels):
-            if i in completed_steps:
-                label.setStyleSheet(self.STYLES["complete"])
-            elif i == current_step:
-                label.setStyleSheet(self.STYLES["active"])
-            elif i < current_step:
-                label.setStyleSheet(self.STYLES["pending"])
-            else:
-                label.setStyleSheet(self.STYLES["disabled"])
-        
-        # Update arrows
-        for i, arrow in enumerate(self.arrows):
-            if i < current_step or i in completed_steps:
-                arrow.setStyleSheet(self.STYLES["arrow_active"])
-            else:
-                arrow.setStyleSheet(self.STYLES["arrow_disabled"])
-        
-        # Update status message if provided
-        if status_message:
-            self.status_label.setText(status_message)
-    
+        # Update label text and style based on status
+        if status == "not_started":
+            status_label.setText("Not Started")
+            status_label.setStyleSheet("color: #888;")
+        elif status == "in_progress":
+            status_label.setText("In Progress")
+            status_label.setStyleSheet("color: #2c7fb8; font-weight: bold;")
+        elif status == "complete":
+            status_label.setText("Complete ✓")
+            status_label.setStyleSheet("color: #2ca05a; font-weight: bold;")
+        elif status == "error":
+            status_label.setText("Error ✗")
+            status_label.setStyleSheet("color: #c0392b; font-weight: bold;")
+        elif status == "partial":
+            status_label.setText("Partial ⚠")
+            status_label.setStyleSheet("color: #f39c12; font-weight: bold;")
+            
     def set_status_message(self, message):
-        """Set just the status message without changing the workflow state."""
-        self.status_label.setText(message)
+        """Set an overall status message for the workflow.
+        
+        Args:
+            message: Status message to display
+        """
+        # This could be extended to add an overall status message to the component
+        pass

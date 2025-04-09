@@ -58,10 +58,10 @@ class PromptsTab(BaseTab):
     def setup_ui(self):
         """Set up the UI components for the Prompts tab."""
         # Create workflow indicator
-        self.workflow_indicator = WorkflowIndicator(
-            "Template Processing Workflow", 
-            ["1. Select Files", "2. Process Template", "3. Review"]
-        )
+        self.workflow_indicator = WorkflowIndicator()
+        self.workflow_indicator.add_step(1, "1. Select Files", "Select template files to process")
+        self.workflow_indicator.add_step(2, "2. Process Template", "Process template with parameters")
+        self.workflow_indicator.add_step(3, "3. Review", "Review generated prompts")
         self.layout.addWidget(self.workflow_indicator)
         
         # Create file selectors
@@ -202,44 +202,34 @@ class PromptsTab(BaseTab):
     
     def check_ready_state(self):
         """Check if all requirements are met to enable the process button."""
-        # Check if UI elements are properly initialized
-        if not all([hasattr(self, attr) for attr in ['process_button', 'export_button', 'run_prompts_button',
-                                                    'markdown_selector', 'transcript_selector']]):
-            return
-            
-        if None in [self.process_button, self.export_button, self.run_prompts_button,
-                   self.markdown_selector, self.transcript_selector]:
-            return
-            
-        # Both markdown and transcript must be selected to process
-        ready = (self.markdown_selector.selected_path is not None and 
-                self.transcript_selector.selected_path is not None)
+        # Check if both a markdown template and transcript have been selected
+        has_markdown = self.markdown_selector.selected_path is not None
+        has_transcript = self.transcript_selector.selected_path is not None
+        ready = has_markdown and has_transcript
+        
+        # Enable or disable the process button based on ready state
         self.process_button.setEnabled(ready)
         
-        # Export and run prompts buttons enabled if we have prompts
-        has_prompts = len(self.current_prompts) > 0
-        self.export_button.setEnabled(has_prompts)
-        self.run_prompts_button.setEnabled(has_prompts)
-        
-        # Update workflow indicator if it exists
-        if not hasattr(self, 'workflow_indicator') or self.workflow_indicator is None:
-            return
-            
-        current_step = 0
-        completed_steps = []
-        
-        if (self.markdown_selector.selected_path is not None and 
-            self.transcript_selector.selected_path is not None):
-            completed_steps.append(0)
+        # Update the workflow indicator steps
+        if has_markdown and has_transcript:
+            self.workflow_indicator.update_status(1, "complete")
+            current_step = 2
+        else:
+            self.workflow_indicator.update_status(1, "not_started")
             current_step = 1
             
-        if len(self.current_prompts) > 0:
-            completed_steps.append(1)
-            current_step = 2
+        # Check if we have processed prompts
+        has_prompts = len(self.current_prompts) > 0
+        if has_prompts:
+            self.workflow_indicator.update_status(2, "complete")
+            self.workflow_indicator.update_status(3, "in_progress")
+        else:
+            self.workflow_indicator.update_status(2, "not_started")
+            self.workflow_indicator.update_status(3, "not_started")
         
-        # Update the workflow indicator
+        # Show status message
         status_message = "Ready to process" if ready else "Select markdown template and transcript"
-        self.workflow_indicator.update_status(current_step, completed_steps, status_message)
+        self.show_status(status_message)
     
     def process_template(self):
         """Process the selected template with the transcript."""

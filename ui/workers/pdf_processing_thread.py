@@ -3,10 +3,14 @@ Worker thread for processing PDF files.
 """
 
 import os
+
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from pdf_utils import (
+    get_pdf_page_count,
     prepare_pdf_files,
+    process_pdf_with_azure,
+    split_large_pdf,
 )
 
 
@@ -14,7 +18,7 @@ class PDFProcessingThread(QThread):
     """Worker thread for processing PDF files."""
 
     progress_signal = pyqtSignal(int, str)
-    finished_signal = pyqtSignal(list, str)
+    finished_signal = pyqtSignal(list)
     error_signal = pyqtSignal(str)
 
     def __init__(self, pdf_files, output_dir, max_pages=1750, overlap=10):
@@ -26,38 +30,180 @@ class PDFProcessingThread(QThread):
         self.overlap = overlap
 
     def run(self):
-        """Run the PDF processing operations."""
+        """Process the selected PDF files and save them to the output directory."""
         try:
-            processed_files = []
-            temp_dir = None
+            # Create a dedicated temp directory
+            temp_dir = os.path.join(self.output_dir, "temp_pdf_processing")
+            os.makedirs(temp_dir, exist_ok=True)
 
-            # Process PDF files, showing progress
-            for i, pdf_path in enumerate(self.pdf_files):
+            self.progress_signal.emit(5, f"Created temp directory: {temp_dir}")
+
+            # Track progress statistics
+            total_files = len(self.pdf_files)
+            processed_count = 0
+
+            # Update initial progress
+            self.progress_signal.emit(
+                10, f"Beginning processing of {total_files} PDF files..."
+            )
+
+            results = []
+
+            # Process each PDF file
+            for i, pdf_file in enumerate(self.pdf_files):
+                # Calculate progress percentage
+                progress = 10 + int((i / total_files) * 80)  # Leave 10% for final steps
+
+                # Get the file name without path and extension
+                file_name = os.path.basename(pdf_file)
+                base_name = os.path.splitext(file_name)[0]
+
+                # Update progress
+                self.progress_signal.emit(
+                    progress, f"Processing file {i+1}/{total_files}: {file_name}"
+                )
+
                 try:
-                    # Update progress
-                    progress_pct = int((i / len(self.pdf_files)) * 100)
+                    # Check if the file exists
+                    if not os.path.exists(pdf_file):
+                        self.progress_signal.emit(
+                            progress, f"File not found (skipping): {pdf_file}"
+                        )
+                        continue
+
+                    # Check file size
+                    file_size_mb = os.path.getsize(pdf_file) / (1024 * 1024)
                     self.progress_signal.emit(
-                        progress_pct, f"Checking: {os.path.basename(pdf_path)}"
+                        progress, f"Processing {file_name} ({file_size_mb:.1f} MB)"
                     )
 
-                    # If this is the first file, create the temp directory and initialize
-                    if i == 0:
-                        processed_files, temp_dir = prepare_pdf_files(
-                            [pdf_path], self.output_dir, self.max_pages, self.overlap
+                    # Process the file
+                    self.progress_signal.emit(
+                        progress, f"Converting {file_name} to text and markdown..."
+                    )
+
+                    # Create target markdown file
+                    self.progress_signal.emit(
+                        progress + 1,
+                        f"Processing {file_name} with Azure Document Intelligence...",
+                    )
+
+                    # Get Azure credentials from environment
+                    azure_endpoint = os.getenv("AZURE_ENDPOINT")
+                    azure_key = os.getenv("AZURE_KEY")
+
+                    if not azure_endpoint or not azure_key:
+                        self.progress_signal.emit(
+                            progress,
+                            f"Azure credentials not found in environment variables. Skipping Azure processing.",
                         )
-                    else:
-                        # Process each file and add to the processed list
-                        new_files, _ = prepare_pdf_files(
-                            [pdf_path], temp_dir, self.max_pages, self.overlap
+                        results.append(
+                            {
+                                "pdf": pdf_file,
+                                "status": "failed",
+                                "error": "Azure credentials not found",
+                            }
                         )
-                        processed_files.extend(new_files)
+                        continue
+
+                    # Use the proper output directories
+                    try:
+                        # Make sure the markdown directory exists
+                        markdown_dir = os.path.join(self.output_dir, "markdown")
+                        json_dir = os.path.join(self.output_dir, "json")
+                        os.makedirs(markdown_dir, exist_ok=True)
+                        os.makedirs(json_dir, exist_ok=True)
+
+                        # Process the PDF with Azure
+                        json_path, markdown_path = process_pdf_with_azure(
+                            pdf_file,
+                            self.output_dir,
+                            json_dir,
+                            markdown_dir,
+                            azure_endpoint,
+                            azure_key,
+                        )
+
+                        # Check if conversion was successful
+                        if os.path.exists(markdown_path) and os.path.exists(json_path):
+                            self.progress_signal.emit(
+                                progress + 2,
+                                f"Successfully processed {file_name} with Azure Document Intelligence",
+                            )
+                            processed_count += 1
+                            results.append(
+                                {
+                                    "pdf": pdf_file,
+                                    "markdown": markdown_path,
+                                    "json": json_path,
+                                    "status": "success",
+                                }
+                            )
+                        else:
+                            self.progress_signal.emit(
+                                progress,
+                                f"Failed to process {file_name} with Azure Document Intelligence",
+                            )
+                            results.append(
+                                {
+                                    "pdf": pdf_file,
+                                    "status": "failed",
+                                    "error": "Azure processing failed",
+                                }
+                            )
+                    except Exception as azure_error:
+                        self.progress_signal.emit(
+                            progress,
+                            f"Error during Azure processing: {str(azure_error)}",
+                        )
+                        results.append(
+                            {
+                                "pdf": pdf_file,
+                                "status": "failed",
+                                "error": str(azure_error),
+                            }
+                        )
 
                 except Exception as e:
-                    self.error_signal.emit(f"Error processing {pdf_path}: {str(e)}")
-                    return
+                    self.progress_signal.emit(
+                        progress, f"Error processing {file_name}: {str(e)}"
+                    )
+                    results.append(
+                        {"pdf": pdf_file, "status": "failed", "error": str(e)}
+                    )
 
-            # Signal completion with processed files and temp directory
-            self.finished_signal.emit(processed_files, temp_dir)
+            # Final cleanup and report
+            try:
+                # Cleanup temp directory if needed and it exists
+                if os.path.exists(temp_dir) and os.path.isdir(temp_dir):
+                    # Only remove files, not the directory itself
+                    for temp_file in os.listdir(temp_dir):
+                        temp_file_path = os.path.join(temp_dir, temp_file)
+                        if os.path.isfile(temp_file_path):
+                            try:
+                                os.remove(temp_file_path)
+                                self.progress_signal.emit(
+                                    95, f"Removed temporary file: {temp_file}"
+                                )
+                            except Exception as e:
+                                self.progress_signal.emit(
+                                    95,
+                                    f"Failed to remove temporary file {temp_file}: {str(e)}",
+                                )
+            except Exception as cleanup_error:
+                self.progress_signal.emit(
+                    95, f"Error during cleanup: {str(cleanup_error)}"
+                )
+
+            # Final progress update
+            self.progress_signal.emit(
+                100,
+                f"PDF processing complete: {processed_count}/{total_files} files processed successfully",
+            )
+
+            # Emit the finished signal with the results
+            self.finished_signal.emit(results)
 
         except Exception as e:
+            # Handle any exceptions
             self.error_signal.emit(f"Error during PDF processing: {str(e)}")

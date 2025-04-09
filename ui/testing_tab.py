@@ -53,10 +53,10 @@ class TestingTab(BaseTab):
     def setup_ui(self):
         """Set up the UI components for the Apply Prompt to PDF tab."""
         # Create workflow indicator
-        self.workflow_indicator = WorkflowIndicator(
-            "Apply Prompt to PDF Workflow", 
-            ["1. Select Files", "2. Process PDF", "3. Review Results"]
-        )
+        self.workflow_indicator = WorkflowIndicator()
+        self.workflow_indicator.add_step(1, "1. Select Files", "Select PDF and prompt files")
+        self.workflow_indicator.add_step(2, "2. Process PDF", "Apply prompt to PDF")
+        self.workflow_indicator.add_step(3, "3. Review Results", "Review the results")
         self.layout.addWidget(self.workflow_indicator)
         
         # Create file selectors for PDF and prompt
@@ -118,7 +118,8 @@ class TestingTab(BaseTab):
         self.current_pdf_path = file_path
         self.load_pdf_preview()
         self.check_ready_state()
-        self.workflow_indicator.update_status(0, [], "PDF selected")
+        self.workflow_indicator.update_status(1, "complete")
+        self.workflow_indicator.set_status_message("PDF selected")
     
     def on_prompt_selected(self, file_path):
         """Handle prompt file selection."""
@@ -184,20 +185,13 @@ class TestingTab(BaseTab):
         if not hasattr(self, 'workflow_indicator') or self.workflow_indicator is None:
             return
             
-        current_step = 0
-        completed_steps = []
-        
-        if (self.pdf_selector.selected_path is not None):
-            completed_steps.append(0)
-            current_step = 1
-            
-        if (self.prompt_selector.selected_path is not None):
-            completed_steps.append(1)
-            current_step = 2
-        
         # Update the workflow indicator
-        status_message = "Ready to process" if ready else "Select PDF and prompt files"
-        self.workflow_indicator.update_status(current_step, completed_steps, status_message)
+        if ready:
+            self.workflow_indicator.update_status(2, "complete")
+            self.workflow_indicator.set_status_message("Ready to process")
+        else:
+            self.workflow_indicator.update_status(0, "not_started")
+            self.workflow_indicator.set_status_message("Select PDF and prompt files")
     
     def process_pdf(self):
         """Process the selected PDF with the selected prompt using Claude."""
@@ -310,7 +304,8 @@ class TestingTab(BaseTab):
             self.show_status("Processing complete")
             
             # Update workflow indicator
-            self.workflow_indicator.update_status(2, [0, 1], "Processing complete")
+            self.workflow_indicator.update_status(2, "complete")
+            self.workflow_indicator.set_status_message("Processing complete")
         else:
             # Show error
             error_message = result.get("error", "Unknown error occurred")
