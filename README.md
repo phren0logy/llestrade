@@ -1,151 +1,98 @@
-# Forensic Report Drafter
+# Forensic Psych Report Drafter
 
-This experimental project seeks to write a rough first draft based on supplied sources of information. This is not intended for real-world use.
+A tool for analyzing and summarizing forensic psychological reports using large language models.
 
-## Project Overview
+## Installation
 
-The Forensic Psych Report Drafter is an application that helps with:
+1. Clone this repository
+2. Set up a Python environment using uv:
+   ```
+   uv venv .venv
+   source .venv/bin/activate   # On Mac/Linux
+   # or
+   .\.venv\Scripts\activate    # On Windows
+   ```
+3. Install dependencies:
+   ```
+   uv pip install -r requirements.txt
+   ```
+4. Configure API keys:
+   - Copy `config.template.env` to `.env`
+   - Add your Anthropic API key (Claude) to `.env`
+5. Run the application:
+   ```
+   python main.py
+   ```
 
-1. Breaking down markdown templates into sections
-2. Generating clean LLM prompts from these sections
-3. Combining these prompts with transcript text
-4. Processing them through Claude AI
-5. Analyzing PDF documents
-6. Processing PDFs with Azure Document Intelligence
-7. Summarizing and analyzing documents with timeline generation
-8. Creating integrated multi-document analyses
-9. Refining draft reports 
+## Troubleshooting
 
-## Refactored Application Structure
+### "Unknown error" with Batch File Processing
 
-The application has been refactored into a modular structure for better maintainability:
+If you see "Unknown error" messages when processing multiple files in the Analysis tab, try these solutions:
 
-```
-forensic-psych-report-drafter/
-├── config.py                # Configuration settings
-├── file_utils.py            # File operations utilities
-├── ingest_markdown.py       # Markdown processing utilities
-├── llm_utils.py             # LLM interaction utilities
-├── main.py                  # Main application entry point
-├── pdf_utils.py             # PDF processing utilities
-├── requirements.txt         # Dependencies
-├── run.py                   # Launcher script
-├── ui/                      # UI components
-│   ├── __init__.py
-│   ├── base_tab.py          # Base class for tabs
-│   ├── prompts_tab.py       # Template generation tab
-│   ├── record_review_tab.py # PDF processing tab
-│   ├── refinement_tab.py    # Report refinement tab
-│   └── testing_tab.py       # PDF analysis tab
-└── (original files preserved)
-```
+1. **Process files one at a time**: The application has been updated to handle files sequentially to avoid thread issues.
+2. **Check for problematic files**: Some files may contain content that causes issues:
+   - Files with unusual character encodings
+   - Files with binary-like content or corrupted text
+   - Files that are extremely large (over 10MB)
+3. **Use the diagnostic tool**: Run the diagnostic script on specific files:
 
-## Features
+   ```
+   python test_diagnosis.py path/to/your/file.md
+   ```
 
-- **Template Generation**: Process markdown files into LLM-ready prompts with transcripts
-- **PDF Analysis**: Analyze PDF documents with Claude AI
-- **PDF Processing**: Process PDF files with Azure Document Intelligence to extract content in JSON and Markdown formats
-- **Document Summarization**: Generate comprehensive document summaries with timelines from extracted content
-- **Integrated Analysis**: Combine multiple document summaries into a unified analysis with comprehensive timeline
-- **Report Refinement**: Refine draft reports with extended thinking capabilities
-- **Improved UI**: Larger, more readable interface with tabbed organization
-- **Better Error Handling**: Robust error handling and recovery
+   This will help identify issues with specific files.
+
+4. **Update the application**: Ensure you're running the latest version with the enhanced error handling.
+
+### LLM API Issues
+
+If you encounter "unknown error" issues with the LLM summarization, try these steps:
+
+1. Run the verification script to check API connectivity:
+
+   ```
+   python verify_llm_connection.py
+   ```
+
+2. Run the direct test script to test the LLM API outside of the Qt framework:
+
+   ```
+   python direct_test.py
+   ```
+
+3. Common issues:
+
+   - Missing API key in `.env` file
+   - Network connectivity issues
+   - Rate limiting (if you've done many API calls)
+   - Signal/slot connection problems in Qt
+
+4. If the direct test works but the application still has issues, try:
+   - Restarting the application
+   - Checking that your API key has sufficient quota
+   - Using `setup_env.py` to reconfigure your API keys
+
+### Signal/Slot Issues
+
+The most common cause of "unknown error" is a problem with the Qt signal/slot connections when running the LLM operations in a separate thread. The application has been updated to handle these cases better, but if you still experience issues:
+
+1. Check the application logs for detailed error messages
+2. Try running the summarization operations through the direct test first to verify API functionality
+3. Ensure that you have proper internet connectivity
 
 ## Usage
 
-### Prerequisites
+1. In the Analysis tab, select folders containing markdown documents
+2. Enter subject information
+3. Click "Generate Summaries with LLM" to create summaries
+4. Use "Combine Summaries" to merge all summary documents
+5. Generate an integrated analysis of all documents
 
-- Python 3.8+
-- [uv](https://github.com/astral-sh/uv) - Fast Python package manager (installation: `curl -LsSf https://astral.sh/uv/install.sh | sh`)
-- Anthropic API key (set as ANTHROPIC_API_KEY environment variable)
-- Azure Document Intelligence API credentials (set as AZURE_ENDPOINT and AZURE_KEY environment variables)
+## Diagnostic Tools
 
-### Installing and Running the Application
-
-The application includes a launcher script (`run.py`) that handles dependency management with uv and starts the application:
-
-```bash
-# Install dependencies and run application
-python run.py
-
-# Skip dependency installation
-python run.py --skip-deps
-```
-
-### Manual Setup with uv
-
-If you prefer to manage dependencies manually:
-
-```bash
-# Install dependencies with uv
-uv pip install -r requirements.txt
-
-# Run the application with uv
-uv run main.py
-```
-
-### Application Workflow
-
-1. **Template Generation**:
-   - Select a markdown file structured with Header 1 sections
-   - Select a transcript file
-   - Process with Claude AI
-   - View and save results
-
-2. **PDF Analysis**:
-   - Select a prompt file with questions for the PDF
-   - Select a PDF file
-   - Process with Claude AI
-   - View and save analysis
-
-3. **Record Review** (PDF Processing):
-   - Select a directory containing PDF files
-   - Choose an output directory
-   - Optionally enter Azure Document Intelligence credentials
-   - Process PDFs (split large files automatically)
-   - Extract content using Azure Document Intelligence
-   - Summarize extracted content with Claude AI
-   - Generate structured analyses with timelines
-   - Combine individual summaries into a single document
-   - Generate an integrated analysis with a comprehensive timeline
-   - View and access JSON, Markdown, and Analysis outputs
-
-4. **Report Refinement**:
-   - Select a draft report
-   - Select a transcript file
-   - Customize the refinement prompt
-   - Process with extended thinking
-   - View and save refined report
-
-## Development Notes
-
-### Managing Dependencies with uv
-
-This project uses [uv](https://github.com/astral-sh/uv) for managing dependencies:
-
-```bash
-# Adding new dependencies
-uv pip install <package-name>
-
-# Adding and updating requirements.txt
-uv pip freeze > requirements.txt
-
-# Compiling requirements (alternative approach)
-uv pip compile requirements.in -o requirements.txt
-```
-
-### Why uv?
-
-- 10-20x faster than traditional pip
-- Automatic virtual environment management
-- Seamless replacement for pip, pip-tools, and virtualenv
-- Better dependency resolution
-- Drop-in compatibility with existing workflows
-
-## Notes on Implementation
-
-- API interactions use Anthropic's latest Claude 3 models
-- Document summarization includes timeline generation in table format
-- Integrated analysis combines multiple document summaries with chronological timelines
-- Extended thinking capabilities for complex reasoning tasks
-- Error handling with graceful fallbacks
+- `verify_llm_connection.py`: Tests API connectivity
+- `test_summary.py`: Tests the summarization of a sample document
+- `direct_test.py`: Comprehensive test of all LLM features
+- `setup_env.py`: Interactive setup of API keys and environment
+- `test_diagnosis.py`: Debug tool for testing specific files

@@ -10,6 +10,7 @@ from datetime import datetime
 from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFileDialog,
     QFormLayout,
@@ -441,19 +442,77 @@ class AnalysisTab(BaseTab):
             )
             return
 
-        if not os.path.exists(self.results_output_directory):
-            try:
+        # Test write permissions on output directory
+        try:
+            # Try to create output directory if it doesn't exist
+            if not os.path.exists(self.results_output_directory):
                 os.makedirs(self.results_output_directory)
                 self.status_panel.append_details(
                     f"Created results output directory: {self.results_output_directory}"
                 )
-            except Exception as e:
+
+            # Test write permissions by creating a test file
+            test_file = os.path.join(self.results_output_directory, "write_test.txt")
+            with open(test_file, "w") as f:
+                f.write("Test write permissions")
+            # Clean up test file
+            try:
+                os.remove(test_file)
+            except:
+                pass
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Output Directory Error",
+                f"Cannot write to the output directory: {str(e)}\n\nPlease select a different directory.",
+            )
+            return
+
+        # Verify API connectivity before proceeding
+        try:
+            # Create a temporary dialog to show status
+            status_dialog = QMessageBox(self)
+            status_dialog.setWindowTitle("LLM API Verification")
+            status_dialog.setText("Checking LLM API connection...")
+            status_dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
+            status_dialog.show()
+
+            # Force UI update
+            QApplication.processEvents()
+
+            # Import and test LLM client
+            from llm_utils import LLMClient
+
+            client = LLMClient()
+
+            # Test a simple token count request
+            test_result = client.count_tokens(text="Test connection")
+
+            # Update dialog
+            if test_result["success"]:
+                status_dialog.setText("LLM API connection successful!")
+                QTimer.singleShot(1000, status_dialog.close)  # Close after 1 second
+            else:
+                status_dialog.close()
                 QMessageBox.critical(
                     self,
-                    "Directory Creation Error",
-                    f"Failed to create results output directory: {str(e)}",
+                    "LLM API Error",
+                    f"Could not connect to LLM API: {test_result.get('error', 'Unknown error')}\n\n"
+                    "Please check that your API key is properly configured in the .env file.",
                 )
                 return
+
+        except Exception as e:
+            if "status_dialog" in locals() and status_dialog.isVisible():
+                status_dialog.close()
+
+            QMessageBox.critical(
+                self,
+                "LLM Initialization Error",
+                f"Failed to initialize LLM client: {str(e)}\n\n"
+                "Please check the API key configuration and network connectivity.",
+            )
+            return
 
         # Now proceed with the LLM summarization
         self.summarize_with_llm()
@@ -508,43 +567,233 @@ class AnalysisTab(BaseTab):
         # Update workflow indicator
         self.workflow_indicator.update_status(WorkflowStep.SUMMARIZE_LLM, "in_progress")
 
+        # ----- NEW APPROACH: Process files one at a time to avoid thread issues -----
+        self.process_files_sequentially(
+            markdown_files, output_dir, subject_name, subject_dob, case_info
+        )
+
+    def process_files_sequentially(
+        self, markdown_files, output_dir, subject_name, subject_dob, case_info
+    ):
+        """Process files one at a time to avoid thread issues."""
         # Create progress dialog
-        progress_dialog = QProgressDialog(
+        self.progress_dialog = QProgressDialog(
             "Summarizing documents with LLM...",
             "Cancel",
             0,
             len(markdown_files),
             self,
         )
-        progress_dialog.setWindowTitle("LLM Summarization")
-        progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        progress_dialog.setMinimumDuration(0)
-        progress_dialog.setValue(0)
-        progress_dialog.show()
+        self.progress_dialog.setWindowTitle("LLM Summarization")
+        self.progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self.progress_dialog.setMinimumDuration(0)
+        self.progress_dialog.setValue(0)
+        self.progress_dialog.show()
 
-        # Create thread for LLM processing
-        self.llm_thread = LLMSummaryThread(
-            markdown_files,
-            output_dir,  # Now using the root output directory
-            subject_name,
-            subject_dob,
-            case_info,
-        )
-        self.llm_thread.progress_signal.connect(
-            lambda pct, msg: self.update_llm_progress(pct, msg)
-        )
-        self.llm_thread.finished_signal.connect(
-            lambda results: self.on_llm_summarization_finished(results, progress_dialog)
-        )
-        self.llm_thread.error_signal.connect(
-            lambda error: self.on_llm_summarization_error(error, progress_dialog)
+        # Initialize results
+        self.summary_results = {
+            "total": len(markdown_files),
+            "processed": 0,
+            "skipped": 0,
+            "failed": 0,
+            "files": [],
+        }
+
+        # Set up processing of first file
+        self.current_file_index = 0
+        self.markdown_files = markdown_files
+        self.output_dir = output_dir
+        self.subject_name = subject_name
+        self.subject_dob = subject_dob
+        self.case_info = case_info
+
+        # Process files one at a time using a timer to avoid blocking the UI
+        QTimer.singleShot(100, self.process_next_file)
+
+    def process_next_file(self):
+        """Process the next file in the queue."""
+        # Check if we're done or canceled
+        if (
+            self.current_file_index >= len(self.markdown_files)
+            or self.progress_dialog.wasCanceled()
+        ):
+            self.finish_processing()
+            return
+
+        # Get the current file
+        current_file = self.markdown_files[self.current_file_index]
+        basename = os.path.splitext(os.path.basename(current_file))[0]
+
+        # Update progress
+        self.progress_dialog.setValue(self.current_file_index)
+        self.progress_dialog.setLabelText(f"Processing: {basename}")
+        self.show_status(
+            f"Summarizing file {self.current_file_index + 1} of {len(self.markdown_files)}: {basename}"
         )
 
-        # Connect the cancel button of the progress dialog to stop the thread
-        progress_dialog.canceled.connect(self.llm_thread.terminate)
+        # Check if already processed
+        summary_file = os.path.join(self.output_dir, f"{basename}_summary.md")
+        if os.path.exists(summary_file):
+            self.status_panel.append_details(
+                f"File already processed, skipping: {basename}"
+            )
+            self.summary_results["skipped"] += 1
+            self.summary_results["files"].append(
+                {
+                    "file": current_file,
+                    "markdown": current_file,
+                    "status": "skipped",
+                    "summary": summary_file,
+                }
+            )
 
-        # Start the thread
-        self.llm_thread.start()
+            # Move to next file
+            self.current_file_index += 1
+            QTimer.singleShot(100, self.process_next_file)
+            return
+
+        # Process current file
+        try:
+            # Create LLM thread for just this file
+            self.single_file_thread = LLMSummaryThread(
+                markdown_files=[current_file],
+                output_dir=self.output_dir,
+                subject_name=self.subject_name,
+                subject_dob=self.subject_dob,
+                case_info=self.case_info,
+            )
+
+            # Connect signals
+            self.single_file_thread.progress_signal.connect(self.update_file_progress)
+            self.single_file_thread.finished_signal.connect(self.on_file_finished)
+            self.single_file_thread.error_signal.connect(self.on_file_error)
+
+            # Start processing
+            self.status_panel.append_details(f"Starting to process: {basename}")
+            self.single_file_thread.start()
+
+        except Exception as e:
+            # Handle error and move to next file
+            self.status_panel.append_details(
+                f"Error setting up processing for {basename}: {str(e)}"
+            )
+
+            self.summary_results["failed"] += 1
+            self.summary_results["files"].append(
+                {
+                    "file": current_file,
+                    "markdown": current_file,
+                    "status": "failed",
+                    "error": str(e),
+                }
+            )
+
+            # Move to next file
+            self.current_file_index += 1
+            QTimer.singleShot(100, self.process_next_file)
+
+    def update_file_progress(self, percent, message):
+        """Update progress for the current file."""
+        # Update status panel
+        self.status_panel.append_details(message)
+
+        # Also show in status bar
+        basename = os.path.basename(self.markdown_files[self.current_file_index])
+        self.show_status(
+            f"File {self.current_file_index + 1}/{len(self.markdown_files)} ({basename}): {message}"
+        )
+
+    def on_file_finished(self, results):
+        """Handle completion of a single file."""
+        # Since we're only processing one file at a time, get that file's result
+        if results.get("files") and len(results["files"]) > 0:
+            file_result = results["files"][0]
+
+            if file_result.get("status") == "success":
+                self.summary_results["processed"] += 1
+            elif file_result.get("status") == "skipped":
+                self.summary_results["skipped"] += 1
+            else:
+                self.summary_results["failed"] += 1
+
+            self.summary_results["files"].append(file_result)
+
+        # Move to next file
+        self.current_file_index += 1
+        QTimer.singleShot(100, self.process_next_file)
+
+    def on_file_error(self, error):
+        """Handle error for a single file."""
+        # Log the error
+        current_file = self.markdown_files[self.current_file_index]
+        basename = os.path.basename(current_file)
+        self.status_panel.append_details(f"Error processing {basename}: {error}")
+
+        # Update results
+        self.summary_results["failed"] += 1
+        self.summary_results["files"].append(
+            {
+                "file": current_file,
+                "markdown": current_file,
+                "status": "failed",
+                "error": error,
+            }
+        )
+
+        # Move to next file
+        self.current_file_index += 1
+        QTimer.singleShot(100, self.process_next_file)
+
+    def finish_processing(self):
+        """Finalize the processing after all files are done."""
+        # Close progress dialog
+        self.progress_dialog.close()
+
+        # Calculate final results
+        total = self.summary_results["total"]
+        processed = self.summary_results["processed"]
+        skipped = self.summary_results["skipped"]
+        failed = self.summary_results["failed"]
+
+        # Update workflow status
+        if processed + skipped == total:
+            self.workflow_indicator.update_status(
+                WorkflowStep.SUMMARIZE_LLM, "complete"
+            )
+        elif processed + skipped > 0:
+            self.workflow_indicator.update_status(WorkflowStep.SUMMARIZE_LLM, "partial")
+        else:
+            self.workflow_indicator.update_status(WorkflowStep.SUMMARIZE_LLM, "error")
+
+        # Show message with results
+        if failed > 0:
+            QMessageBox.warning(
+                self,
+                "Summarization Results",
+                f"Summarization completed with some errors.\n\n"
+                f"Total files: {total}\n"
+                f"Successfully processed: {processed}\n"
+                f"Skipped (already processed): {skipped}\n"
+                f"Failed: {failed}\n\n"
+                f"See the status panel for details on failures.",
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Summarization Complete",
+                f"All files have been processed successfully.\n\n"
+                f"Total files: {total}\n"
+                f"Successfully processed: {processed}\n"
+                f"Skipped (already processed): {skipped}",
+            )
+
+        # Update status bar
+        self.show_status(
+            f"LLM summarization complete: {processed + skipped}/{total} files processed"
+        )
+
+        # Refresh file list
+        self.refresh_file_list()
 
     def get_markdown_files(self):
         """Get a list of all markdown files in the markdown directory."""
@@ -581,119 +830,6 @@ class AnalysisTab(BaseTab):
             self.status_panel.append_details(f"  - {os.path.basename(file)}")
 
         return markdown_files
-
-    def update_llm_progress(self, percent, message):
-        """Update the progress for LLM summarization."""
-        # Update status panel
-        self.status_panel.append_details(message)
-
-        # Update the status bar
-        self.show_status(f"LLM: {message}", percent)
-
-    def on_llm_summarization_finished(self, results, progress_dialog):
-        """Handle completion of LLM summarization."""
-        try:
-            # Close the progress dialog
-            progress_dialog.close()
-
-            # Safely handle the results - check if it's a dictionary
-            if not isinstance(results, dict):
-                # Handle string or other unexpected types
-                self.show_status(
-                    f"LLM summarization completed with unexpected result format"
-                )
-                self.status_panel.append_details(
-                    f"Unexpected result format: {type(results)}"
-                )
-                self.workflow_indicator.update_status(
-                    WorkflowStep.SUMMARIZE_LLM, "error"
-                )
-
-                # Show error message
-                QMessageBox.warning(
-                    self,
-                    "Summarization Result Error",
-                    f"LLM summarization completed but returned an unexpected result format. Please check logs.",
-                )
-                return
-
-            # Update status message
-            try:
-                num_success = sum(
-                    1 for r in results.get("files", []) if r.get("status") == "success"
-                )
-                num_total = results.get("total", 0)
-                self.show_status(
-                    f"LLM summarization completed: {num_success}/{num_total} files processed"
-                )
-
-                # Show detailed results in the console
-                for result in results.get("files", []):
-                    if result.get("status") == "success":
-                        self.status_panel.append_details(
-                            f"Summarized: {os.path.basename(result.get('file', 'unknown'))}"
-                        )
-                    else:
-                        self.status_panel.append_details(
-                            f"Failed to summarize {os.path.basename(result.get('file', 'unknown'))}: {result.get('error', 'Unknown error')}"
-                        )
-            except Exception as e:
-                # Handle any other errors in processing the results
-                self.status_panel.append_details(f"Error processing results: {str(e)}")
-                num_success = 0
-                num_total = 0
-
-            # Update workflow indicator
-            if num_success == num_total and num_total > 0:
-                self.workflow_indicator.update_status(
-                    WorkflowStep.SUMMARIZE_LLM, "complete"
-                )
-            elif num_success > 0:
-                self.workflow_indicator.update_status(
-                    WorkflowStep.SUMMARIZE_LLM, "partial"
-                )
-            else:
-                self.workflow_indicator.update_status(
-                    WorkflowStep.SUMMARIZE_LLM, "error"
-                )
-
-            # Show message box with results
-            QMessageBox.information(
-                self,
-                "Summarization Complete",
-                f"LLM summarization completed.\n\n{num_success} of {num_total} files were successfully summarized.\n\n"
-                f"Summaries saved to: {self.results_output_directory}",
-            )
-
-            # Update file list
-            self.refresh_file_list()
-
-        except Exception as e:
-            # Catch any unexpected errors to prevent crashes
-            self.status_panel.append_details(
-                f"Error in summarization completion handler: {str(e)}"
-            )
-            self.show_status("Error finishing LLM summarization")
-            self.workflow_indicator.update_status(WorkflowStep.SUMMARIZE_LLM, "error")
-
-    def on_llm_summarization_error(self, error, progress_dialog):
-        """Handle error in LLM summarization."""
-        # Close the progress dialog
-        if progress_dialog and progress_dialog.isVisible():
-            progress_dialog.close()
-
-        # Update workflow indicator
-        self.workflow_indicator.update_status(WorkflowStep.SUMMARIZE_LLM, "error")
-
-        # Show error in status panel
-        self.status_panel.append_details(f"LLM summarization error: {error}")
-
-        # Show error message box
-        QMessageBox.critical(
-            self,
-            "LLM Summarization Error",
-            f"An error occurred during LLM summarization:\n\n{error}",
-        )
 
     def combine_summaries(self):
         """Combine all summary markdown files into a single file."""
@@ -847,6 +983,9 @@ class AnalysisTab(BaseTab):
         # Update file list
         self.refresh_file_list()
 
+        # Update workflow state to ensure buttons are properly enabled/disabled
+        self.check_workflow_state()
+
         # Close progress dialog after a delay
         QTimer.singleShot(1000, progress_dialog.close)
 
@@ -986,6 +1125,9 @@ class AnalysisTab(BaseTab):
 
         # Refresh file list to show new file
         self.refresh_file_list()
+
+        # Update workflow state to ensure buttons are properly enabled/disabled
+        self.check_workflow_state()
 
     def on_integrated_analysis_error(self, error, progress_dialog):
         """Handle error in integrated analysis."""
