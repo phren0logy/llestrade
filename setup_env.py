@@ -140,78 +140,72 @@ def check_dependencies():
 
 
 def test_api_connectivity():
-    """Test connectivity to the Anthropic API."""
+    """Test connectivity to the LLM APIs."""
     print("\n=== API Connectivity Test ===\n")
 
+    # Check that environment variables are loaded
     try:
-        print("Testing Anthropic API connection...")
+        # Ensure we're using the .env file values
+        from dotenv import load_dotenv
 
-        # Import the client
+        load_dotenv()
+    except ImportError:
+        print("❌ python-dotenv package not installed.")
+        print("   Please install it with: pip install python-dotenv")
+        return False
+
+    # Check if the ANTHROPIC_API_KEY is set
+    anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not anthropic_key or anthropic_key == "your_api_key_here":
+        print("❌ ANTHROPIC_API_KEY is not set in the .env file.")
+        print("   Please run the setup_api_keys() function first.")
+        return False
+
+    # Try to import and initialize the LLM client
+    try:
         try:
-            from llm_utils import LLMClient
+            from llm_utils import LLMClientFactory
 
-            print("✅ Successfully imported LLMClient")
+            print("✅ Successfully imported LLMClientFactory")
         except ImportError as e:
-            print(f"❌ Failed to import LLMClient: {str(e)}")
+            print(f"❌ Failed to import LLMClientFactory: {str(e)}")
             return False
 
-        # Initialize the client
         try:
-            client = LLMClient()
-            if client.anthropic_initialized:
-                print("✅ Successfully initialized LLMClient")
+            client = LLMClientFactory.create_client(provider="auto")
+            if client:
+                print("✅ Successfully initialized LLM client")
             else:
-                print("❌ LLMClient failed to initialize properly")
+                print("❌ LLM client failed to initialize properly")
                 return False
         except Exception as e:
-            print(f"❌ Error initializing LLMClient: {str(e)}")
+            print(f"❌ Error initializing LLM client: {str(e)}")
             return False
 
-        # Test API call
+        # Test API connectivity with a simple token count request
         try:
-            test_result = client.count_tokens(text="Hello world")
-            if test_result["success"]:
-                print(
-                    f"✅ Successfully connected to Anthropic API. Token count: {test_result['token_count']}"
-                )
-            else:
-                print(
-                    f"❌ API call failed: {test_result.get('error', 'Unknown error')}"
-                )
-                return False
+            response = client.count_tokens(text="Test message to count tokens.")
 
-            # Test an actual generation call
-            print("\nTesting actual response generation...")
-            response = client.generate_response(
-                prompt_text="Briefly describe what an LLM is in one sentence.",
-                system_prompt="You are a helpful assistant.",
-                temperature=0.1,
-            )
-
-            if response["success"]:
-                print(
-                    f"✅ Successfully generated response ({len(response.get('content', ''))} chars)"
-                )
-                if "usage" in response:
-                    print(
-                        f"   Input tokens: {response['usage'].get('input_tokens', 'unknown')}"
-                    )
-                    print(
-                        f"   Output tokens: {response['usage'].get('output_tokens', 'unknown')}"
-                    )
+            if response.get("success", False):
+                provider = getattr(client, "provider", "unknown")
+                print(f"✅ Successfully connected to {provider.capitalize()} API")
+                print(f"   Token count: {response.get('token_count', 'unknown')}")
                 return True
             else:
                 print(
-                    f"❌ Response generation failed: {response.get('error', 'Unknown error')}"
+                    f"❌ API request failed: {response.get('error', 'Unknown error')}"
                 )
                 return False
 
         except Exception as e:
-            print(f"❌ Error testing API: {str(e)}")
+            print(f"❌ Error making API request: {str(e)}")
             return False
 
     except Exception as e:
-        print(f"❌ Unexpected error: {str(e)}")
+        import traceback
+
+        print(f"❌ Unexpected error during API connectivity test: {str(e)}")
+        print(traceback.format_exc())
         return False
 
 
@@ -251,20 +245,21 @@ John Doe is a 35-year-old individual born on 1988-01-15.
     # Now try summarizing it directly
     try:
         print("Creating LLM client...")
-        from llm_utils import LLMClient
+        from llm_utils import LLMClientFactory
 
-        client = LLMClient()
+        client = LLMClientFactory.create_client(provider="auto")
 
-        # Check which provider is being used
-        if hasattr(client, "anthropic_initialized") and client.anthropic_initialized:
-            print("Using Anthropic for summarization")
+        # Check provider information
+        provider = getattr(client, "provider", "unknown")
+        if provider == "anthropic":
+            print("Using Anthropic Claude for summarization")
             llm_provider = "Anthropic Claude"
-        elif hasattr(client, "gemini_initialized") and client.gemini_initialized:
-            print("Using Gemini for summarization")
+        elif provider == "gemini":
+            print("Using Google Gemini for summarization")
             llm_provider = "Google Gemini"
         else:
-            print("No LLM provider available")
-            return False
+            print(f"Using {provider} provider for summarization")
+            llm_provider = provider.capitalize() if provider else "Unknown"
 
         # Create prompt
         prompt = f"""

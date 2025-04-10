@@ -9,7 +9,7 @@ import logging
 from typing import Dict, Any
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from llm_utils import LLMClient
+from llm_utils import LLMClientFactory
 
 class PDFPromptThread(QThread):
     """Thread for processing PDFs with Claude in the background."""
@@ -29,9 +29,10 @@ class PDFPromptThread(QThread):
     def run(self):
         """Run the processing on the background thread."""
         try:
-            # Initialize the Claude client
-            self.update_signal.emit("Initializing Claude client...")
-            claude_client = LLMClient()
+            # Initialize the LLM client using factory
+            self.update_signal.emit("Initializing LLM client...")
+            # Use Anthropic specifically for PDF processing since it has native PDF support
+            llm_client = LLMClientFactory.create_client(provider="anthropic")
             
             # Check if the PDF file exists
             if not os.path.exists(self.pdf_path):
@@ -61,7 +62,7 @@ class PDFPromptThread(QThread):
                 self.progress_signal.emit(60, 100)
                 
                 # Use the new unified method for processing PDFs with thinking
-                result = claude_client.generate_response_with_pdf_and_thinking(
+                result = llm_client.generate_response_with_pdf_and_thinking(
                     prompt_text=self.prompt_text,
                     pdf_file_path=self.pdf_path,
                     model="claude-3-7-sonnet-20250219",

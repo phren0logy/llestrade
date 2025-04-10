@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import (
 
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
 from file_utils import read_file_content, read_file_preview, write_file_content
-from llm_utils import LLMClient
+from llm_utils import LLMClientFactory
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.results_viewer import ResultsViewer
@@ -69,10 +69,12 @@ class RefinementThread(QThread):
                 transcript_content = read_file_content(self.transcript_path)
                 self.update_signal.emit("Transcript loaded successfully")
 
-            # Create LLM client
-            llm_client = LLMClient(
+            # Create LLM client using factory
+            self.update_signal.emit("Initializing LLM client...")
+            llm_client = LLMClientFactory.create_client(
+                provider="auto",
                 timeout=DEFAULT_TIMEOUT
-                * 5,  # Increased timeout for refinement (5 minutes)
+                * 10,  # Increased timeout for refinement (5 minutes)
                 max_retries=3,
                 thinking_budget_tokens=32000,  # Allocate generous thinking budget
             )

@@ -498,7 +498,7 @@ class PDFProcessingTab(BaseTab):
         
         # Connect signals
         self.azure_thread.progress_signal.connect(
-            lambda n, total, msg: self.update_azure_progress(n, total, msg, progress_dialog)
+            lambda processed, msg: self.update_azure_progress(processed, len(self.pdf_files), msg, progress_dialog)
         )
         self.azure_thread.finished_signal.connect(
             lambda results: self.azure_processing_finished(results, progress_dialog)

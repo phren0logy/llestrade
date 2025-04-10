@@ -9,7 +9,7 @@ from datetime import datetime
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from file_utils import write_file_content
-from llm_utils import LLMClient
+from llm_utils import LLMClientFactory
 
 
 class PromptRunnerThread(QThread):
@@ -25,7 +25,7 @@ class PromptRunnerThread(QThread):
         self.prompts = prompts
         self.output_dir = output_dir
         self.transcript_path = transcript_path
-        self.llm_client = LLMClient()
+        self.llm_client = LLMClientFactory.create_client(provider="auto")
 
     def run(self):
         """Run the prompts through the LLM and save results."""

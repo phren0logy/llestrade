@@ -425,82 +425,87 @@ class AnalysisTab(BaseTab):
         if not os.path.exists(self.markdown_directory):
             QMessageBox.warning(
                 self,
-                "Directory Not Found",
-                f"The selected markdown directory does not exist: {self.markdown_directory}",
+                "Invalid Directory",
+                f"The directory {self.markdown_directory} does not exist.",
             )
             return
 
-        # Check if results output directory is selected and exists
-        if (
-            not hasattr(self, "results_output_directory")
-            or not self.results_output_directory
-        ):
+        # Check if results directory is selected and exists
+        if not hasattr(self, "results_output_directory") or not self.results_output_directory:
             QMessageBox.warning(
                 self,
-                "Missing Directory",
+                "Missing Output Directory",
                 "Please select a results output directory first.",
             )
             return
 
-        # Test write permissions on output directory
-        try:
-            # Try to create output directory if it doesn't exist
-            if not os.path.exists(self.results_output_directory):
-                os.makedirs(self.results_output_directory)
-                self.status_panel.append_details(
-                    f"Created results output directory: {self.results_output_directory}"
-                )
-
-            # Test write permissions by creating a test file
-            test_file = os.path.join(self.results_output_directory, "write_test.txt")
-            with open(test_file, "w") as f:
-                f.write("Test write permissions")
-            # Clean up test file
-            try:
-                os.remove(test_file)
-            except:
-                pass
-        except Exception as e:
-            QMessageBox.critical(
+        if not os.path.exists(self.results_output_directory):
+            # Ask if the directory should be created
+            reply = QMessageBox.question(
                 self,
-                "Output Directory Error",
-                f"Cannot write to the output directory: {str(e)}\n\nPlease select a different directory.",
+                "Create Directory",
+                f"The directory {self.results_output_directory} does not exist. Create it?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    os.makedirs(self.results_output_directory)
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Directory Creation Failed",
+                        f"Failed to create directory: {str(e)}",
+                    )
+                    return
+            else:
+                return
+
+        # Get subject name and DOB
+        subject_name = self.subject_input.text().strip()
+        subject_dob = self.dob_input.text().strip()
+
+        # Get case information
+        case_info = self.case_info_input.toPlainText().strip()
+
+        # Check for missing subject name or DOB
+        if not subject_name or not subject_dob:
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please fill in both Subject Name and Date of Birth.",
             )
             return
 
-        # Verify API connectivity before proceeding
+        # Check if the API client can be initialized
+        status_dialog = QMessageBox()
+        status_dialog.setIcon(QMessageBox.Icon.Information)
+        status_dialog.setWindowTitle("Checking LLM Availability")
+        status_dialog.setText("Checking if LLM API is available...")
+        status_dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        status_dialog.show()
+        QApplication.processEvents()  # Force UI update
+
         try:
-            # Create a temporary dialog to show status
-            status_dialog = QMessageBox(self)
-            status_dialog.setWindowTitle("LLM API Verification")
-            status_dialog.setText("Checking LLM API connection...")
-            status_dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
-            status_dialog.show()
+            # Attempt to initialize the LLM client
+            from llm_utils import LLMClientFactory
 
-            # Force UI update
-            QApplication.processEvents()
-
-            # Import and test LLM client
-            from llm_utils import LLMClient
-
-            client = LLMClient()
-
-            # Test a simple token count request
-            test_result = client.count_tokens(text="Test connection")
-
-            # Update dialog
-            if test_result["success"]:
-                status_dialog.setText("LLM API connection successful!")
-                QTimer.singleShot(1000, status_dialog.close)  # Close after 1 second
-            else:
+            client = LLMClientFactory.create_client(provider="auto")
+            
+            # Try a simple request to ensure connectivity
+            response = client.count_tokens(text="Test connection")
+            
+            if not response.get("success", False):
                 status_dialog.close()
-                QMessageBox.critical(
+                QMessageBox.warning(
                     self,
                     "LLM API Error",
-                    f"Could not connect to LLM API: {test_result.get('error', 'Unknown error')}\n\n"
-                    "Please check that your API key is properly configured in the .env file.",
+                    f"LLM API test failed: {response.get('error', 'Unknown error')}",
                 )
                 return
+
+            status_dialog.close()
 
         except Exception as e:
             if "status_dialog" in locals() and status_dialog.isVisible():

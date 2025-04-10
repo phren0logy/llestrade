@@ -9,7 +9,7 @@ import traceback
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
-from llm_utils import LLMClient
+from llm_utils import LLMClientFactory
 
 
 class IntegratedAnalysisThread(QThread):
@@ -27,7 +27,7 @@ class IntegratedAnalysisThread(QThread):
         self.subject_name = subject_name
         self.subject_dob = subject_dob
         self.case_info = case_info
-        self.llm_client = LLMClient()
+        self.llm_client = LLMClientFactory.create_client(provider="auto")
 
     def process_api_response(self, prompt, system_prompt, use_gemini=False):
         """Process API response with detailed error handling and retries."""

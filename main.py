@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 from config import APP_TITLE, APP_VERSION, setup_environment_variables
 
 # Import utility modules
-from llm_utils import LLMClient
+from llm_utils import LLMClientFactory
 
 # Import UI tab modules
 from ui.prompts_tab import PromptsTab
@@ -87,19 +87,32 @@ class ForensicReportDrafterApp(QMainWindow):
         self.central_layout.addWidget(self.tab_widget)
 
     def check_api_key(self):
-        """Check if the Anthropic API key is available."""
+        """Check if the API keys are available."""
         try:
             # Create a temporary client to check API key
-            LLMClient()
-            self.status_bar.showMessage("API key found. Ready to use.", 5000)
-        except ValueError as e:
+            client = LLMClientFactory.create_client(provider="auto")
+            
+            # Test if it works
+            response = client.count_tokens(text="Test connection")
+            if response.get("success", False):
+                provider = getattr(client, "provider", "auto")
+                self.status_bar.showMessage(f"{provider.capitalize()} API key found. Ready to use.", 5000)
+            else:
+                QMessageBox.warning(
+                    self,
+                    "API Connection Issue",
+                    f"API connection test failed: {response.get('error', 'Unknown error')}\n\n"
+                    "Please check your API keys and network connectivity.",
+                )
+                self.status_bar.showMessage("API connection test failed.", 0)
+        except Exception as e:
             QMessageBox.critical(
                 self,
                 "API Key Error",
-                f"Error with Anthropic API key: {str(e)}\n\n"
-                "Please set the ANTHROPIC_API_KEY environment variable.",
+                f"Error with API keys: {str(e)}\n\n"
+                "Please set the ANTHROPIC_API_KEY or GOOGLE_API_KEY environment variable.",
             )
-            self.status_bar.showMessage("API key not found. Set ANTHROPIC_API_KEY.", 0)
+            self.status_bar.showMessage("API key not found. Please set up API keys.", 0)
 
     def closeEvent(self, event):
         """Handle the window close event."""

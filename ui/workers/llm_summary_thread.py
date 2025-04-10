@@ -8,7 +8,7 @@ import time
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from llm_utils import LLMClient
+from llm_utils import LLMClientFactory
 
 
 def chunk_document_with_overlap(text, client, max_chunk_size=60000, overlap=1000):
@@ -134,9 +134,9 @@ class LLMSummaryThread(QThread):
         """Initialize LLM client with better error handling."""
         try:
             self.progress_signal.emit(0, "Initializing LLM client...")
-            from llm_utils import LLMClient
+            from llm_utils import LLMClientFactory
 
-            self.llm_client = LLMClient()
+            self.llm_client = LLMClientFactory.create_client(provider="auto")
             # Test connection by sending a simple request
             test_result = self.llm_client.count_tokens(text="Test connection")
             if not test_result["success"]:
@@ -339,7 +339,7 @@ Please analyze the document content above, wrapped in "document-content" tags, a
 - Adverse life events
 - A timeline of events in a markdown table format with columns for Date, Event, and Significance
 
-Inlude the page number for each of the items above.
+Include the page number for each of the items above.
 
 ## Timeline Instructions
 - Create a timeline of events in a markdown table format with columns for Date, Event, and Significance
@@ -369,20 +369,12 @@ Keep your analysis focused on factual information directly stated in the documen
                 )
                 return False
 
-            # Check which provider is being used
-            if (
-                hasattr(self.llm_client, "anthropic_initialized")
-                and self.llm_client.anthropic_initialized
-            ):
-                self.progress_signal.emit(0, "Using Anthropic API for summarization")
-            elif (
-                hasattr(self.llm_client, "gemini_initialized")
-                and self.llm_client.gemini_initialized
-            ):
-                self.progress_signal.emit(0, "Using Gemini API for summarization")
+            # Check provider information using BaseLLMClient approach
+            if hasattr(self.llm_client, "provider"):
+                self.progress_signal.emit(0, f"Using {self.llm_client.provider} API for summarization")
             else:
                 self.progress_signal.emit(
-                    0, "Using unknown API provider for summarization"
+                    0, "Using default API provider for summarization"
                 )
 
             return True
@@ -407,56 +399,38 @@ Keep your analysis focused on factual information directly stated in the documen
                     self._initialize_llm_client()
 
                     if not self.test_llm_availability():
-                        raise Exception(
-                            "LLM API still not available after reinitialization"
-                        )
+                        raise Exception("LLM API not available after reinitialization")
 
-                self.progress_signal.emit(
-                    0,
-                    f"Sending request to LLM API (attempt {retry_count + 1}/{max_retries})...",
-                )
+                # Log request details
+                provider = getattr(self.llm_client, "provider", "unknown")
+                self.progress_signal.emit(0, f"Sending request to {provider} API")
 
-                # Create a detailed log of the API parameters
-                self.progress_signal.emit(
-                    0, f"Using model: {type(self.llm_client).__name__}"
-                )
-                self.progress_signal.emit(
-                    0, f"System prompt length: {len(system_prompt)} chars"
-                )
-                self.progress_signal.emit(0, f"Prompt length: {len(prompt)} chars")
-
-                # Log which provider is being used
-                if (
-                    hasattr(self.llm_client, "anthropic_initialized")
-                    and self.llm_client.anthropic_initialized
-                ):
-                    provider = "Anthropic Claude"
-                elif (
-                    hasattr(self.llm_client, "gemini_initialized")
-                    and self.llm_client.gemini_initialized
-                ):
-                    provider = "Google Gemini"
+                # Different parameters based on provider
+                if provider == "anthropic":
+                    # Generate the response using Claude
+                    response = self.llm_client.generate_response(
+                        prompt_text=prompt,
+                        system_prompt=system_prompt,
+                        temperature=0.1,
+                        model="claude-3-sonnet-20240229",
+                        max_tokens=100000,
+                    )
+                elif provider == "gemini":
+                    # Generate the response using Gemini
+                    response = self.llm_client.generate_response(
+                        prompt_text=prompt,
+                        system_prompt=system_prompt,
+                        temperature=0.1,
+                        model="models/gemini-1.5-pro-latest",
+                        max_tokens=200000,
+                    )
                 else:
-                    provider = "Unknown Provider"
-
-                self.progress_signal.emit(0, f"Using {provider} for generation")
-
-                # Time the API call for debugging
-                start_time = time.time()
-
-                # Try to send the request
-                response = self.llm_client.generate_response(
-                    prompt_text=prompt,
-                    system_prompt=system_prompt,
-                    temperature=0.1,
-                    max_tokens=32000,  # Ensure adequate token limits
-                )
-
-                # Log response time
-                elapsed_time = time.time() - start_time
-                self.progress_signal.emit(
-                    0, f"API response received in {elapsed_time:.2f} seconds"
-                )
+                    # Use default parameters
+                    response = self.llm_client.generate_response(
+                        prompt_text=prompt,
+                        system_prompt=system_prompt,
+                        temperature=0.1,
+                    )
 
                 # Check response
                 if not response["success"]:
@@ -737,11 +711,11 @@ Keep your analysis focused on factual information directly stated in the documen
                     # Combine the summaries using Anthropic's extended thinking functionality
                     self.progress_signal.emit(
                         0,
-                        "Using Anthropic's extended thinking to create integrated summary...",
+                        "Using extended thinking to create integrated summary...",
                     )
 
                     # Create a meta-summary prompt
-                     meta_prompt= f"""
+                    meta_prompt = f"""
 # Document Integration Task
 
 ## Document Information
@@ -769,120 +743,60 @@ Use extended thinking to work through the document summaries systematically befo
 {combined_chunks}
 """
 
-                    # Verify that Anthropic is available
-                    if (
-                        not hasattr(self.llm_client, "anthropic_initialized")
-                        or not self.llm_client.anthropic_initialized
-                    ):
-                        # Check if Gemini is available as an alternative
-                        if (
-                            hasattr(self.llm_client, "gemini_initialized")
-                            and self.llm_client.gemini_initialized
-                        ):
-                            self.progress_signal.emit(
-                                0,
-                                "Anthropic not available, using Gemini's long context and step-by-step thinking capabilities",
-                            )
-                            # Use Gemini's thinking capability
-                            thinking_response = self.llm_client.generate_response_with_gemini_thinking(
-                                prompt_text=meta_prompt,
-                                system_prompt=f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
-                                temperature=0.3,  # Lower temperature for more factual responses
-                                max_output_tokens=32000,  # Gemini 1.5 Pro supports very large outputs
-                            )
+                    # Check if we should use extended thinking for complex documents
+                    # Specifically with Gemini
+                    provider = getattr(self.llm_client, "provider", "unknown")
+                    use_extended_thinking = provider == "gemini" and token_count["token_count"] > 5000
 
-                            if not thinking_response["success"]:
-                                raise Exception(
-                                    f"Failed to combine chunks with Gemini thinking: {thinking_response.get('error', 'Unknown error')}"
-                                )
-
-                            # Log thinking process if available
-                            if thinking_response.get("thinking"):
-                                self.progress_signal.emit(
-                                    0,
-                                    f"Gemini performed {len(thinking_response['thinking'])} characters of reasoning process",
-                                )
-
-                                # Save thinking to a separate file for reference
-                                thinking_file = os.path.join(
-                                    os.path.dirname(summary_file),
-                                    f"{os.path.basename(summary_file).replace('.md', '')}_gemini_reasoning.md",
-                                )
-                                with open(thinking_file, "w", encoding="utf-8") as f:
-                                    f.write(
-                                        f"# Gemini Analysis Reasoning Process for {document_name}\n\n"
-                                    )
-                                    f.write(
-                                        "Gemini 2.5 Pro used its 2M token context window to analyze the document chunks.\n\n"
-                                    )
-                                    f.write(thinking_response["thinking"])
-
-                                self.progress_signal.emit(
-                                    0,
-                                    f"Saved Gemini reasoning process to {thinking_file}",
-                                )
-
-                            final_content = thinking_response["content"]
-                        else:
-                            self.progress_signal.emit(
-                                0,
-                                "Warning: Neither Anthropic nor Gemini thinking capabilities available, using standard API call",
-                            )
-                            # Use standard API call as fallback
-                            response = self.llm_client.generate_response(
-                                prompt_text=meta_prompt,
-                                system_prompt=f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
-                                temperature=0.1,
-                            )
-
-                            if not response["success"]:
-                                raise Exception(
-                                    f"Failed to combine chunks: {response.get('error', 'Unknown error')}"
-                                )
-
-                            final_content = response["content"]
-                    else:
-                        # Use extended thinking functionality
+                    if use_extended_thinking:
                         self.progress_signal.emit(
-                            0,
-                            "Using Anthropic's extended thinking capability to create integrated analysis...",
+                            0, "Using extended thinking capability for complex document"
                         )
-
-                        thinking_response = self.llm_client.generate_response_with_extended_thinking(
-                            prompt_text=meta_prompt,
-                            system_prompt=f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
-                            temperature=0.1,  # Lower temperature for more factual responses
-                            thinking_budget_tokens=16000,  # Allocate sufficient tokens for thinking
-                        )
-
-                        if not thinking_response["success"]:
-                            raise Exception(
-                                f"Failed to combine chunks with extended thinking: {thinking_response.get('error', 'Unknown error')}"
-                            )
-
-                        # Log thinking process if available
-                        if thinking_response.get("thinking"):
+                        
+                        # Check if we have generate_response_with_extended_thinking method
+                        if hasattr(self.llm_client, "generate_response_with_extended_thinking"):
                             self.progress_signal.emit(
-                                0,
-                                f"Claude performed {len(thinking_response['thinking'])} characters of thinking",
+                                0, "Generating response with extended thinking"
                             )
-
-                            # Save thinking to a separate file for reference
-                            thinking_file = os.path.join(
-                                os.path.dirname(summary_file),
-                                f"{os.path.basename(summary_file).replace('.md', '')}_thinking.md",
+                            
+                            # Generate with step-by-step thinking
+                            thinking_response = self.llm_client.generate_response_with_extended_thinking(
+                                prompt_text=meta_prompt,
+                                system_prompt=f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
+                                temperature=0.2,
                             )
-                            with open(thinking_file, "w", encoding="utf-8") as f:
-                                f.write(
-                                    f"# Analysis Thinking Process for {document_name}\n\n"
+                            
+                            if thinking_response["success"]:
+                                # If the Gemini thinking was successful, save it to a file
+                                if "thinking" in thinking_response and thinking_response["thinking"]:
+                                    # Create a file for the thinking process
+                                    thinking_file = summary_file.replace(
+                                        ".md", "-thinking-process.txt"
+                                    )
+                                    with open(thinking_file, "w", encoding="utf-8") as f:
+                                        f.write(thinking_response["thinking"])
+                                    
+                                    self.progress_signal.emit(
+                                        0, f"Saved Gemini reasoning process to {thinking_file}"
+                                    )
+                                
+                                final_content = thinking_response["content"]
+                            else:
+                                # If extended thinking fails, fall back to regular generation
+                                self.progress_signal.emit(
+                                    0, 
+                                    f"Extended thinking failed: {thinking_response.get('error', 'Unknown error')}. Falling back to standard generation."
                                 )
-                                f.write(thinking_response["thinking"])
-
+                                final_content = self.process_api_response(meta_prompt, f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}")
+                        else:
+                            # Fall back to standard generation
                             self.progress_signal.emit(
-                                0, f"Saved thinking process to {thinking_file}"
+                                0, "Extended thinking not available, using standard generation"
                             )
-
-                        final_content = thinking_response["content"]
+                            final_content = self.process_api_response(meta_prompt, f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}")
+                    else:
+                        # Standard generation for normal documents
+                        final_content = self.process_api_response(meta_prompt, f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}")
 
                     self.progress_signal.emit(
                         0,
@@ -927,26 +841,63 @@ Use extended thinking to work through the document summaries systematically befo
                             raise Exception("Failed to initialize LLM client")
 
                     # Log which API we're using
-                    if (
-                        hasattr(self.llm_client, "anthropic_initialized")
-                        and self.llm_client.anthropic_initialized
-                    ):
-                        self.progress_signal.emit(0, "Using Anthropic Claude API")
-                    elif (
-                        hasattr(self.llm_client, "gemini_initialized")
-                        and self.llm_client.gemini_initialized
-                    ):
-                        self.progress_signal.emit(0, "Using Google Gemini API")
+                    provider = getattr(self.llm_client, "provider", "unknown")
+                    self.progress_signal.emit(0, f"Using {provider} API")
+
+                    # Check if we should use extended thinking for complex documents
+                    # Specifically with Gemini
+                    use_extended_thinking = provider == "gemini" and token_count["token_count"] > 5000
+
+                    if use_extended_thinking:
+                        self.progress_signal.emit(
+                            0, "Using extended thinking capability for complex document"
+                        )
+                        
+                        # Check if we have generate_response_with_extended_thinking method
+                        if hasattr(self.llm_client, "generate_response_with_extended_thinking"):
+                            self.progress_signal.emit(
+                                0, "Generating response with extended thinking"
+                            )
+                            
+                            # Generate with step-by-step thinking
+                            thinking_response = self.llm_client.generate_response_with_extended_thinking(
+                                prompt_text=prompt,
+                                system_prompt=system_prompt,
+                                temperature=0.2,
+                            )
+                            
+                            if thinking_response["success"]:
+                                # If the Gemini thinking was successful, save it to a file
+                                if "thinking" in thinking_response and thinking_response["thinking"]:
+                                    # Create a file for the thinking process
+                                    thinking_file = summary_file.replace(
+                                        ".md", "-thinking-process.txt"
+                                    )
+                                    with open(thinking_file, "w", encoding="utf-8") as f:
+                                        f.write(thinking_response["thinking"])
+                                    
+                                    self.progress_signal.emit(
+                                        0, f"Saved Gemini reasoning process to {thinking_file}"
+                                    )
+                                
+                                final_content = thinking_response["content"]
+                            else:
+                                # If extended thinking fails, fall back to regular generation
+                                self.progress_signal.emit(
+                                    0, 
+                                    f"Extended thinking failed: {thinking_response.get('error', 'Unknown error')}. Falling back to standard generation."
+                                )
+                                final_content = self.process_api_response(prompt, system_prompt)
+                        else:
+                            # Fall back to standard generation
+                            self.progress_signal.emit(
+                                0, "Extended thinking not available, using standard generation"
+                            )
+                            final_content = self.process_api_response(prompt, system_prompt)
                     else:
-                        self.progress_signal.emit(0, "Using unknown API provider")
+                        # Standard generation for normal documents
+                        final_content = self.process_api_response(prompt, system_prompt)
 
-                    # Use the new response processing method with enhanced logging
-                    final_content = self.process_api_response(prompt, system_prompt)
-
-                    self.progress_signal.emit(
-                        0,
-                        f"Successfully generated summary: {len(final_content)} characters",
-                    )
                 except Exception as e:
                     self.progress_signal.emit(0, f"Error in LLM processing: {str(e)}")
                     raise Exception(f"Error in LLM processing: {str(e)}")
