@@ -867,7 +867,7 @@ class GeminiClient(BaseLLMClient):
         self,
         prompt_text: str,
         model: str = "models/gemini-2.5-pro-preview-03-25",
-        max_tokens: int = 200000,  # Increased from 32000 to allow for large outputs
+        max_tokens: int = 200000,  # Increased from 32000 to leverage 2M token context window
         temperature: float = 0.7,
         system_prompt: Optional[str] = None,
         thinking_budget_tokens: Optional[int] = None,
@@ -875,12 +875,12 @@ class GeminiClient(BaseLLMClient):
         """
         Generate a response from Gemini leveraging its long context capabilities and step-by-step thinking.
 
-        Optimized for Gemini 2 and 2.5's reasoning capabilities with a 2M token context window.
+        This function uses the meta_prompt structure from llm_summary_thread.py.
 
         Args:
-            prompt_text: The prompt to send to Gemini
+            prompt_text: The prompt to send to Gemini, should follow meta_prompt structure
             model: The Gemini model to use (default is 2.5 Pro Preview)
-            max_tokens: Maximum number of tokens in the response (default 200k to handle large outputs)
+            max_tokens: Maximum number of tokens in the response (default 200k to leverage 2M token context window)
             temperature: Temperature parameter (randomness)
             system_prompt: Optional system prompt to set context
             thinking_budget_tokens: Not used for Gemini but included for API compatibility
@@ -897,48 +897,17 @@ class GeminiClient(BaseLLMClient):
             }
 
         try:
-            # Create a prompt with explicit step-by-step reasoning instructions
-            # This approach works well with Gemini 2 and 2.5's reasoning abilities
-            thinking_prompt = f"""
-{prompt_text}
-
-==== RESPONSE FORMAT INSTRUCTIONS ====
-
-I'd like you to approach this task methodically using Gemini's reasoning capabilities:
-
-First, provide a section labeled "REASONING PROCESS":
-1. Break down the problem into clear components
-2. Think step-by-step through each component
-3. Consider multiple perspectives and approaches
-4. Analyze key information connections and implications
-5. Show your reasoning chain explicitly
-6. Document any important calculations or logic
-
-After you've completed your reasoning, include "==== FINAL RESPONSE ====" as a separator.
-
-Then provide your final answer that incorporates the insights from your reasoning.
-
-This approach allows you to leverage Gemini's full 2M token context window and reasoning abilities.
-"""
-
-            # Add system prompt if provided
-            if system_prompt:
-                combined_prompt = f"{system_prompt}\n\n{thinking_prompt}"
-            else:
-                combined_prompt = thinking_prompt
-
             # Set temperature for optimal reasoning quality
-            # Gemini 2.5 performs better with slightly higher temperatures for reasoning tasks
             actual_temperature = max(0.2, min(0.7, temperature))
 
             # Generate the response using the standard generate_response method
-            # Leverage Gemini's 2M token context window
+            # Pass system_prompt separately rather than combining it with prompt_text
             response = self.generate_response(
-                prompt_text=combined_prompt,
+                prompt_text=prompt_text,
                 model=model,
                 max_tokens=max_tokens,
                 temperature=actual_temperature,
-                system_prompt=None,  # Already included above
+                system_prompt=system_prompt,  # Properly pass system_prompt as a separate parameter
             )
 
             if not response["success"]:
@@ -950,36 +919,14 @@ This approach allows you to leverage Gemini's full 2M token context window and r
                     "provider": "gemini",
                 }
 
-            # Parse the response to extract reasoning and final answer
+            # Don't try to extract thinking - use the entire response as both content and thinking
             content = response["content"]
-
-            # Extract reasoning section and final answer
-            thinking = ""
-            final_answer = ""
-
-            if "==== FINAL RESPONSE ====" in content:
-                parts = content.split("==== FINAL RESPONSE ====", 1)
-
-                # Extract reasoning section
-                if "REASONING PROCESS" in parts[0]:
-                    thinking_start = parts[0].find("REASONING PROCESS")
-                    if thinking_start != -1:
-                        thinking = parts[0][thinking_start:].strip()
-                else:
-                    thinking = parts[0].strip()
-
-                # Extract final answer
-                final_answer = parts[1].strip()
-            else:
-                # If the model didn't follow the format, use the full content as the final answer
-                final_answer = content
-                thinking = "The model did not provide explicit reasoning steps."
-
+            
             # Construct the result
             result = {
                 "success": True,
-                "content": final_answer,
-                "thinking": thinking,
+                "content": content,
+                "thinking": content,  # Same content for both
                 "usage": response.get("usage", {}),
                 "model": model,
                 "provider": "gemini",

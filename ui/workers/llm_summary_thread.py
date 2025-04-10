@@ -741,7 +741,7 @@ Keep your analysis focused on factual information directly stated in the documen
                     )
 
                     # Create a meta-summary prompt
-                    meta_prompt = f"""
+                     meta_prompt= f"""
 # Document Integration Task
 
 ## Document Information
