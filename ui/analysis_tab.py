@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from llm_utils import LLMClientFactory, cached_count_tokens
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.status_panel import StatusPanel
@@ -431,7 +432,10 @@ class AnalysisTab(BaseTab):
             return
 
         # Check if results directory is selected and exists
-        if not hasattr(self, "results_output_directory") or not self.results_output_directory:
+        if (
+            not hasattr(self, "results_output_directory")
+            or not self.results_output_directory
+        ):
             QMessageBox.warning(
                 self,
                 "Missing Output Directory",
@@ -475,47 +479,6 @@ class AnalysisTab(BaseTab):
                 self,
                 "Missing Information",
                 "Please fill in both Subject Name and Date of Birth.",
-            )
-            return
-
-        # Check if the API client can be initialized
-        status_dialog = QMessageBox()
-        status_dialog.setIcon(QMessageBox.Icon.Information)
-        status_dialog.setWindowTitle("Checking LLM Availability")
-        status_dialog.setText("Checking if LLM API is available...")
-        status_dialog.setStandardButtons(QMessageBox.StandardButton.NoButton)
-        status_dialog.show()
-        QApplication.processEvents()  # Force UI update
-
-        try:
-            # Attempt to initialize the LLM client
-            from llm_utils import LLMClientFactory
-
-            client = LLMClientFactory.create_client(provider="auto")
-            
-            # Try a simple request to ensure connectivity
-            response = client.count_tokens(text="Test connection")
-            
-            if not response.get("success", False):
-                status_dialog.close()
-                QMessageBox.warning(
-                    self,
-                    "LLM API Error",
-                    f"LLM API test failed: {response.get('error', 'Unknown error')}",
-                )
-                return
-
-            status_dialog.close()
-
-        except Exception as e:
-            if "status_dialog" in locals() and status_dialog.isVisible():
-                status_dialog.close()
-
-            QMessageBox.critical(
-                self,
-                "LLM Initialization Error",
-                f"Failed to initialize LLM client: {str(e)}\n\n"
-                "Please check the API key configuration and network connectivity.",
             )
             return
 
@@ -1133,21 +1096,3 @@ class AnalysisTab(BaseTab):
 
         # Update workflow state to ensure buttons are properly enabled/disabled
         self.check_workflow_state()
-
-    def on_integrated_analysis_error(self, error, progress_dialog):
-        """Handle error in integrated analysis."""
-        # Close the progress dialog
-        if progress_dialog and progress_dialog.isVisible():
-            progress_dialog.close()
-
-        # Update workflow indicator
-        self.workflow_indicator.update_status(WorkflowStep.INTEGRATE_ANALYSIS, "error")
-
-        # Show error message
-        self.status_panel.append_details(f"Integration error: {error}")
-
-        QMessageBox.critical(
-            self,
-            "Integration Error",
-            f"An error occurred during integrated analysis:\n\n{error}",
-        )

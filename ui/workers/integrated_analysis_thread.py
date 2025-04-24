@@ -2,6 +2,7 @@
 Worker thread for generating an integrated analysis with Claude's thinking model.
 """
 
+import logging
 import os
 import time
 import traceback
@@ -9,7 +10,7 @@ import traceback
 from PyQt6.QtCore import QThread, pyqtSignal
 from PyQt6.QtWidgets import QApplication
 
-from llm_utils import LLMClientFactory
+from llm_utils import LLMClientFactory, cached_count_tokens
 
 
 class IntegratedAnalysisThread(QThread):
@@ -248,6 +249,9 @@ class IntegratedAnalysisThread(QThread):
         try:
             # Define the output file path
             integrated_file = os.path.join(self.output_dir, "integrated_analysis.md")
+            thinking_tokens_file = os.path.join(
+                self.output_dir, "integrated_analysis_thinking_tokens.md"
+            )
 
             # Check if the integrated analysis already exists
             if os.path.exists(integrated_file):
@@ -275,9 +279,9 @@ class IntegratedAnalysisThread(QThread):
 
             # Count tokens to determine which LLM to use
             self.progress_signal.emit(
-                30, "Counting tokens to select appropriate model..."
+                30, "Calculating token usage to select appropriate model..."
             )
-            token_count_result = self.llm_client.count_tokens(text=prompt)
+            token_count_result = cached_count_tokens(self.llm_client, text=prompt)
 
             use_gemini = False
             if token_count_result["success"]:
@@ -298,16 +302,75 @@ class IntegratedAnalysisThread(QThread):
                 )
 
             # Update progress
-            self.progress_signal.emit(40, "Sending for analysis...")
+            self.progress_signal.emit(
+                40, "Sending for analysis with extended thinking..."
+            )
 
             # Use specific model based on token count
             system_prompt = f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
 
-            # Use our new process_api_response method to handle timeouts, retries and errors
-            response = self.process_api_response(prompt, system_prompt, use_gemini)
+            # Use extended thinking if available, otherwise fall back to regular API call
+            if (
+                hasattr(self.llm_client, "generate_response_with_extended_thinking")
+                and not use_gemini
+            ):
+                self.progress_signal.emit(42, "Using extended thinking capabilities...")
+
+                # Set a reasonable thinking budget
+                thinking_budget_tokens = (
+                    min(16000, token_count // 2)
+                    if token_count_result["success"]
+                    else 16000
+                )
+
+                # Generate with extended thinking
+                response = self.llm_client.generate_response_with_extended_thinking(
+                    prompt_text=prompt,
+                    system_prompt=system_prompt,
+                    model="claude-3-7-sonnet-20250219",
+                    temperature=0.1,
+                    thinking_budget_tokens=thinking_budget_tokens,
+                )
+
+                # Save thinking tokens to a separate file if available
+                if (
+                    response["success"]
+                    and "thinking" in response
+                    and response["thinking"]
+                ):
+                    self.progress_signal.emit(
+                        82, "Saving thinking tokens to separate file..."
+                    )
+
+                    # Create thinking tokens content with header information
+                    thinking_content = f"""# Thinking Tokens for Integrated Analysis of {self.subject_name}
+
+## Subject Information
+- **Subject Name**: {self.subject_name}
+- **Date of Birth**: {self.subject_dob}
+- **Generated**: {time.strftime('%Y-%m-%d %H:%M:%S')}
+
+## Thinking Process
+{response["thinking"]}
+"""
+                    # Write thinking tokens to file
+                    with open(thinking_tokens_file, "w", encoding="utf-8") as f:
+                        f.write(thinking_content)
+
+                    self.progress_signal.emit(
+                        85, f"Thinking tokens saved to {thinking_tokens_file}"
+                    )
+                else:
+                    self.progress_signal.emit(
+                        82, "No thinking tokens available in the response"
+                    )
+            else:
+                # Use our process_api_response method for regular API calls or with Gemini
+                self.progress_signal.emit(42, "Using standard API request...")
+                response = self.process_api_response(prompt, system_prompt, use_gemini)
 
             # Update progress
-            self.progress_signal.emit(80, "Processing response...")
+            self.progress_signal.emit(90, "Processing response...")
 
             if not response["success"]:
                 raise Exception(
@@ -345,6 +408,11 @@ class IntegratedAnalysisThread(QThread):
             Prompt string
         """
         return f"""
+## Combined Document Summaries
+<combined_summaries>
+{combined_content}
+</combined_summaries>
+
 # Integrated Document Analysis Task
 
 ## Subject Information
@@ -355,13 +423,14 @@ class IntegratedAnalysisThread(QThread):
 {self.case_info}
 
 ## Instructions
-I'm providing you with multiple document summaries that contain information about the subject (or subjects). Please analyze all of these summaries and create a comprehensive integrated report per subject that includes:
+I'm providing you with multiple document summaries that contain information about the subject (or subjects). The summaries are from markdown versions of original PDF documents. Please analyze all of these summaries and create a comprehensive integrated report per subject that includes:
 
 1. **Executive Summary**: A clear, concise overview of the subject based on all documents (700-1000 words).
 
 2. **Comprehensive Timeline**: Create a single, unified timeline that combines all events from the individual document timelines. The timeline should:
    - Be in chronological order (oldest to newest)
    - Be formatted as a markdown table with columns for Date, Event, Significance, and Source Document Name(s)
+   - Create or preserve all markdown links to the original PDF page number in the format [Page x](./pdfs/<filename.pdf>#page=<page_number>)
    - Calculate the subject's age at each significant event when relevant (using DOB: {self.subject_dob})
    - Remove duplicate events, preserving multiple Source Document Names
    - Resolve any conflicting information if possible (noting discrepancies) - document all resolved and unresolved discrepancies in a separate section
@@ -378,8 +447,9 @@ I'm providing you with multiple document summaries that contain information abou
 
 4. **Significant Observations**: Highlight particularly noteworthy information that appears across multiple documents or seems especially relevant.
 
+5. **Create or preserve all markdown links to the original PDF page number in the format [file  name.pdf: Page x](./pdfs/<filename.pdf>#page=<page_number>)
+
 Please use your thinking capabilities to connect information across documents, identify patterns, and create a coherent narrative from these separate summaries. When information appears contradictory, note the discrepancy rather than trying to resolve it definitively.
 
-## Combined Document Summaries
-{combined_content}
+Before finalizing results, do a review for accuracy, with attention to both exact quotes and markdown links to original PDFs.
 """

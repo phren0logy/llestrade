@@ -190,7 +190,7 @@ class TestingTab(BaseTab):
             self.workflow_indicator.update_status(2, "complete")
             self.workflow_indicator.set_status_message("Ready to process")
         else:
-            self.workflow_indicator.update_status(0, "not_started")
+            self.workflow_indicator.update_status(1, "not_started")
             self.workflow_indicator.set_status_message("Select PDF and prompt files")
     
     def process_pdf(self):
@@ -212,7 +212,8 @@ class TestingTab(BaseTab):
             return
             
         # Update the workflow indicator
-        self.workflow_indicator.update_status(1, [0], "Applying prompt to PDF...")
+        self.workflow_indicator.update_status(2, "in_progress")
+        self.workflow_indicator.set_status_message("Applying prompt to PDF...")
         
         # Reset the progress bar
         self.progress_bar.setValue(0)

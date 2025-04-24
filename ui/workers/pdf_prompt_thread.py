@@ -25,6 +25,7 @@ class PDFPromptThread(QThread):
         self.prompt_text = prompt_text
         self.output_dir = output_dir
         self.result = None
+        self.thinking_budget_tokens = 16000  # Default thinking budget tokens
         
     def run(self):
         """Run the processing on the background thread."""
@@ -69,7 +70,7 @@ class PDFPromptThread(QThread):
                     max_tokens=32000,
                     temperature=1.0,  # As required by Anthropic for thinking mode
                     system_prompt=system_prompt,
-                    thinking_budget_tokens=16000  # Consistent thinking budget
+                    thinking_budget_tokens=self.thinking_budget_tokens
                 )
                 
                 # Store the result

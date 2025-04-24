@@ -8,7 +8,7 @@ import time
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
-from llm_utils import LLMClientFactory
+from llm_utils import LLMClientFactory, cached_count_tokens
 
 
 def chunk_document_with_overlap(text, client, max_chunk_size=60000, overlap=1000):
@@ -24,90 +24,143 @@ def chunk_document_with_overlap(text, client, max_chunk_size=60000, overlap=1000
     Returns:
         List of text chunks
     """
-    # Calculate a safe max chunk size accounting for summary prompt and response
-    safe_max_chunk_size = (
-        max_chunk_size - 5000
-    )  # Reserve tokens for prompt and other content
+    try:
+        # Calculate a safe max chunk size accounting for summary prompt and response
+        safe_max_chunk_size = (
+            max_chunk_size - 5000
+        )  # Reserve tokens for prompt and other content
 
-    # We'll use paragraphs as our base unit to avoid splitting mid-sentence
-    paragraphs = [p for p in text.split("\n\n") if p.strip()]
+        # We'll use paragraphs as our base unit to avoid splitting mid-sentence
+        paragraphs = [p for p in text.split("\n\n") if p.strip()]
 
-    chunks = []
-    current_paragraphs = []
-    overlap_paragraphs = []
+        # Early exit for small documents - estimate tokens first using characters
+        # Average of 4 chars per token is a reasonable estimation for English text
+        estimated_total_tokens = len(text) // 4
+        if estimated_total_tokens < safe_max_chunk_size:
+            # If it's likely small enough, verify with a single API call
+            token_count_result = cached_count_tokens(client, text=text)
+            if (
+                token_count_result.get("success", False)
+                and token_count_result.get("token_count", float("inf"))
+                < safe_max_chunk_size
+            ):
+                return [text]  # Return the entire text as a single chunk
 
-    i = 0
-    while i < len(paragraphs):
-        # Add the current paragraph
-        current_paragraphs.append(paragraphs[i])
+        chunks = []
+        current_paragraphs = []
+        overlap_paragraphs = []
 
-        # Check if we have enough paragraphs to test the size
-        if len(current_paragraphs) % 10 == 0 or i == len(paragraphs) - 1:
-            current_text = "\n\n".join(current_paragraphs)
+        # Track estimated token count to reduce API calls
+        estimated_current_tokens = 0
+        check_interval = 20  # Check tokens every 20 paragraphs instead of 10
 
-            # Try to count tokens accurately
-            token_count_result = client.count_tokens(text=current_text)
+        i = 0
+        while i < len(paragraphs):
+            # Add the current paragraph
+            current_paragraph = paragraphs[i]
+            current_paragraphs.append(current_paragraph)
 
-            # Get token count or estimate if counting failed
-            if token_count_result["success"] and "token_count" in token_count_result:
-                token_count = token_count_result["token_count"]
-            else:
-                # Fallback to a character-based estimation (more conservative than word-based)
-                token_count = len(current_text) // 3  # Roughly 3 chars per token
+            # Update estimated token count
+            estimated_current_tokens += len(current_paragraph) // 4
 
-            # If we've exceeded the safe limit, create a chunk
-            if token_count > safe_max_chunk_size and len(current_paragraphs) > 1:
-                # Remove the last paragraph that pushed us over the limit
-                if i < len(paragraphs) - 1 or token_count > max_chunk_size:
-                    current_paragraphs.pop()
-                    i -= 1  # Adjust index to process this paragraph again
+            # Only check actual token count when necessary
+            should_check = (
+                len(current_paragraphs) % check_interval == 0
+                or i == len(paragraphs) - 1
+                or estimated_current_tokens >= safe_max_chunk_size * 0.8
+            )  # Check when we're near the limit
 
-                # Create chunk from current paragraphs
-                chunk_text = "\n\n".join(current_paragraphs)
-                chunks.append(chunk_text)
+            if should_check:
+                current_text = "\n\n".join(current_paragraphs)
 
-                # Prepare overlap for next chunk (up to 5 paragraphs)
-                overlap_size = min(len(current_paragraphs), 5)
-                overlap_paragraphs = current_paragraphs[-overlap_size:]
+                # Start with character-based estimation
+                char_based_estimate = len(current_text) // 4
 
-                # Check if the overlap text itself is too large
-                overlap_text = "\n\n".join(overlap_paragraphs)
-                overlap_token_result = client.count_tokens(text=overlap_text)
-
-                # If overlap is too large or token counting fails, reduce it
-                if (
-                    not overlap_token_result["success"]
-                    or overlap_token_result.get("token_count", safe_max_chunk_size)
-                    > safe_max_chunk_size // 2
-                ):
-                    # Try with fewer paragraphs, down to just one
-                    for test_size in range(overlap_size - 1, 0, -1):
-                        test_paragraphs = current_paragraphs[-test_size:]
-                        test_text = "\n\n".join(test_paragraphs)
-                        test_result = client.count_tokens(text=test_text)
-
-                        if (
-                            test_result["success"]
-                            and test_result["token_count"] <= safe_max_chunk_size // 2
-                        ):
-                            overlap_paragraphs = test_paragraphs
-                            break
+                # Only use the API if we're close to the limit based on estimation
+                if char_based_estimate > safe_max_chunk_size * 0.7:
+                    # Now count tokens accurately
+                    token_count_result = cached_count_tokens(client, text=current_text)
+                    if (
+                        token_count_result["success"]
+                        and "token_count" in token_count_result
+                    ):
+                        token_count = token_count_result["token_count"]
+                        # Update our estimation ratio for future estimates
+                        if char_based_estimate > 0:
+                            char_token_ratio = token_count / char_based_estimate
+                            # Apply the learned ratio to our estimated count
+                            estimated_current_tokens = int(
+                                estimated_current_tokens * char_token_ratio
+                            )
                     else:
-                        # Even a single paragraph is too big, use an empty list
-                        overlap_paragraphs = []
+                        # If token counting fails, use character-based estimation
+                        token_count = char_based_estimate
+                else:
+                    # Not close to limit, just use estimation
+                    token_count = char_based_estimate
 
-                # Start a new chunk with the (potentially reduced) overlap paragraphs
-                current_paragraphs = overlap_paragraphs.copy()
+                # If we've exceeded the safe limit, create a chunk
+                if token_count > safe_max_chunk_size and len(current_paragraphs) > 1:
+                    # Remove the last paragraph that pushed us over the limit
+                    if i < len(paragraphs) - 1 or token_count > max_chunk_size:
+                        current_paragraphs.pop()
+                        i -= 1  # Adjust index to process this paragraph again
 
-        i += 1
+                    # Create chunk from current paragraphs
+                    chunk_text = "\n\n".join(current_paragraphs)
+                    chunks.append(chunk_text)
 
-    # Add the last chunk if it wasn't already added
-    if current_paragraphs and (
-        not chunks or "\n\n".join(current_paragraphs) != chunks[-1]
-    ):
-        chunks.append("\n\n".join(current_paragraphs))
+                    # Prepare overlap for next chunk (up to 5 paragraphs)
+                    overlap_size = min(len(current_paragraphs), 5)
+                    overlap_paragraphs = current_paragraphs[-overlap_size:]
 
-    return chunks
+                    # Use character estimation for overlap size instead of API call
+                    overlap_text = "\n\n".join(overlap_paragraphs)
+                    overlap_token_estimate = len(overlap_text) // 4
+
+                    # Only make an API call if the estimated overlap is potentially too large
+                    if overlap_token_estimate > safe_max_chunk_size // 3:
+                        overlap_token_result = cached_count_tokens(
+                            client, text=overlap_text
+                        )
+                        if (
+                            not overlap_token_result["success"]
+                            or overlap_token_result.get(
+                                "token_count", safe_max_chunk_size
+                            )
+                            > safe_max_chunk_size // 2
+                        ):
+                            # Reduce overlap size based on character counts
+                            # Try with fewer paragraphs but avoid repeated API calls
+                            for test_size in range(overlap_size - 1, 0, -1):
+                                test_paragraphs = current_paragraphs[-test_size:]
+                                test_text = "\n\n".join(test_paragraphs)
+                                # Use character estimation for quick checks
+                                if len(test_text) // 4 <= safe_max_chunk_size // 2:
+                                    overlap_paragraphs = test_paragraphs
+                                    break
+                            else:
+                                # Even a single paragraph is too big, use an empty list
+                                overlap_paragraphs = []
+
+                    # Start a new chunk with the overlap paragraphs
+                    current_paragraphs = overlap_paragraphs.copy()
+                    estimated_current_tokens = len("\n\n".join(current_paragraphs)) // 4
+
+            i += 1
+
+        # Add the last chunk if it wasn't already added
+        if current_paragraphs and (
+            not chunks or "\n\n".join(current_paragraphs) != chunks[-1]
+        ):
+            chunks.append("\n\n".join(current_paragraphs))
+
+        return chunks
+
+    except Exception as e:
+        logging.error(f"Error in chunk_document_with_overlap: {str(e)}")
+        # Return the original text as a single chunk in case of error
+        return [text]
 
 
 class LLMSummaryThread(QThread):
@@ -133,12 +186,17 @@ class LLMSummaryThread(QThread):
     def _initialize_llm_client(self):
         """Initialize LLM client with better error handling."""
         try:
+            # Skip initialization if client already exists
+            if self.llm_client:
+                self.progress_signal.emit(0, "Using existing LLM client")
+                return
+
             self.progress_signal.emit(0, "Initializing LLM client...")
             from llm_utils import LLMClientFactory
 
             self.llm_client = LLMClientFactory.create_client(provider="auto")
             # Test connection by sending a simple request
-            test_result = self.llm_client.count_tokens(text="Test connection")
+            test_result = cached_count_tokens(self.llm_client, text="Test connection")
             if not test_result["success"]:
                 error_msg = f"LLM client initialization test failed: {test_result.get('error', 'Unknown error')}"
                 logging.error(error_msg)
@@ -158,13 +216,6 @@ class LLMSummaryThread(QThread):
                 self._initialize_llm_client()
                 if not self.llm_client:
                     raise Exception("Failed to initialize LLM client")
-
-            # Check API connectivity
-            connectivity_check = self.llm_client.count_tokens(text="Connectivity test")
-            if not connectivity_check["success"]:
-                raise Exception(
-                    f"LLM API connectivity issue: {connectivity_check.get('error', 'Unknown error')}"
-                )
 
             # Send initial progress
             self.progress_signal.emit(
@@ -316,7 +367,7 @@ class LLMSummaryThread(QThread):
 ## Document Information
 - **Subject Name**: {self.subject_name}
 - **Date of Birth**: {self.subject_dob}
-- **Document**: {document_name}
+- **Original Document**: (The {document_name} is a markdown file that was converted from a PDF. Change the extension from .md to .pdf)
 
 ## Case Background
 {self.case_info}
@@ -339,10 +390,12 @@ Please analyze the document content above, wrapped in "document-content" tags, a
 - Adverse life events
 - A timeline of events in a markdown table format with columns for Date, Event, and Significance
 
-Include the page number for each of the items above.
+Include the page number for all extracted items.
+Create a markdown link to [filename.pdf: Page x](./pdfs/<filename.pdf>#page=<page_number>) for each page number referenced.
+When a range of pages is referenced, link the first page but include the range in the text.
 
 ## Timeline Instructions
-- Create a timeline of events in a markdown table format with columns for Date, Event, and Significance
+- Create a timeline of events in a markdown table format with columns for Date, Event, and Significance, and Page Number
 - Using the subject's date of birth ({self.subject_dob}), calculate the subject's age at each event when relevant
 - When exact dates aren't provided, estimate years when possible and mark them with "(est.)"
 - Organize the timeline chronologically with the most recent events at the bottom
@@ -350,6 +403,8 @@ Include the page number for each of the items above.
 - If there are multiple events with the same date and significance, list them in the order they occurred
 
 Keep your analysis focused on factual information directly stated in the document.
+
+Before finalizing results, do a review for accuracy, with attention to exact quotes and markdown links to original PDFs.
 """
         self.progress_signal.emit(0, f"Prompt created: {len(prompt)} characters")
         return prompt
@@ -360,8 +415,26 @@ Keep your analysis focused on factual information directly stated in the documen
             self.progress_signal.emit(0, "LLM client not initialized")
             return False
 
+        # Check if the client is initialized based on the is_initialized property
+        # This avoids making an API call to test availability
+        if (
+            hasattr(self.llm_client, "is_initialized")
+            and self.llm_client.is_initialized
+        ):
+            # Get provider information
+            if hasattr(self.llm_client, "provider"):
+                self.progress_signal.emit(
+                    0, f"Using {self.llm_client.provider} API for summarization"
+                )
+            else:
+                self.progress_signal.emit(
+                    0, "Using default API provider for summarization"
+                )
+            return True
+
+        # Fallback to actually testing the API if we can't determine initialization status
         try:
-            test_result = self.llm_client.count_tokens(text="Test connection")
+            test_result = cached_count_tokens(self.llm_client, text="Test connection")
             if not test_result["success"]:
                 self.progress_signal.emit(
                     0,
@@ -371,7 +444,9 @@ Keep your analysis focused on factual information directly stated in the documen
 
             # Check provider information using BaseLLMClient approach
             if hasattr(self.llm_client, "provider"):
-                self.progress_signal.emit(0, f"Using {self.llm_client.provider} API for summarization")
+                self.progress_signal.emit(
+                    0, f"Using {self.llm_client.provider} API for summarization"
+                )
             else:
                 self.progress_signal.emit(
                     0, "Using default API provider for summarization"
@@ -390,16 +465,15 @@ Keep your analysis focused on factual information directly stated in the documen
 
         while retry_count < max_retries:
             try:
-                # First verify the LLM is available
-                if not self.test_llm_availability():
-                    # Try reinitializing
+                # First check if the LLM client is properly initialized
+                if not self.llm_client:
+                    # Try reinitializing if client doesn't exist
                     self.progress_signal.emit(
-                        0, "LLM API not available, attempting to reinitialize"
+                        0, "LLM API not initialized, attempting to initialize"
                     )
                     self._initialize_llm_client()
-
-                    if not self.test_llm_availability():
-                        raise Exception("LLM API not available after reinitialization")
+                    if not self.llm_client:
+                        raise Exception("Failed to initialize LLM client")
 
                 # Log request details
                 provider = getattr(self.llm_client, "provider", "unknown")
@@ -620,32 +694,47 @@ Keep your analysis focused on factual information directly stated in the documen
 
             # Check if file is large enough to need chunking
             try:
-                self.progress_signal.emit(0, f"Counting tokens in document")
-                token_count_result = self.llm_client.count_tokens(text=markdown_content)
-                if not token_count_result["success"]:
-                    self.progress_signal.emit(
-                        0,
-                        f"Token counting failed: {token_count_result.get('error', 'Unknown error')}",
+                # Start with character-based estimation to avoid unnecessary API calls
+                self.progress_signal.emit(0, f"Estimating document size")
+                estimated_tokens = (
+                    len(markdown_content) // 4
+                )  # Reasonable approximation
+                self.progress_signal.emit(
+                    0, f"Estimated token count: ~{estimated_tokens}"
+                )
+
+                # Only count tokens with API if the document might be near our chunking threshold
+                if estimated_tokens > 25000:  # Lower threshold for safety
+                    self.progress_signal.emit(0, f"Counting tokens in document")
+                    token_count_result = cached_count_tokens(
+                        self.llm_client, text=markdown_content
                     )
-                    # Use character-based estimation as fallback
-                    estimated_tokens = len(markdown_content) // 4
-                    self.progress_signal.emit(
-                        0,
-                        f"Using character-based token estimate: ~{estimated_tokens} tokens",
-                    )
-                    token_count = {"success": True, "token_count": estimated_tokens}
+                    if not token_count_result["success"]:
+                        self.progress_signal.emit(
+                            0,
+                            f"Token counting failed: {token_count_result.get('error', 'Unknown error')}",
+                        )
+                        # Use character-based estimation as fallback
+                        token_count = {"success": True, "token_count": estimated_tokens}
+                    else:
+                        token_count = token_count_result
+                        self.progress_signal.emit(
+                            0, f"File token count: {token_count['token_count']}"
+                        )
                 else:
-                    token_count = token_count_result
+                    # Small document, use estimation
+                    token_count = {"success": True, "token_count": estimated_tokens}
                     self.progress_signal.emit(
-                        0, f"File token count: {token_count['token_count']}"
+                        0,
+                        f"Using character-based token estimate for small document: ~{estimated_tokens} tokens",
                     )
             except Exception as e:
-                self.progress_signal.emit(0, f"Error counting tokens: {str(e)}")
+                self.progress_signal.emit(0, f"Error estimating tokens: {str(e)}")
                 # Use character-based estimation as fallback
                 estimated_tokens = len(markdown_content) // 4
                 self.progress_signal.emit(
                     0,
-                    f"Using character-based token estimate: ~{estimated_tokens} tokens",
+                    f"Using fallback character-based token estimate: ~{estimated_tokens} tokens",
                 )
                 token_count = {"success": True, "token_count": estimated_tokens}
 
@@ -653,7 +742,7 @@ Keep your analysis focused on factual information directly stated in the documen
                 # Document is large, use chunking with specified parameters (60000 tokens, 1000 overlap)
                 self.progress_signal.emit(
                     0,
-                    f"Document {document_name} is large. Chunking with 60000 token size and 1000 token overlap.",
+                    f"Document {document_name} is large ({token_count['token_count']} tokens) and needs chunking.",
                 )
 
                 try:
@@ -673,49 +762,81 @@ Keep your analysis focused on factual information directly stated in the documen
 
                     # Process each chunk separately
                     chunk_summaries = []
-                    for i, chunk in enumerate(chunks):
+
+                    # If we only have one chunk and it's the same size as the original document,
+                    # then skip the chunking process entirely and process as a single document
+                    if (
+                        len(chunks) == 1
+                        and len(chunks[0]) >= len(markdown_content) * 0.95
+                    ):  # 95% to account for any minor text processing
                         self.progress_signal.emit(
-                            0, f"Processing chunk {i+1}/{len(chunks)}..."
+                            0,
+                            f"Document {document_name} is large ({token_count['token_count']} tokens) but fits within a single chunk. Processing as one unit.",
                         )
-
-                        # Create a prompt for this specific chunk
-                        chunk_prompt = self.create_summary_prompt(
-                            f"{document_name} (chunk {i+1}/{len(chunks)})", chunk
+                        # Switch to single-document processing
+                        # Create the prompt
+                        self.progress_signal.emit(0, f"Creating prompt for document")
+                        prompt = self.create_summary_prompt(
+                            document_name, markdown_content
                         )
-
-                        # Send to LLM for summarization with retries
-                        chunk_system_prompt = f"You are analyzing chunk {i+1}/{len(chunks)} of a document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
-
                         self.progress_signal.emit(
-                            0, f"Summarizing chunk {i+1}/{len(chunks)}..."
+                            0, f"Created prompt: {len(prompt)} characters"
                         )
 
-                        # Use Claude for each chunk summary
-                        chunk_content = self.process_api_response(
-                            chunk_prompt, chunk_system_prompt
-                        )
+                        # Process the API request with detailed logging
+                        system_prompt = f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
 
-                        # Store the chunk summary
-                        chunk_summaries.append(
-                            f"## Chunk {i+1}/{len(chunks)} Summary\n\n{chunk_content}"
-                        )
-
+                        # Send to LLM for summarization
+                        final_content = self.process_api_response(prompt, system_prompt)
+                    else:
+                        # Actually process multiple chunks
                         self.progress_signal.emit(
-                            0, f"Successfully summarized chunk {i+1}/{len(chunks)}"
+                            0, f"Processing document with {len(chunks)} distinct chunks"
                         )
 
-                    # Combine all chunk summaries into a single text
-                    self.progress_signal.emit(0, "Combining chunk summaries...")
-                    combined_chunks = "\n\n".join(chunk_summaries)
+                        for i, chunk in enumerate(chunks):
+                            self.progress_signal.emit(
+                                0, f"Processing chunk {i+1}/{len(chunks)}..."
+                            )
 
-                    # Combine the summaries using Anthropic's extended thinking functionality
-                    self.progress_signal.emit(
-                        0,
-                        "Using extended thinking to create integrated summary...",
-                    )
+                            # Create a prompt for this specific chunk
+                            chunk_prompt = self.create_summary_prompt(
+                                f"{document_name} (chunk {i+1}/{len(chunks)})", chunk
+                            )
 
-                    # Create a meta-summary prompt
-                    meta_prompt = f"""
+                            # Send to LLM for summarization with retries
+                            chunk_system_prompt = f"You are analyzing chunk {i+1}/{len(chunks)} of a document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
+
+                            self.progress_signal.emit(
+                                0, f"Summarizing chunk {i+1}/{len(chunks)}..."
+                            )
+
+                            # Use Claude for each chunk summary
+                            chunk_content = self.process_api_response(
+                                chunk_prompt, chunk_system_prompt
+                            )
+
+                            # Store the chunk summary
+                            chunk_summaries.append(
+                                f"## Chunk {i+1}/{len(chunks)} Summary\n\n{chunk_content}"
+                            )
+
+                            self.progress_signal.emit(
+                                0, f"Successfully summarized chunk {i+1}/{len(chunks)}"
+                            )
+
+                        # Combine all chunk summaries into a single text
+                        self.progress_signal.emit(0, "Combining chunk summaries...")
+                        combined_chunks = "\n\n".join(chunk_summaries)
+
+                        # Combine the summaries using Anthropic's extended thinking functionality
+                        self.progress_signal.emit(
+                            0,
+                            "Using extended thinking to create integrated summary...",
+                        )
+
+                        # Create a meta-summary prompt
+                        meta_prompt = f"""
 # Document Integration Task
 
 ## Document Information
@@ -731,11 +852,11 @@ Below are the summaries for each chunk of the document.
 Please analyze all the chunk summaries and create a unified, coherent summary of the entire document with the following elements:
 
 1. **Document Overview**: Provide an overall summary of what the document contains
-2. **Citations**: Include the  page number where possible for each extracted piece of information
-2. **Key Facts**: Extract key facts and information about the subject from across all chunks
-3. **Timeline**: Consolidate any timeline information from the chunks into a single, chronological timeline
-4. **Major Findings**: Identify significant findings, patterns, or inconsistencies across the document
-5. **Integration**: Use your thinking capabilities to connect information across chunks, identify overarching themes, and create a cohesive summary
+2. **Citations**: Include the file name and page number where possible for each extracted piece of information. Create or retain a markdown link to ./pdfs/<filename.pdf>#page=<page_number> for each citation.
+3. **Key Facts**: Extract key facts and information about the subject from across all chunks
+4. **Timeline**: Consolidate any timeline information from the chunks into a single, chronological timeline
+5. **Major Findings**: Identify significant findings, patterns, or inconsistencies across the document
+6. **Integration**: Use your thinking capabilities to connect information across chunks, identify overarching themes, and create a cohesive summary
 
 Use extended thinking to work through the document summaries systematically before producing your final response.
 
@@ -743,74 +864,78 @@ Use extended thinking to work through the document summaries systematically befo
 {combined_chunks}
 """
 
-                    # Check if we should use extended thinking for complex documents
-                    # Specifically with Gemini
-                    provider = getattr(self.llm_client, "provider", "unknown")
-                    use_extended_thinking = provider == "gemini" and token_count["token_count"] > 5000
-
-                    if use_extended_thinking:
-                        self.progress_signal.emit(
-                            0, "Using extended thinking capability for complex document"
+                        # Check if we should use extended thinking for complex documents
+                        provider = getattr(self.llm_client, "provider", "unknown")
+                        use_extended_thinking = (
+                            True  # Always use extended thinking regardless of provider
                         )
-                        
-                        # Check if we have generate_response_with_extended_thinking method
-                        if hasattr(self.llm_client, "generate_response_with_extended_thinking"):
-                            self.progress_signal.emit(
-                                0, "Generating response with extended thinking"
-                            )
-                            
-                            # Generate with step-by-step thinking
-                            thinking_response = self.llm_client.generate_response_with_extended_thinking(
-                                prompt_text=meta_prompt,
-                                system_prompt=f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
-                                temperature=0.2,
-                            )
-                            
-                            if thinking_response["success"]:
-                                # If the Gemini thinking was successful, save it to a file
-                                if "thinking" in thinking_response and thinking_response["thinking"]:
-                                    # Create a file for the thinking process
-                                    thinking_file = summary_file.replace(
-                                        ".md", "-thinking-process.txt"
-                                    )
-                                    with open(thinking_file, "w", encoding="utf-8") as f:
-                                        f.write(thinking_response["thinking"])
-                                    
-                                    self.progress_signal.emit(
-                                        0, f"Saved Gemini reasoning process to {thinking_file}"
-                                    )
-                                
-                                final_content = thinking_response["content"]
-                            else:
-                                # If extended thinking fails, fall back to regular generation
-                                self.progress_signal.emit(
-                                    0, 
-                                    f"Extended thinking failed: {thinking_response.get('error', 'Unknown error')}. Falling back to standard generation."
-                                )
-                                final_content = self.process_api_response(meta_prompt, f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}")
-                        else:
-                            # Fall back to standard generation
-                            self.progress_signal.emit(
-                                0, "Extended thinking not available, using standard generation"
-                            )
-                            final_content = self.process_api_response(meta_prompt, f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}")
-                    else:
-                        # Standard generation for normal documents
-                        final_content = self.process_api_response(meta_prompt, f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}")
 
-                    self.progress_signal.emit(
-                        0,
-                        f"Successfully generated integrated summary from {len(chunks)} chunks",
-                    )
+                        if use_extended_thinking:
+                            self.progress_signal.emit(
+                                0,
+                                "Using extended thinking capability for complex document",
+                            )
+
+                            # Check if we have generate_response_with_extended_thinking method
+                            if hasattr(
+                                self.llm_client,
+                                "generate_response_with_extended_thinking",
+                            ):
+                                self.progress_signal.emit(
+                                    0, "Generating response with extended thinking"
+                                )
+
+                                # Generate with step-by-step thinking
+                                thinking_response = self.llm_client.generate_response_with_extended_thinking(
+                                    prompt_text=meta_prompt,
+                                    system_prompt=f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
+                                    temperature=0.2,
+                                )
+
+                                if thinking_response["success"]:
+                                    # Just use the content, don't save thinking tokens to file
+                                    final_content = thinking_response["content"]
+                                else:
+                                    # If extended thinking fails, fall back to regular generation
+                                    self.progress_signal.emit(
+                                        0,
+                                        f"Extended thinking failed: {thinking_response.get('error', 'Unknown error')}. Falling back to standard generation.",
+                                    )
+                                    final_content = self.process_api_response(
+                                        meta_prompt,
+                                        f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
+                                    )
+                            else:
+                                # Fall back to standard generation
+                                self.progress_signal.emit(
+                                    0,
+                                    "Extended thinking not available, using standard generation",
+                                )
+                                final_content = self.process_api_response(
+                                    meta_prompt,
+                                    f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
+                                )
+                        else:
+                            # Standard generation for normal documents
+                            final_content = self.process_api_response(
+                                meta_prompt,
+                                f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}",
+                            )
+
+                        self.progress_signal.emit(
+                            0,
+                            f"Successfully generated integrated summary from {len(chunks)} chunks",
+                        )
 
                 except Exception as e:
                     self.progress_signal.emit(0, f"Error in chunk processing: {str(e)}")
                     raise Exception(f"Error in chunk processing: {str(e)}")
+
             else:
                 # Document is small enough for a single chunk
                 self.progress_signal.emit(
                     0,
-                    f"Document {document_name} is of manageable size. Processing as a single unit.",
+                    f"Document {document_name} is of manageable size. Processing as one unit.",
                 )
 
                 try:
@@ -845,55 +970,51 @@ Use extended thinking to work through the document summaries systematically befo
                     self.progress_signal.emit(0, f"Using {provider} API")
 
                     # Check if we should use extended thinking for complex documents
-                    # Specifically with Gemini
-                    use_extended_thinking = provider == "gemini" and token_count["token_count"] > 5000
+                    use_extended_thinking = (
+                        True  # Always use extended thinking regardless of provider
+                    )
 
                     if use_extended_thinking:
                         self.progress_signal.emit(
-                            0, "Using extended thinking capability for complex document"
+                            0, "Using extended thinking capability for document"
                         )
-                        
+
                         # Check if we have generate_response_with_extended_thinking method
-                        if hasattr(self.llm_client, "generate_response_with_extended_thinking"):
+                        if hasattr(
+                            self.llm_client, "generate_response_with_extended_thinking"
+                        ):
                             self.progress_signal.emit(
                                 0, "Generating response with extended thinking"
                             )
-                            
+
                             # Generate with step-by-step thinking
                             thinking_response = self.llm_client.generate_response_with_extended_thinking(
                                 prompt_text=prompt,
                                 system_prompt=system_prompt,
                                 temperature=0.2,
                             )
-                            
+
                             if thinking_response["success"]:
-                                # If the Gemini thinking was successful, save it to a file
-                                if "thinking" in thinking_response and thinking_response["thinking"]:
-                                    # Create a file for the thinking process
-                                    thinking_file = summary_file.replace(
-                                        ".md", "-thinking-process.txt"
-                                    )
-                                    with open(thinking_file, "w", encoding="utf-8") as f:
-                                        f.write(thinking_response["thinking"])
-                                    
-                                    self.progress_signal.emit(
-                                        0, f"Saved Gemini reasoning process to {thinking_file}"
-                                    )
-                                
+                                # Just use the content, don't save thinking tokens to file
                                 final_content = thinking_response["content"]
                             else:
                                 # If extended thinking fails, fall back to regular generation
                                 self.progress_signal.emit(
-                                    0, 
-                                    f"Extended thinking failed: {thinking_response.get('error', 'Unknown error')}. Falling back to standard generation."
+                                    0,
+                                    f"Extended thinking failed: {thinking_response.get('error', 'Unknown error')}. Falling back to standard generation.",
                                 )
-                                final_content = self.process_api_response(prompt, system_prompt)
+                                final_content = self.process_api_response(
+                                    prompt, system_prompt
+                                )
                         else:
                             # Fall back to standard generation
                             self.progress_signal.emit(
-                                0, "Extended thinking not available, using standard generation"
+                                0,
+                                "Extended thinking not available, using standard generation",
                             )
-                            final_content = self.process_api_response(prompt, system_prompt)
+                            final_content = self.process_api_response(
+                                prompt, system_prompt
+                            )
                     else:
                         # Standard generation for normal documents
                         final_content = self.process_api_response(prompt, system_prompt)

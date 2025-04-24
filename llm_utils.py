@@ -8,6 +8,7 @@ import base64
 import logging
 import os
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -17,6 +18,63 @@ from dotenv import load_dotenv
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# Token counting cache to reduce redundant API calls
+_TOKEN_COUNT_CACHE = {}
+_MAX_CACHE_SIZE = 1000
+
+# LRU cache for token counting - use a dictionary to track cache hits and misses
+_LRU_CACHE_STATS = {"hits": 0, "misses": 0}
+
+
+def cached_count_tokens(client, text=None, messages=None):
+    """
+    Count tokens with caching to reduce redundant API calls.
+
+    Args:
+        client: LLM client instance with count_tokens method
+        text: Text to count tokens for
+        messages: Messages to count tokens for
+
+    Returns:
+        Token count result dictionary from the client
+    """
+    # Create a cache key based on content
+    cache_key = None
+    if text is not None:
+        cache_key = f"text:{hash(text)}"
+    elif messages is not None:
+        # Convert messages to a stable string representation for hashing
+        msg_str = str(messages)
+        cache_key = f"messages:{hash(msg_str)}"
+
+    # Return cached result if available
+    if cache_key and cache_key in _TOKEN_COUNT_CACHE:
+        _LRU_CACHE_STATS["hits"] += 1
+        # Move this item to the end of the cache (most recently used)
+        result = _TOKEN_COUNT_CACHE.pop(cache_key)
+        _TOKEN_COUNT_CACHE[cache_key] = result
+        return result
+
+    # Cache miss
+    _LRU_CACHE_STATS["misses"] += 1
+
+    # Get fresh count if not in cache
+    result = client.count_tokens(text=text, messages=messages)
+
+    # Cache successful results
+    if cache_key and result.get("success", False):
+        # If cache is full, remove the oldest item (first in the dict)
+        if len(_TOKEN_COUNT_CACHE) >= _MAX_CACHE_SIZE:
+            # Remove the oldest item (first key)
+            oldest_key = next(iter(_TOKEN_COUNT_CACHE))
+            _TOKEN_COUNT_CACHE.pop(oldest_key)
+
+        # Add new result to cache
+        _TOKEN_COUNT_CACHE[cache_key] = result
+
+    return result
+
 
 # -----------------------
 # Base LLM Client Class
@@ -403,11 +461,28 @@ class AnthropicClient(BaseLLMClient):
                     and block.text is not None
                 ):
                     content += block.text
+                elif (
+                    block.type == "thinking"
+                    and hasattr(block, "thinking")
+                    and block.thinking is not None
+                ):
+                    thinking += block.thinking
+                elif block.type == "redacted_thinking" and hasattr(block, "data"):
+                    has_redacted_thinking = True
+
+            # Add note about redacted thinking if present
+            if has_redacted_thinking:
+                redacted_note = "\n\n[NOTE: Some thinking was flagged by safety systems and encrypted.]\n\n"
+                if thinking:
+                    thinking += redacted_note
+                else:
+                    thinking = redacted_note
 
             # Construct the result
             result = {
                 "success": True,
                 "content": content,
+                "thinking": thinking,
                 "usage": {
                     "input_tokens": response.usage.input_tokens,
                     "output_tokens": response.usage.output_tokens,
@@ -539,6 +614,122 @@ class AnthropicClient(BaseLLMClient):
             return {
                 "success": False,
                 "error": f"Error with thinking: {str(e)}",
+                "content": None,
+                "thinking": None,
+            }
+
+    def generate_response_with_pdf_and_thinking(
+        self,
+        prompt_text: str,
+        pdf_file_path: str,
+        model: str = "claude-3-7-sonnet-20250219",
+        max_tokens: int = 32000,
+        temperature: float = 1.0,
+        system_prompt: Optional[str] = None,
+        thinking_budget_tokens: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Generate a response from Claude for a given prompt and PDF file with extended thinking enabled."""
+        if not self.is_initialized:
+            return {
+                "success": False,
+                "error": "Anthropic client not initialized - required for PDF extended thinking",
+                "content": None,
+                "thinking": None,
+            }
+        try:
+            # Verify the PDF file exists
+            if not os.path.exists(pdf_file_path):
+                raise FileNotFoundError(f"PDF file not found: {pdf_file_path}")
+
+            # Read the PDF file
+            with open(pdf_file_path, "rb") as f:
+                pdf_data = f.read()
+
+            # Use default thinking budget if not provided
+            if thinking_budget_tokens is None:
+                thinking_budget_tokens = self.thinking_budget_tokens
+            # Ensure thinking budget is less than max_tokens
+            if thinking_budget_tokens >= max_tokens:
+                thinking_budget_tokens = max_tokens - 1000
+
+            # Prepare message parameters with PDF and thinking enabled
+            message_params = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": thinking_budget_tokens,
+                },
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt_text},
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "application/pdf",
+                                    "data": base64.b64encode(pdf_data).decode("utf-8"),
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+            if system_prompt is None:
+                message_params["system"] = self.default_system_prompt
+            else:
+                message_params["system"] = system_prompt
+
+            # Create the message
+            response = self.client.messages.create(
+                **message_params,
+                timeout=self.timeout,
+            )
+
+            # Extract content and thinking from response
+            content = ""
+            thinking = ""
+            has_redacted_thinking = False
+            for block in response.content:
+                if block.type == "text" and hasattr(block, "text") and block.text is not None:
+                    content += block.text
+                elif block.type == "thinking" and hasattr(block, "thinking") and block.thinking is not None:
+                    thinking += block.thinking
+                elif block.type == "redacted_thinking" and hasattr(block, "data"):
+                    has_redacted_thinking = True
+
+            if has_redacted_thinking:
+                redacted_note = "\n\n[NOTE: Some thinking was flagged by safety systems and encrypted.]\n\n"
+                if thinking:
+                    thinking += redacted_note
+                else:
+                    thinking = redacted_note
+
+            # Construct usage
+            usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            }
+
+            # Construct the result
+            result = {
+                "success": True,
+                "content": content,
+                "thinking": thinking,
+                "usage": usage,
+                "model": model,
+                "provider": "anthropic",
+            }
+            return result
+
+        except Exception as e:
+            logging.error(f"Error with PDF extended thinking: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Error with PDF extended thinking: {str(e)}",
                 "content": None,
                 "thinking": None,
             }
@@ -921,7 +1112,7 @@ class GeminiClient(BaseLLMClient):
 
             # Don't try to extract thinking - use the entire response as both content and thinking
             content = response["content"]
-            
+
             # Construct the result
             result = {
                 "success": True,

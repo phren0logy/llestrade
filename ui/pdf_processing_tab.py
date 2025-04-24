@@ -366,13 +366,13 @@ class PDFProcessingTab(BaseTab):
         progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
         progress_dialog.show()
         
-        # Create and start the test thread
-        from pdf_utils import test_azure_connection_async
+        # Import the correct test function
+        from pdf_utils import test_azure_connection as azure_test_func
         
         # Test the connection
         try:
             progress_dialog.setValue(30)
-            result = test_azure_connection_async(azure_endpoint, azure_key)
+            result = azure_test_func(azure_endpoint, azure_key)
             success = result.get('success', False)
             message = result.get('message', 'Unknown result')
             
@@ -411,73 +411,66 @@ class PDFProcessingTab(BaseTab):
 
     def process_pdfs_with_azure(self):
         """Process the selected PDF files with Azure Document Intelligence."""
-        # Get Azure credentials
+        # Get the Azure credentials
         azure_endpoint = self.azure_endpoint_input.text().strip()
         azure_key = self.azure_key_input.text().strip()
         
-        # Use environment variables if inputs are empty
-        if not azure_endpoint:
-            azure_endpoint = os.getenv("AZURE_ENDPOINT")
-        if not azure_key:
-            azure_key = os.getenv("AZURE_KEY")
-            
-        # Validate inputs
+        # Check for Azure credentials
         if not azure_endpoint or not azure_key:
-            QMessageBox.warning(
+            QMessageBox.critical(
                 self,
-                "Missing Azure Credentials",
-                "Please enter Azure endpoint and API key to use Azure Document Intelligence.",
+                "Azure Credentials Missing",
+                "Please enter your Azure Document Intelligence endpoint and API key.",
             )
             return
-            
-        if not self.pdf_files:
-            QMessageBox.warning(
-                self,
-                "No PDFs Selected",
-                "Please select PDF files to process.",
-            )
-            return
-            
-        if not self.output_directory:
-            QMessageBox.warning(
-                self,
-                "No Output Directory",
-                "Please select an output directory for the processed files.",
-            )
-            return
-            
-        # Store credentials in environment variables for future use
-        os.environ["AZURE_ENDPOINT"] = azure_endpoint
-        os.environ["AZURE_KEY"] = azure_key
-            
-        # Update workflow status
-        self.workflow_indicator.update_status(WorkflowStep.PROCESS_PDFS, "in_progress")
         
-        # Show confirmation dialog
-        reply = QMessageBox.question(
-            self,
-            "Process PDFs",
-            f"Process {len(self.pdf_files)} PDF files with Azure Document Intelligence?\n\n"
-            f"This will create markdown and JSON files in:\n{self.output_directory}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
+        # Filter files to only process those without existing outputs
+        files_to_process = []
+        skipped_files = []
         
-        if reply == QMessageBox.StandardButton.No:
-            self.workflow_indicator.update_status(WorkflowStep.PROCESS_PDFS, "not_started")
-            return
+        # Check each file against the output directory
+        for pdf_path in self.pdf_files:
+            basename = os.path.splitext(os.path.basename(pdf_path))[0]
+            json_file = os.path.join(self.output_directory, "json", f"{basename}.json")
+            md_file = os.path.join(self.output_directory, "markdown", f"{basename}.md")
             
-        # Create directories if they don't exist
-        os.makedirs(self.output_directory, exist_ok=True)
+            # Skip if both files already exist
+            if os.path.exists(json_file) and os.path.exists(md_file):
+                skipped_files.append({
+                    "pdf": pdf_path,
+                    "status": "skipped",
+                    "json": json_file,
+                    "markdown": md_file
+                })
+                self.status_panel.append_details(f"⚠ {os.path.basename(pdf_path)} - Skipped (already processed)")
+            else:
+                files_to_process.append(pdf_path)
+        
+        # Check if there are any files left to process
+        if not files_to_process:
+            QMessageBox.information(
+                self,
+                "No Files to Process",
+                f"All {len(self.pdf_files)} PDF files have already been processed and exist in the output directory."
+            )
+            
+            # Update workflow status
+            self.workflow_indicator.update_status(WorkflowStep.PROCESS_PDFS, "complete")
+            
+            # Show skipped files in status
+            self.status_panel.append_details(f"PDF processing complete: All {len(skipped_files)} files already processed")
+            return
+        
+        # Create output directories if they don't exist
         os.makedirs(os.path.join(self.output_directory, "json"), exist_ok=True)
         os.makedirs(os.path.join(self.output_directory, "markdown"), exist_ok=True)
         
         # Create progress dialog
         progress_dialog = QProgressDialog(
-            f"Processing {len(self.pdf_files)} PDF files...",
+            f"Processing {len(files_to_process)} PDF files...",
             "Cancel",
             0,
-            len(self.pdf_files),
+            len(files_to_process),
             self,
         )
         progress_dialog.setWindowTitle("Azure PDF Processing")
@@ -490,7 +483,7 @@ class PDFProcessingTab(BaseTab):
         
         # Create Azure thread
         self.azure_thread = AzureProcessingThread(
-            self.pdf_files,
+            files_to_process,
             self.output_directory,
             azure_endpoint,
             azure_key
@@ -498,10 +491,10 @@ class PDFProcessingTab(BaseTab):
         
         # Connect signals
         self.azure_thread.progress_signal.connect(
-            lambda processed, msg: self.update_azure_progress(processed, len(self.pdf_files), msg, progress_dialog)
+            lambda processed, msg: self.update_azure_progress(processed, len(files_to_process), msg, progress_dialog)
         )
         self.azure_thread.finished_signal.connect(
-            lambda results: self.azure_processing_finished(results, progress_dialog)
+            lambda results: self.azure_processing_finished(results, progress_dialog, skipped_files)
         )
         self.azure_thread.error_signal.connect(
             self.azure_processing_error
@@ -519,18 +512,45 @@ class PDFProcessingTab(BaseTab):
         # Update status panel
         self.status_panel.append_details(message)
 
-    def azure_processing_finished(self, results, dialog):
+    def azure_processing_finished(self, results, dialog, skipped_files=None):
         """Handle completion of Azure PDF processing."""
         # Close the progress dialog
         if dialog:
             dialog.close()
+        
+        # Initialize skipped_files if not provided
+        if skipped_files is None:
+            skipped_files = []
             
-        # Get success and failure counts
-        successful = sum(1 for r in results if r.get("success", False))
-        failed = len(results) - successful
+        # Check if results is a string and handle appropriately
+        if isinstance(results, str):
+            # Display the string result and set generic counts
+            self.status_panel.append_details(f"PDF processing complete with message: {results}")
+            self.workflow_indicator.update_status(WorkflowStep.PROCESS_PDFS, "complete")
+            self.process_button.setEnabled(True)
+            
+            QMessageBox.information(
+                self,
+                "Processing Complete",
+                f"PDF processing completed: {results}"
+            )
+            return
+        
+        # Combine skipped files with results
+        if skipped_files:
+            if "files" not in results:
+                results["files"] = []
+            results["files"].extend(skipped_files)
+            results["skipped"] = results.get("skipped", 0) + len(skipped_files)
+        
+        # Get success and failure counts for dictionary results
+        successful = sum(1 for r in results.get("files", []) if r.get("status") == "processed")
+        failed = sum(1 for r in results.get("files", []) if r.get("status") == "failed")
+        skipped = sum(1 for r in results.get("files", []) if r.get("status") == "skipped")
+        total = successful + failed + skipped
             
         # Update workflow status
-        if successful == len(results):
+        if successful > 0 and failed == 0:
             self.workflow_indicator.update_status(WorkflowStep.PROCESS_PDFS, "complete")
         elif successful > 0:
             self.workflow_indicator.update_status(WorkflowStep.PROCESS_PDFS, "partial")
@@ -541,11 +561,13 @@ class PDFProcessingTab(BaseTab):
         self.process_button.setEnabled(True)
             
         # Show details in status panel
-        self.status_panel.append_details(f"PDF processing complete: {successful} successful, {failed} failed")
-        for result in results:
-            file_name = os.path.basename(result.get("pdf_path", "Unknown file"))
-            if result.get("success", False):
+        self.status_panel.append_details(f"PDF processing complete: {successful} successful, {failed} failed, {skipped} skipped")
+        for result in results.get("files", []):
+            file_name = os.path.basename(result.get("pdf", "Unknown file"))
+            if result.get("status") == "processed":
                 self.status_panel.append_details(f"✓ {file_name} - Successfully processed")
+            elif result.get("status") == "skipped":
+                self.status_panel.append_details(f"⚠ {file_name} - Skipped (already processed)")
             else:
                 error = result.get("error", "Unknown error")
                 self.status_panel.append_details(f"❌ {file_name} - Failed: {error}")
@@ -554,9 +576,10 @@ class PDFProcessingTab(BaseTab):
         QMessageBox.information(
             self,
             "Processing Complete",
-            f"Processed {len(results)} PDF files with Azure Document Intelligence.\n\n"
+            f"Processed {total} PDF files with Azure Document Intelligence.\n\n"
             f"Successfully processed: {successful}\n"
-            f"Failed: {failed}\n\n"
+            f"Failed: {failed}\n"
+            f"Skipped: {skipped}\n\n"
             f"Output directory: {self.output_directory}"
         )
 

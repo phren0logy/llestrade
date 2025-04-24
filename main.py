@@ -5,6 +5,22 @@ Brings together all UI components and implements the main window functionality.
 
 import os
 import sys
+# macOS Qt plugin fix: set Qt plugin path before loading any Qt modules
+try:
+    import PyQt6
+    plugin_root = os.path.join(os.path.dirname(PyQt6.__file__), "Qt6", "plugins")
+    platforms_path = os.path.join(plugin_root, "platforms")
+    os.environ["QT_PLUGIN_PATH"] = plugin_root
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = platforms_path
+    from PyQt6.QtCore import QCoreApplication
+    # include both plugin root and platforms directory for Qt plugin loading
+    QCoreApplication.setLibraryPaths([plugin_root, platforms_path])
+except Exception:
+    pass
+
+import logging
+import traceback
+from pathlib import Path
 
 from PyQt6.QtCore import QSize
 from PyQt6.QtGui import QIcon
@@ -22,7 +38,7 @@ from PyQt6.QtWidgets import (
 from config import APP_TITLE, APP_VERSION, setup_environment_variables
 
 # Import utility modules
-from llm_utils import LLMClientFactory
+from llm_utils import LLMClientFactory, cached_count_tokens
 
 # Import UI tab modules
 from ui.prompts_tab import PromptsTab
@@ -86,22 +102,25 @@ class ForensicReportDrafterApp(QMainWindow):
         # Add tab widget to layout
         self.central_layout.addWidget(self.tab_widget)
 
-    def check_api_key(self):
-        """Check if the API keys are available."""
+    def check_api_key(self, provider="auto"):
+        """Check if the API key is valid by making a test request."""
         try:
-            # Create a temporary client to check API key
-            client = LLMClientFactory.create_client(provider="auto")
+            # Create client with auto provider selection first
+            client = LLMClientFactory.create_client(provider=provider)
             
-            # Test if it works
-            response = client.count_tokens(text="Test connection")
+            # Simple test with token counting (minimal API impact)
+            response = cached_count_tokens(client, text="Test connection")
+            
+            # Check response
             if response.get("success", False):
                 provider = getattr(client, "provider", "auto")
                 self.status_bar.showMessage(f"{provider.capitalize()} API key found. Ready to use.", 5000)
             else:
+                error = response.get("error", "Unknown error")
                 QMessageBox.warning(
                     self,
                     "API Connection Issue",
-                    f"API connection test failed: {response.get('error', 'Unknown error')}\n\n"
+                    f"API connection test failed: {error}\n\n"
                     "Please check your API keys and network connectivity.",
                 )
                 self.status_bar.showMessage("API connection test failed.", 0)
