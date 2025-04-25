@@ -214,12 +214,12 @@ As a part of my interview, I conducted the Trauma Symptom Inventory version 2 (T
 
 The TSI-2 is divided into four factors, with 12 clinical scales spread across the four factors. The scores on each of the 12 scales are categorized as _normal_, _problematic_, or _clinically elevated_. The last category, _clinically elevated_, is often consistent with a degree of symptoms needed for elements of psychiatric diagnosis.
 
-<template>
+</template>
 
 Using the manual above, compile this subject's results from this Trauma Symptom Inventory 2 evaluation according to the three steps below.
 
-Step 1: Group the subject's results hierarchically by Factor, then Scale, then Subscale. Include both T scores and percentiles.
+Step 1: Group the subject's results hierarchically by Factor, then Scale, then Subscale. Include T scores.
 
-Step 2: Rewrite the results in paragraph form. Write one paragraph per Factor, starting with a description of the Factor. Give the T score and percentile score for each Factor, even if it is in the _normal_ range (T score of 60 or below). For Scale and Subscale results in the _problematic_ range (T score 60 to 64) or _clinically elevated_ range (T score above 65), provide a description of the relevant scale or subscale. Include both T scores and percentiles. All descriptions should come from the manual.
+Step 2: Rewrite the results in paragraph form. Write one paragraph per Factor, starting with a description of the Factor. Give the T score for each Factor, even if it is in the _normal_ range (T score of 60 or below). For Scale and Subscale results in the _problematic_ range (T score 60 to 64) or _clinically elevated_ range (T score above 65), give the T score, the result (_problematic_ or _clinically elevated_), and a description of the relevant scale or subscale. All descriptions should come from the manual.
 
-Step 3: Create the final output. Start with inserting the the template above. Then comment on the validity scales (ATR and RL). If the results are invalid, describe why they are invalid and provide no further interpretation. If the results are valid, reproduce the results of Step 2 in the final output. Review all results for accuracy, including checking the scores, percentiles, and descriptions. Based on the reviewed results, write a brief interpretation of the results. Then produce the final output.
+Step 3: Create the final output. Start with inserting the template, which is wrapped in "template" tags. Then comment on the validity scales (ATR and RL). If the results are invalid, describe why they are invalid and provide no further interpretation. If the results are valid, reproduce the results of Step 2 in the final output. Review all results for accuracy, including checking the scores, percentiles, and descriptions. Based on the reviewed results, write a brief interpretation of the results. Then produce the final output.
