@@ -5,7 +5,7 @@ Brings together all UI components and implements the main window functionality.
 
 import os
 import sys
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QTabWidget,
@@ -14,8 +14,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-from PyQt6.QtGui import QIcon
-from PyQt6.QtCore import QSize
+from PySide6.QtGui import QIcon
+from PySide6.QtCore import QSize
 
 # Import configuration settings
 from config import APP_TITLE, APP_VERSION, setup_environment_variables

@@ -62,17 +62,17 @@ else:
 # Enable high DPI scaling
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
-# Now import PyQt6 and utilities
+# Now import PySide6 and utilities
 try:
-    from PyQt6.QtCore import (
+    from PySide6.QtCore import (
         QEvent,
         QPoint,
         QSize,
         Qt,
         QTimer
     )
-    from PyQt6.QtGui import QAction, QFont
-    from PyQt6.QtWidgets import (
+    from PySide6.QtGui import QAction, QFont
+    from PySide6.QtWidgets import (
         QApplication,
         QFileDialog,
         QHBoxLayout,

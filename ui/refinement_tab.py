@@ -6,9 +6,9 @@ Handles the report refinement with extended thinking functionality.
 import os
 import time
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -31,10 +31,10 @@ from ui.components.workflow_indicator import WorkflowIndicator
 class RefinementThread(QThread):
     """Thread for running report refinement in the background."""
 
-    update_signal = pyqtSignal(str)
-    thinking_signal = pyqtSignal(str)
-    result_signal = pyqtSignal(str)
-    finished_signal = pyqtSignal()
+    update_signal = Signal(str)
+    thinking_signal = Signal(str)
+    result_signal = Signal(str)
+    finished_signal = Signal()
 
     def __init__(
         self, report_path, instructions, template_path=None, transcript_path=None

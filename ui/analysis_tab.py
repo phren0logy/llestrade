@@ -7,9 +7,9 @@ import os
 import re
 from datetime import datetime
 
-from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QFileDialog,
@@ -1025,8 +1025,70 @@ class AnalysisTab(BaseTab):
         )
         progress_dialog.setWindowTitle("Integrated Analysis")
         progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dialog.setValue(10)
+        progress_dialog.setValue(5)
+        progress_dialog.setLabelText("Initializing LLM clients...")
         progress_dialog.show()
+        QApplication.processEvents()  # Ensure UI updates
+        
+        # Check if the combined summary is particularly large
+        try:
+            from llm_utils import LLMClientFactory
+
+            # First try to create an Anthropic client (preferred for most analyses)
+            self.status_panel.append_details("Attempting to initialize Claude client first...")
+            anthropic_client = LLMClientFactory.create_client(provider="anthropic")
+            
+            # Check if Claude was initialized successfully
+            if hasattr(anthropic_client, 'is_initialized') and anthropic_client.is_initialized:
+                self.status_panel.append_details("✅ Successfully initialized Claude client")
+                use_claude_client = True
+                
+                # No need to explicitly initialize Gemini unless we detect the file is very large
+                try:
+                    # Estimate file size by reading it
+                    with open(combined_file, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        # Rough estimate: 1 token is approximately 4 characters
+                        estimated_tokens = len(content) // 4
+                        self.status_panel.append_details(f"Estimated token count: ~{estimated_tokens}")
+                        
+                        # Only try Gemini for very large files (>180k tokens)
+                        if estimated_tokens > 180000:
+                            self.status_panel.append_details("File is very large (>180k tokens), initializing Gemini as alternative...")
+                            try_gemini = True
+                        else:
+                            self.status_panel.append_details("File is within Claude's size limits, using Claude")
+                            try_gemini = False
+                except Exception as e:
+                    self.status_panel.append_details(f"Error estimating file size: {str(e)}")
+                    try_gemini = False
+            else:
+                self.status_panel.append_details("❌ Failed to initialize Claude client, will try Gemini")
+                use_claude_client = False
+                try_gemini = True
+        except Exception as e:
+            self.status_panel.append_details(f"Error initializing Claude client: {str(e)}")
+            use_claude_client = False
+            try_gemini = True
+            
+        # Only try initializing Gemini if needed based on the above logic
+        use_gemini_client = False
+        if try_gemini:
+            try:
+                self.status_panel.append_details("Attempting to initialize Gemini client...")
+                # Create a Gemini client directly
+                gemini_client = LLMClientFactory.create_client(provider="gemini")
+                
+                # Check if it was successfully initialized
+                if hasattr(gemini_client, 'is_initialized') and gemini_client.is_initialized:
+                    self.status_panel.append_details("✅ Successfully initialized Gemini client")
+                    use_gemini_client = True
+                else:
+                    self.status_panel.append_details("❌ Failed to initialize Gemini client")
+                    use_gemini_client = False
+            except Exception as e:
+                self.status_panel.append_details(f"Error initializing Gemini client: {str(e)}")
+                use_gemini_client = False
 
         # Create a worker thread for integrated analysis
         self.integrated_thread = IntegratedAnalysisThread(
@@ -1036,6 +1098,48 @@ class AnalysisTab(BaseTab):
             subject_dob,
             case_info,
         )
+        
+        # Choose which client to initialize based on our decision logic
+        progress_dialog.setValue(8)
+        if use_claude_client and not try_gemini:
+            # Prefer Claude client for most cases
+            progress_dialog.setLabelText("Setting up Claude client for analysis thread...")
+            QApplication.processEvents()  # Ensure UI updates
+            
+            try:
+                # Reinitialize the thread with Claude
+                if hasattr(self.integrated_thread, 'reinitialize_llm_client'):
+                    success = self.integrated_thread.reinitialize_llm_client(provider="anthropic")
+                    if success:
+                        self.status_panel.append_details("✅ Reinitialized thread with Claude client")
+                    else:
+                        self.status_panel.append_details("❌ Failed to reinitialize thread with Claude")
+            except Exception as e:
+                self.status_panel.append_details(f"Error setting up Claude client: {str(e)}")
+        elif use_gemini_client:
+            # Use Gemini for large files or when Claude fails
+            progress_dialog.setLabelText("Setting up Gemini client for analysis thread...")
+            QApplication.processEvents()  # Ensure UI updates
+            
+            try:
+                # Call the reinitialize method on the thread directly with "gemini"
+                if hasattr(self.integrated_thread, 'reinitialize_llm_client'):
+                    success = self.integrated_thread.reinitialize_llm_client(provider="gemini")
+                    if success:
+                        self.status_panel.append_details("✅ Reinitialized thread with Gemini client")
+                    else:
+                        self.status_panel.append_details("❌ Failed to reinitialize thread with Gemini")
+                elif hasattr(self.integrated_thread, 'force_init_gemini_client'):
+                    success = self.integrated_thread.force_init_gemini_client()
+                    if success:
+                        self.status_panel.append_details("✅ Forced Gemini client initialization")
+                    else:
+                        self.status_panel.append_details("❌ Failed to force Gemini client")
+            except Exception as e:
+                self.status_panel.append_details(f"Error setting up Gemini client: {str(e)}")
+        else:
+            # If both failed, let the thread try auto-detection
+            self.status_panel.append_details("Both clients failed initialization, trying thread's auto-detection")
 
         # Connect signals
         self.integrated_thread.progress_signal.connect(
@@ -1096,3 +1200,25 @@ class AnalysisTab(BaseTab):
 
         # Update workflow state to ensure buttons are properly enabled/disabled
         self.check_workflow_state()
+
+    def on_integrated_analysis_error(self, error, progress_dialog):
+        """Handle error during integrated analysis."""
+        # Close the progress dialog
+        progress_dialog.close()
+
+        # Update the status
+        self.workflow_indicator.update_status(
+            WorkflowStep.INTEGRATE_ANALYSIS, "error"
+        )
+        self.show_status("Integrated analysis failed")
+        self.status_panel.append_details(f"Error: {error}")
+
+        # Show error message
+        QMessageBox.critical(
+            self,
+            "Integration Failed",
+            f"Failed to generate integrated analysis: {error}"
+        )
+
+        # Refresh file list
+        self.refresh_file_list()

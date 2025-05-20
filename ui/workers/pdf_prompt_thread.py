@@ -7,16 +7,16 @@ import os
 import time
 import logging
 from typing import Dict, Any
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 from llm_utils import LLMClientFactory
 
 class PDFPromptThread(QThread):
     """Thread for processing PDFs with Claude in the background."""
     
-    update_signal = pyqtSignal(str)
-    progress_signal = pyqtSignal(int, int)
-    finished_signal = pyqtSignal(dict)
+    update_signal = Signal(str)
+    progress_signal = Signal(int, int)
+    finished_signal = Signal(dict)
     
     def __init__(self, pdf_path: str, prompt_text: str, output_dir: str):
         """Initialize the thread with paths to PDF and prompt."""

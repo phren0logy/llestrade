@@ -3,8 +3,8 @@ Status panel component for the Forensic Psych Report Drafter.
 Provides a collapsible panel for displaying status and log information.
 """
 
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QGroupBox, QVBoxLayout, QLabel, QTextEdit
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QLabel, QTextEdit
 
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 

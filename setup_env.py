@@ -7,7 +7,6 @@ This helps users set up their API keys and verify connectivity.
 import getpass
 import os
 import shutil
-import sys
 from pathlib import Path
 
 

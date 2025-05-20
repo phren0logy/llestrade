@@ -10,9 +10,9 @@ import time
 from datetime import datetime
 
 import fitz  # PyMuPDF
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
     QFormLayout,

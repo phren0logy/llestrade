@@ -454,6 +454,8 @@ class AnthropicClient(BaseLLMClient):
 
             # Extract the response content
             content = ""
+            thinking = ""  # Initialize thinking variable
+            has_redacted_thinking = False
             for block in response.content:
                 if (
                     block.type == "text"
@@ -869,7 +871,7 @@ class GeminiClient(BaseLLMClient):
             debug=debug,
         )
 
-        self.gemini_model = None
+        self.client = None
         self._init_client(api_key)
 
     def _init_client(self, api_key: Optional[str] = None):
@@ -883,48 +885,82 @@ class GeminiClient(BaseLLMClient):
             # Check for Google Generative AI package
             try:
                 import google.generativeai as genai
-            except ImportError:
+                self.genai = genai
+                logging.info("Google GenerativeAI package imported successfully")
+            except ImportError as ie:
                 logging.error(
-                    "google-generativeai package not installed - please install with: pip install google-generativeai"
+                    f"google-generativeai package import error: {str(ie)} - please install with: pip install google-generativeai"
                 )
                 return
 
             # Get API key
             if api_key:
                 os.environ["GEMINI_API_KEY"] = api_key
+                logging.info("Using provided API key for Gemini")
 
-            api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-            if not api_key:
+            # First try GEMINI_API_KEY, then fall back to GOOGLE_API_KEY
+            gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            if not gemini_key:
                 logging.error(
                     "GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set"
                 )
                 return
+                
+            # Log API key for debugging (only first/last few characters)
+            if len(gemini_key) > 8:
+                logging.info(
+                    f"Using Gemini API key starting with: {gemini_key[:4]}...{gemini_key[-4:]}"
+                )
+            else:
+                logging.warning("Gemini API key too short or invalid")
 
             # Configure the Gemini API
-            genai.configure(api_key=api_key)
-            self.gemini_model = genai.GenerativeModel(
-                "models/gemini-2.5-pro-preview-03-25"
-            )
-
-            # Log successful initialization
-            logging.info(
-                "Google Gemini client initialized with model: models/gemini-2.5-pro-preview-03-25"
-            )
+            logging.info("Configuring Google GenAI...")
+            try:
+                self.genai.configure(api_key=gemini_key)
+                self.client = True  # Flag that configuration was successful
+                logging.info("Google GenAI configured successfully")
+            except Exception as client_error:
+                logging.error(f"Error configuring Google GenAI: {str(client_error)}")
+                self.client = None
+                return
+            
+            # Store the default model name - use one of the available models from the list
+            self.model_name = "gemini-2.5-pro-preview-05-06"
+            
+            # Test if the API is working by creating a model
+            try:
+                # Try creating a GenerativeModel object
+                logging.info("Testing Gemini by creating a GenerativeModel...")
+                model = self.genai.GenerativeModel(model_name=self.model_name)
+                self.default_model = model
+                logging.info(f"Google Gemini initialized successfully with model: {self.model_name}")
+                
+                # Also try listing models
+                logging.info("Testing Gemini by listing available models...")
+                models = list(self.genai.list_models())
+                if models:
+                    model_names = ", ".join([str(m.name) for m in models[:5]])
+                    logging.info(f"Available Gemini models include: {model_names}")
+            except Exception as e:
+                logging.error(f"Error testing Gemini API: {str(e)}")
+                self.client = None
+                return
 
         except Exception as e:
             logging.error(f"Error initializing Gemini client: {str(e)}")
-            self.gemini_model = None
+            self.client = None
 
     @property
     def is_initialized(self) -> bool:
         """Check if the client is properly initialized."""
-        return self.gemini_model is not None
+        return self.client is not None
 
     def generate_response(
         self,
         prompt_text: str,
-        model: str = "models/gemini-2.5-pro-preview-03-25",
-        max_tokens: int = 200000,  # Increased from 32000 to leverage 2M token context window
+        model: str = "gemini-2.5-pro-preview-05-06",
+        max_tokens: int = 200000,
         temperature: float = 0.1,
         system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -934,7 +970,7 @@ class GeminiClient(BaseLLMClient):
         Args:
             prompt_text: The prompt to send to Gemini
             model: The Gemini model to use
-            max_tokens: Maximum number of tokens in the response (increased to 200k for large responses)
+            max_tokens: Maximum number of tokens in the response
             temperature: Temperature parameter (randomness)
             system_prompt: Optional system prompt to set context
 
@@ -949,16 +985,13 @@ class GeminiClient(BaseLLMClient):
             }
 
         try:
-            # Combine the system prompt with user prompt for Gemini
-            # Gemini doesn't have a separate system prompt concept
-            combined_prompt = prompt_text
-            if system_prompt:
-                combined_prompt = f"{system_prompt}\n\n{prompt_text}"
-
+            # Store the model name for other methods to use
+            self.model_name = model
+            
             # Log the request details
-            logging.debug(
-                f"Gemini API Request - Combined prompt length: {len(combined_prompt)}"
-            )
+            logging.debug(f"Gemini API Request - Prompt length: {len(prompt_text)}")
+            if system_prompt:
+                logging.debug(f"Gemini API Request - System prompt length: {len(system_prompt)}")
             logging.debug(f"Gemini API Request - Temperature: {temperature}")
             logging.debug(f"Gemini API Request - Max tokens: {max_tokens}")
 
@@ -966,18 +999,25 @@ class GeminiClient(BaseLLMClient):
             start_time = time.time()
 
             try:
-                # Configure generation parameters
-                generation_config = {
-                    "temperature": temperature,
-                    "max_output_tokens": max_tokens,
-                    "top_p": 0.95,
-                    "top_k": 40,
-                }
-
-                # Get a response
-                response = self.gemini_model.generate_content(
-                    combined_prompt,
-                    generation_config=generation_config,
+                # Create generation config
+                generation_config = self.genai.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                    top_p=0.95,
+                    top_k=40,
+                )
+                
+                # Get a GenerativeModel instance - use 'model_name' parameter
+                gemini_model = self.genai.GenerativeModel(model_name=model)
+                
+                # Add system instruction if provided
+                if system_prompt:
+                    gemini_model = gemini_model.with_system_instruction(system_prompt)
+                
+                # Generate content
+                response = gemini_model.generate_content(
+                    prompt_text,
+                    generation_config=generation_config
                 )
 
                 # Calculate elapsed time
@@ -986,30 +1026,9 @@ class GeminiClient(BaseLLMClient):
                     f"Gemini API Response received in {elapsed_time:.2f} seconds"
                 )
 
-                # Check for blocked response
-                if (
-                    hasattr(response, "candidates")
-                    and len(response.candidates) > 0
-                    and hasattr(response.candidates[0], "finish_reason")
-                    and response.candidates[0].finish_reason == "SAFETY"
-                ):
-                    return {
-                        "success": False,
-                        "error": "Content was blocked by safety filters",
-                        "provider": "gemini",
-                    }
-
                 # Extract the response text
                 if hasattr(response, "text"):
                     content = response.text
-                elif (
-                    hasattr(response, "candidates")
-                    and len(response.candidates) > 0
-                    and hasattr(response.candidates[0], "content")
-                    and hasattr(response.candidates[0].content, "parts")
-                    and len(response.candidates[0].content.parts) > 0
-                ):
-                    content = response.candidates[0].content.parts[0].text
                 else:
                     return {
                         "success": False,
@@ -1019,11 +1038,11 @@ class GeminiClient(BaseLLMClient):
 
                 # Gemini doesn't provide token usage information
                 # Estimate based on chars
-                char_count = len(combined_prompt) + len(content)
+                char_count = len(prompt_text) + len(content)
                 token_estimate = char_count // 4  # Rough estimate of chars to tokens
 
                 usage = {
-                    "input_tokens": len(combined_prompt) // 4,  # Rough estimate
+                    "input_tokens": len(prompt_text) // 4,  # Rough estimate
                     "output_tokens": len(content) // 4,  # Rough estimate
                 }
 
@@ -1057,27 +1076,28 @@ class GeminiClient(BaseLLMClient):
     def generate_response_with_extended_thinking(
         self,
         prompt_text: str,
-        model: str = "models/gemini-2.5-pro-preview-03-25",
-        max_tokens: int = 200000,  # Increased from 32000 to leverage 2M token context window
+        model: str = "gemini-2.5-pro-preview-05-06",
+        max_tokens: int = 200000,
         temperature: float = 0.7,
         system_prompt: Optional[str] = None,
         thinking_budget_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
-        Generate a response from Gemini leveraging its long context capabilities and step-by-step thinking.
-
-        This function uses the meta_prompt structure from llm_summary_thread.py.
+        Generate a response from Gemini with structured reasoning and thinking.
+        
+        Since Gemini doesn't have a native "thinking" API like Claude, this implementation
+        uses structured prompting to encourage detailed reasoning before answering.
 
         Args:
-            prompt_text: The prompt to send to Gemini, should follow meta_prompt structure
-            model: The Gemini model to use (default is 2.5 Pro Preview)
-            max_tokens: Maximum number of tokens in the response (default 200k to leverage 2M token context window)
+            prompt_text: The prompt to send to Gemini
+            model: The Gemini model to use
+            max_tokens: Maximum number of tokens in the response
             temperature: Temperature parameter (randomness)
             system_prompt: Optional system prompt to set context
             thinking_budget_tokens: Not used for Gemini but included for API compatibility
 
         Returns:
-            Dictionary with response information including thinking and final response
+            Dictionary with response information including thinking and final answer
         """
         if not self.is_initialized:
             return {
@@ -1088,37 +1108,155 @@ class GeminiClient(BaseLLMClient):
             }
 
         try:
-            # Set temperature for optimal reasoning quality
-            actual_temperature = max(0.2, min(0.7, temperature))
-
-            # Generate the response using the standard generate_response method
-            # Pass system_prompt separately rather than combining it with prompt_text
-            response = self.generate_response(
-                prompt_text=prompt_text,
-                model=model,
-                max_tokens=max_tokens,
-                temperature=actual_temperature,
-                system_prompt=system_prompt,  # Properly pass system_prompt as a separate parameter
+            # Create a structured prompt that separates thinking from the final answer
+            structured_prompt = ""
+            if system_prompt:
+                structured_prompt = f"System instructions: {system_prompt}\n\n"
+                
+            structured_prompt += (
+                "I'd like you to solve this problem using detailed reasoning before providing your final answer.\n\n"
+                "Please structure your response like this:\n"
+                "1. First provide your detailed thinking and analysis under a section called \"## Thinking\"\n"
+                "2. Then provide your final, organized answer under a section called \"## Answer\"\n\n"
+                "Make sure to include BOTH sections clearly marked with these exact headings.\n"
+                "Ensure your thinking is comprehensive and shows all steps of your analysis.\n\n"
+                "Here's the question or task to solve:\n\n" + prompt_text
             )
-
-            if not response["success"]:
+            
+            # Log the exact prompt format for debugging
+            logging.debug(f"Structured prompt for Gemini (first 500 chars): {structured_prompt[:500]}...")
+            
+            # Create a specific system prompt for reasoning if none provided
+            reasoning_system_prompt = None
+            if not system_prompt:
+                reasoning_system_prompt = (
+                    "You are an assistant that provides detailed step-by-step reasoning. "
+                    "Always think through problems methodically before providing an answer. "
+                    "Show all your work and explain your reasoning process clearly."
+                )
+            
+            # Set temperature for optimal reasoning quality (0.5 is good balance for reasoning)
+            actual_temperature = max(0.2, min(0.5, temperature))
+            
+            # Configure generation parameters
+            generation_config = self.genai.GenerationConfig(
+                temperature=actual_temperature,
+                max_output_tokens=max_tokens,
+                top_p=0.95,
+                top_k=40,
+            )
+            
+            # Explicitly log which model is being used
+            logging.info(f"Using Gemini model: {model}")
+            
+            # Create a GenerativeModel and set the system instruction if supported
+            try:
+                gemini_model = self.genai.GenerativeModel(model_name=model)
+                logging.info("Successfully created GenerativeModel instance")
+            except Exception as model_error:
+                logging.error(f"Error creating GenerativeModel: {str(model_error)}")
+                raise
+            
+            # Try to set system instruction if supported
+            try:
+                if reasoning_system_prompt and hasattr(gemini_model, "with_system_instruction"):
+                    logging.info("Applying system instruction to Gemini model")
+                    gemini_model = gemini_model.with_system_instruction(reasoning_system_prompt)
+            except Exception as system_error:
+                # Log the error but continue without system instruction
+                logging.warning(f"Could not set system instruction: {str(system_error)} - continuing without it")
+                
+            # Generate response with explicit timeout handling
+            import time
+            start_time = time.time()
+            generation_timeout = 600  # Increased to 10 minutes
+            
+            try:
+                logging.info("Sending request to Gemini API...")
+                response = gemini_model.generate_content(
+                    structured_prompt, 
+                    generation_config=generation_config
+                )
+                elapsed = time.time() - start_time
+                logging.info(f"Gemini API response received in {elapsed:.1f} seconds")
+            except Exception as api_error:
+                elapsed = time.time() - start_time
+                logging.error(f"Error from Gemini API after {elapsed:.1f} seconds: {str(api_error)}")
+                raise
+            
+            if not response or not hasattr(response, "text"):
+                logging.error("Invalid or empty response from Gemini (missing text attribute)")
                 return {
                     "success": False,
-                    "error": response.get("error", "Unknown error"),
+                    "error": "Invalid or empty response from Gemini",
                     "content": None,
                     "thinking": None,
                     "provider": "gemini",
                 }
-
-            # Don't try to extract thinking - use the entire response as both content and thinking
-            content = response["content"]
-
+            
+            # Extract the full response text
+            full_response = response.text
+            logging.info(f"Received response of length {len(full_response)} chars")
+            
+            # Check if the response is empty (0 characters)
+            if not full_response or len(full_response) == 0:
+                logging.error("Empty response from Gemini API")
+                return {
+                    "success": False,
+                    "error": "Empty response from Gemini API",
+                    "content": None, 
+                    "thinking": None,
+                    "provider": "gemini",
+                }
+            
+            # Try to separate thinking from the final answer
+            thinking_section = ""
+            final_answer = ""
+            
+            # Look for the thinking and answer sections
+            if "## Thinking" in full_response and "## Answer" in full_response:
+                # Split by the section headers
+                parts = full_response.split("## Thinking", 1)
+                if len(parts) > 1:
+                    thinking_content = "## Thinking" + parts[1].split("## Answer", 1)[0]
+                    thinking_section = thinking_content.strip()
+                    
+                    answer_parts = full_response.split("## Answer", 1)
+                    if len(answer_parts) > 1:
+                        final_answer = answer_parts[1].strip()
+                logging.info("Successfully separated thinking and answer sections")
+            else:
+                # If no clear separation, use an approximation - first 80% as thinking, rest as answer
+                logging.warning("No clear thinking/answer separation found, using approximation")
+                split_point = int(len(full_response) * 0.8)
+                thinking_section = full_response[:split_point].strip()
+                final_answer = full_response[split_point:].strip()
+                
+                # If we couldn't find a clear separation, use the full response as both
+                if not thinking_section or not final_answer:
+                    logging.warning("Fallback to using full response for both thinking and answer")
+                    thinking_section = full_response
+                    final_answer = full_response
+            
+            # Ensure at least minimal thinking section:
+            if not thinking_section or len(thinking_section) < 100:
+                logging.warning("Insufficient thinking section, using full response")
+                thinking_section = f"## Thinking\n\n{full_response}"
+            
+            # Estimate token usage
+            char_count = len(structured_prompt) + len(full_response)
+            token_estimate = char_count // 4
+            
             # Construct the result
             result = {
                 "success": True,
-                "content": content,
-                "thinking": content,  # Same content for both
-                "usage": response.get("usage", {}),
+                "content": final_answer,  # The final answer only
+                "thinking": thinking_section,  # The thinking process
+                "full_response": full_response,  # The entire response
+                "usage": {
+                    "input_tokens": len(structured_prompt) // 4,  # Very rough estimate
+                    "output_tokens": len(full_response) // 4,  # Rough estimate
+                },
                 "model": model,
                 "provider": "gemini",
             }
@@ -1167,21 +1305,35 @@ class GeminiClient(BaseLLMClient):
             elif messages is not None:
                 # Try to extract text from messages
                 for message in messages:
-                    if isinstance(message.get("content"), str):
-                        content_to_count += message.get("content", "") + " "
-                    elif isinstance(message.get("content"), list):
-                        for content_block in message.get("content", []):
-                            if (
-                                isinstance(content_block, dict)
-                                and "text" in content_block
-                            ):
-                                content_to_count += content_block["text"] + " "
+                    if "content" in message:
+                        content = message["content"]
+                        if isinstance(content, str):
+                            content_to_count += content + " "
+                        elif isinstance(content, list):
+                            for item in content:
+                                if isinstance(item, dict) and "text" in item:
+                                    content_to_count += item["text"] + " "
             else:
                 return {
                     "success": False,
                     "error": "Either messages or text must be provided",
                 }
 
+            # Try to use the actual count_tokens API if available
+            try:
+                # Create a GenerativeModel to count tokens
+                model = self.genai.GenerativeModel(model_name=self.model_name)
+                count_result = model.count_tokens(content_to_count)
+                
+                if hasattr(count_result, "total_tokens"):
+                    return {
+                        "success": True,
+                        "token_count": count_result.total_tokens,
+                        "estimated": False,
+                    }
+            except Exception as token_error:
+                logging.debug(f"Token counting API error: {str(token_error)}, falling back to estimation")
+                
             # Calculate estimated token count (very rough approximation)
             token_estimate = len(content_to_count) // 4
 
@@ -1232,6 +1384,7 @@ class LLMClientFactory:
         # Auto-detect provider based on available API keys
         if provider == "auto":
             # Try Anthropic first
+            logging.info("Trying to initialize Anthropic client...")
             client = AnthropicClient(
                 timeout=timeout,
                 max_retries=max_retries,
@@ -1246,8 +1399,8 @@ class LLMClientFactory:
                 return client
 
             # Fall back to Gemini
-            logging.info("Falling back to Gemini provider")
-            return GeminiClient(
+            logging.info("Anthropic client initialization failed, trying Gemini...")
+            gemini_client = GeminiClient(
                 timeout=timeout,
                 max_retries=max_retries,
                 thinking_budget_tokens=thinking_budget_tokens,
@@ -1255,9 +1408,17 @@ class LLMClientFactory:
                 api_key=api_key,
                 debug=debug,
             )
-
+            
+            if gemini_client.is_initialized:
+                logging.info("Successfully initialized Gemini client")
+                return gemini_client
+            else:
+                logging.warning("Failed to initialize Gemini client, returning uninitialized Anthropic client as fallback")
+                return client
+            
         # Create client for specific provider
         if provider == "anthropic":
+            logging.info("Explicitly initializing Anthropic client...")
             return AnthropicClient(
                 timeout=timeout,
                 max_retries=max_retries,
@@ -1267,6 +1428,7 @@ class LLMClientFactory:
                 debug=debug,
             )
         elif provider == "gemini":
+            logging.info("Explicitly initializing Gemini client...")
             return GeminiClient(
                 timeout=timeout,
                 max_retries=max_retries,
@@ -1382,9 +1544,9 @@ class LLMClient:
     def generate_response(
         self,
         prompt_text: str,
-        model: str = "claude-3-7-sonnet-20250219",
-        max_tokens: int = 32000,
-        temperature: float = 0.0,
+        model: str = "gemini-2.5-pro-preview-05-06",
+        max_tokens: int = 200000,
+        temperature: float = 0.1,
         system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate a response, preferring Anthropic if available."""
@@ -1399,7 +1561,7 @@ class LLMClient:
         elif self.gemini_initialized:
             return self.gemini_client.generate_response(
                 prompt_text=prompt_text,
-                model="models/gemini-2.5-pro-preview-03-25",  # Override model for Gemini
+                model=model,
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system_prompt=system_prompt,
@@ -1415,9 +1577,9 @@ class LLMClient:
         self,
         prompt_text: str,
         pdf_file_path: str,
-        model: str = "claude-3-7-sonnet-20250219",
-        max_tokens: int = 32000,
-        temperature: float = 0.0,
+        model: str = "gemini-2.5-pro-preview-05-06",
+        max_tokens: int = 200000,
+        temperature: float = 0.1,
         system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Generate a response with PDF, requires Anthropic."""
@@ -1440,9 +1602,9 @@ class LLMClient:
     def generate_response_with_extended_thinking(
         self,
         prompt_text: str,
-        model: str = "claude-3-7-sonnet-20250219",
-        max_tokens: int = 32000,
-        temperature: float = 1.0,
+        model: str = "gemini-2.5-pro-preview-05-06",
+        max_tokens: int = 200000,
+        temperature: float = 0.7,
         system_prompt: Optional[str] = None,
         thinking_budget_tokens: int = 16000,
     ) -> Dict[str, Any]:
@@ -1467,7 +1629,7 @@ class LLMClient:
     def generate_response_with_gemini(
         self,
         prompt_text: str,
-        model: str = "models/gemini-2.5-pro-preview-03-25",
+        model: str = "gemini-2.5-pro-preview-05-06",
         max_output_tokens: int = 32000,
         temperature: float = 0.1,
         system_prompt: Optional[str] = None,
@@ -1507,7 +1669,7 @@ class LLMClient:
     def generate_response_with_gemini_thinking(
         self,
         prompt_text: str,
-        model: str = "models/gemini-2.5-pro-preview-03-25",
+        model: str = "gemini-2.5-pro-preview-05-06",
         max_output_tokens: int = 200000,  # Increased from 32000 to leverage 2M token context window
         temperature: float = 0.3,
         system_prompt: Optional[str] = None,

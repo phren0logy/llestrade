@@ -6,7 +6,7 @@ import os
 import time
 from datetime import datetime
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 from file_utils import write_file_content
 from llm_utils import LLMClientFactory
@@ -15,9 +15,9 @@ from llm_utils import LLMClientFactory
 class PromptRunnerThread(QThread):
     """Worker thread for running prompts through Claude and saving results."""
 
-    progress_signal = pyqtSignal(int, str)
-    finished_signal = pyqtSignal(dict)
-    error_signal = pyqtSignal(str)
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
 
     def __init__(self, prompts, output_dir, transcript_path):
         """Initialize the thread with the prompts to run."""

@@ -6,7 +6,7 @@ import logging
 import os
 import time
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 from llm_utils import LLMClientFactory, cached_count_tokens
 
@@ -166,9 +166,9 @@ def chunk_document_with_overlap(text, client, max_chunk_size=60000, overlap=1000
 class LLMSummaryThread(QThread):
     """Worker thread for summarizing markdown files with Claude."""
 
-    progress_signal = pyqtSignal(int, str)
-    finished_signal = pyqtSignal(dict)
-    error_signal = pyqtSignal(str)
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
 
     def __init__(
         self, markdown_files, output_dir, subject_name, subject_dob, case_info

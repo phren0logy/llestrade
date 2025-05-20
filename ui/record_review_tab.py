@@ -12,9 +12,9 @@ import time
 from datetime import datetime
 
 import fitz  # PyMuPDF
-from PyQt6.QtCore import QCoreApplication, Qt, QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont
-from PyQt6.QtWidgets import (
+from PySide6.QtCore import QCoreApplication, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QFont
+from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -130,7 +130,7 @@ class RecordReviewTab(BaseTab):
 
     def create_tabbed_interface(self):
         """Create a tabbed interface to organize the UI components."""
-        from PyQt6.QtWidgets import QTabWidget
+        from PySide6.QtWidgets import QTabWidget
 
         # Create tabs for different sections
         input_tab = QWidget()

@@ -3,8 +3,8 @@ File utility module for the Forensic Psych Report Drafter.
 Provides functions for file operations, including reading, writing, and previewing file content.
 """
 
-import os
 import logging
+import os
 from pathlib import Path
 
 
@@ -49,18 +49,20 @@ def extract_text_from_pdf(pdf_path, max_pages=None):
         Exception: If there's an issue extracting text from the PDF
     """
     try:
-        from pypdf import PdfReader
+        import fitz  # PyMuPDF
         
-        reader = PdfReader(pdf_path)
-        num_pages = len(reader.pages)
+        doc = fitz.open(pdf_path)
+        num_pages = len(doc)
         
         if max_pages is not None:
             num_pages = min(num_pages, max_pages)
         
         text = []
         for i in range(num_pages):
-            page = reader.pages[i]
-            text.append(f"--- Page {i+1} ---\n{page.extract_text()}")
+            page = doc[i]
+            text.append(f"--- Page {i+1} ---\n{page.get_text()}")
+        
+        doc.close()
         
         return "\n\n".join(text)
     except FileNotFoundError:

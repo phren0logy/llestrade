@@ -9,15 +9,12 @@ import shutil
 import time
 from pathlib import Path
 
+import fitz  # PyMuPDF
 from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import (
-    AnalyzeResult,
-    DocumentContentFormat,
-)
-
+from azure.ai.documentintelligence.models import (AnalyzeResult,
+                                                  DocumentContentFormat)
 # Azure Document Intelligence imports
 from azure.core.credentials import AzureKeyCredential
-from PyPDF2 import PdfReader, PdfWriter
 
 
 def get_pdf_page_count(pdf_path):
@@ -30,9 +27,10 @@ def get_pdf_page_count(pdf_path):
     Returns:
         int: Number of pages in the PDF
     """
-    with open(pdf_path, "rb") as file:
-        reader = PdfReader(file)
-        return len(reader.pages)
+    doc = fitz.open(pdf_path)
+    page_count = len(doc)
+    doc.close()
+    return page_count
 
 
 def split_large_pdf(pdf_path, output_dir, max_pages=1750, overlap=10):
@@ -52,44 +50,45 @@ def split_large_pdf(pdf_path, output_dir, max_pages=1750, overlap=10):
     pdf_filename = os.path.basename(pdf_path)
     filename_base, ext = os.path.splitext(pdf_filename)
 
-    # Create a reader object
-    with open(pdf_path, "rb") as file:
-        reader = PdfReader(file)
-        total_pages = len(reader.pages)
+    # Open the PDF with PyMuPDF
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
 
-        # If the PDF is not large enough to split, return the original path
-        if total_pages <= max_pages:
-            return [pdf_path]
+    # If the PDF is not large enough to split, return the original path
+    if total_pages <= max_pages:
+        doc.close()
+        return [pdf_path]
 
-        # Calculate how many segments we'll need
-        segment_count = (total_pages - 1) // max_pages + 1
-        output_files = []
+    # Calculate how many segments we'll need
+    segment_count = (total_pages - 1) // max_pages + 1
+    output_files = []
 
-        # Split the PDF into segments
-        for i in range(segment_count):
-            start_page = max(0, i * max_pages - overlap if i > 0 else 0)
-            end_page = min(total_pages, (i + 1) * max_pages)
+    # Split the PDF into segments
+    for i in range(segment_count):
+        start_page = max(0, i * max_pages - overlap if i > 0 else 0)
+        end_page = min(total_pages, (i + 1) * max_pages)
 
-            # Create a writer for this segment
-            writer = PdfWriter()
+        # Create a new document for this segment
+        new_doc = fitz.open()
+        
+        # Add the relevant pages to the new document
+        new_doc.insert_pdf(doc, from_page=start_page, to_page=end_page-1)
 
-            # Add the relevant pages to the writer
-            for page_num in range(start_page, end_page):
-                writer.add_page(reader.pages[page_num])
+        # Determine output filename for this segment
+        output_filename = (
+            f"{filename_base}_part{i+1:03d}_{start_page+1:05d}-{end_page:05d}{ext}"
+        )
+        output_path = os.path.join(output_dir, output_filename)
 
-            # Determine output filename for this segment
-            output_filename = (
-                f"{filename_base}_part{i+1:03d}_{start_page+1:05d}-{end_page:05d}{ext}"
-            )
-            output_path = os.path.join(output_dir, output_filename)
+        # Save the new document
+        new_doc.save(output_path)
+        new_doc.close()
 
-            # Write the output file
-            with open(output_path, "wb") as output_file:
-                writer.write(output_file)
+        output_files.append(output_path)
 
-            output_files.append(output_path)
-
-        return output_files
+    # Close the original document
+    doc.close()
+    return output_files
 
 
 def prepare_pdf_files(pdf_files, output_dir, max_pages=1750, overlap=10):
@@ -136,6 +135,83 @@ def cleanup_temp_files(temp_dir):
         temp_dir: Path to the temporary directory
     """
     shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def extract_text_from_pdf(pdf_path):
+    """
+    Extract text from a PDF file using PyMuPDF.
+
+    Args:
+        pdf_path: Path to the PDF file to extract text from
+
+    Returns:
+        dict: Dictionary with success status and extracted text or error
+    """
+    try:
+        doc = fitz.open(pdf_path)
+        text = []
+        
+        for page_num, page in enumerate(doc):
+            page_text = page.get_text()
+            text.append(f"--- Page {page_num + 1} ---\n{page_text}")
+        
+        doc.close()
+        
+        return {
+            "success": True,
+            "text": "\n\n".join(text)
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+def extract_text_from_pdf_with_azure(pdf_path, endpoint=None, key=None):
+    """
+    Extract text from a PDF file using Azure Document Intelligence.
+
+    Args:
+        pdf_path: Path to the PDF file to extract text from
+        endpoint: Azure Document Intelligence API endpoint
+        key: Azure Document Intelligence API key
+
+    Returns:
+        dict: Dictionary with success status and extracted text or error
+    """
+    try:
+        # Use a temporary output directory
+        temp_dir = os.path.join(os.path.dirname(pdf_path), "temp_azure_extraction")
+        os.makedirs(temp_dir, exist_ok=True)
+        
+        # Process with Azure
+        try:
+            json_path, markdown_path = process_pdf_with_azure(
+                pdf_path, temp_dir, endpoint=endpoint, key=key
+            )
+            
+            # Read the markdown content
+            with open(markdown_path, "r", encoding="utf-8") as f:
+                markdown_content = f.read()
+            
+            # Clean up temporary files
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            
+            return {
+                "success": True,
+                "text": markdown_content
+            }
+        except Exception as e:
+            # If Azure fails, fall back to local processing
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            return extract_text_from_pdf(pdf_path)
+            
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 def process_pdf_with_azure(

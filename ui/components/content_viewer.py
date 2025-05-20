@@ -3,9 +3,9 @@ Content viewer component for the Forensic Psych Report Drafter.
 Provides a simple text viewer without the file tree.
 """
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QTextEdit, QWidget, QVBoxLayout
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QTextEdit, QWidget, QVBoxLayout
 
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 

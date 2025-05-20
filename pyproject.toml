@@ -5,12 +5,15 @@ description = "An experimental forensic report drafter"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "anthropic>=0.49.0",
+    "anthropic==0.51.0",
     "azure-ai-documentintelligence>=1.0.2",
+    "click>=8.1.8",
+    "google-generativeai>=0.8.5",
+    "gradio>=5.29.0",
     "langchain>=0.3.20",
     "langchain-text-splitters>=0.3.6",
     "pymupdf>=1.25.5",
-    "pypdf2>=3.0.1",
-    "pyqt6>=6.9.0",
+    "pyside6>=6.9.0",
     "python-dotenv>=1.1.0",
+    "tqdm>=4.67.1",
 ]

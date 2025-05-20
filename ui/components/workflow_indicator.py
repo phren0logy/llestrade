@@ -5,8 +5,8 @@ Provides a visual representation of workflow steps and their status.
 
 import os
 from enum import Enum
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QGroupBox, QHBoxLayout, QVBoxLayout, QLabel
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QVBoxLayout, QLabel
 
 
 class WorkflowStep(Enum):

@@ -53,11 +53,11 @@ else:
 
 # Now try importing PyQt6
 try:
-    from PyQt6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QWidget
-    from PyQt6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QWidget
+    from PySide6.QtCore import Qt
     print("Successfully imported PyQt6 modules")
 except ImportError as e:
-    print(f"Failed to import PyQt6: {e}")
+    print(f"Failed to import PySide6: {e}")
     sys.exit(1)
 
 class TestWindow(QMainWindow):

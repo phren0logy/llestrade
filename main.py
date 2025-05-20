@@ -5,26 +5,59 @@ Brings together all UI components and implements the main window functionality.
 
 import os
 import sys
+
 # macOS Qt plugin fix: set Qt plugin path before loading any Qt modules
-try:
-    import PyQt6
-    plugin_root = os.path.join(os.path.dirname(PyQt6.__file__), "Qt6", "plugins")
-    platforms_path = os.path.join(plugin_root, "platforms")
-    os.environ["QT_PLUGIN_PATH"] = plugin_root
-    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = platforms_path
-    from PyQt6.QtCore import QCoreApplication
-    # include both plugin root and platforms directory for Qt plugin loading
-    QCoreApplication.setLibraryPaths([plugin_root, platforms_path])
-except Exception:
-    pass
+# This MUST be done before importing ANY PySide6 modules
+if sys.platform == "darwin":  # macOS specific fix
+    # Try both venv and system paths
+    possible_plugin_paths = []
+
+    # Add potential PySide6 plugin paths
+    try:
+        import site
+
+        for site_dir in site.getsitepackages():
+            qt_path = os.path.join(site_dir, "PySide6", "Qt", "plugins")
+            if os.path.exists(qt_path):
+                possible_plugin_paths.append(qt_path)
+    except ImportError:
+        pass
+
+    # Check if we're in a virtual environment
+    if hasattr(sys, "real_prefix") or (
+        hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix
+    ):
+        venv_path = os.path.join(
+            sys.prefix,
+            "lib",
+            "python" + sys.version[:3],
+            "site-packages",
+            "PySide6",
+            "Qt",
+            "plugins",
+        )
+        if os.path.exists(venv_path):
+            possible_plugin_paths.append(venv_path)
+
+    # Set environment variables if we found valid paths
+    if possible_plugin_paths:
+        os.environ["QT_PLUGIN_PATH"] = os.pathsep.join(possible_plugin_paths)
+        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = os.pathsep.join(
+            [
+                os.path.join(p, "platforms")
+                for p in possible_plugin_paths
+                if os.path.exists(os.path.join(p, "platforms"))
+            ]
+        )
 
 import logging
 import traceback
 from pathlib import Path
 
-from PyQt6.QtCore import QSize
-from PyQt6.QtGui import QIcon
-from PyQt6.QtWidgets import (
+# Now we can safely import PySide6
+from PySide6.QtCore import QCoreApplication, QSize
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
     QMessageBox,
@@ -34,18 +67,26 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+# Additional plugin path setting using QCoreApplication
+if (
+    sys.platform == "darwin"
+    and "possible_plugin_paths" in locals()
+    and possible_plugin_paths
+):
+    QCoreApplication.setLibraryPaths(possible_plugin_paths)
+
 # Import configuration settings
 from config import APP_TITLE, APP_VERSION, setup_environment_variables
 
 # Import utility modules
 from llm_utils import LLMClientFactory, cached_count_tokens
+from ui.analysis_tab import AnalysisTab
+from ui.pdf_processing_tab import PDFProcessingTab
 
 # Import UI tab modules
 from ui.prompts_tab import PromptsTab
 from ui.refinement_tab import RefinementTab
 from ui.testing_tab import TestingTab
-from ui.pdf_processing_tab import PDFProcessingTab
-from ui.analysis_tab import AnalysisTab
 
 
 class ForensicReportDrafterApp(QMainWindow):
@@ -107,14 +148,16 @@ class ForensicReportDrafterApp(QMainWindow):
         try:
             # Create client with auto provider selection first
             client = LLMClientFactory.create_client(provider=provider)
-            
+
             # Simple test with token counting (minimal API impact)
             response = cached_count_tokens(client, text="Test connection")
-            
+
             # Check response
             if response.get("success", False):
                 provider = getattr(client, "provider", "auto")
-                self.status_bar.showMessage(f"{provider.capitalize()} API key found. Ready to use.", 5000)
+                self.status_bar.showMessage(
+                    f"{provider.capitalize()} API key found. Ready to use.", 5000
+                )
             else:
                 error = response.get("error", "Unknown error")
                 QMessageBox.warning(

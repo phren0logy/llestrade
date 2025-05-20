@@ -4,9 +4,9 @@ Provides a split view with a file tree and content viewer.
 """
 
 import os
-from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QSplitter, QTreeWidget, QTreeWidgetItem, QTextEdit
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QFont
+from PySide6.QtWidgets import QSplitter, QTreeWidget, QTreeWidgetItem, QTextEdit
 
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 
@@ -18,7 +18,7 @@ class ResultsViewer(QSplitter):
     """
     
     # Signal emitted when an item is selected in the tree
-    item_selected = pyqtSignal(QTreeWidgetItem, int)
+    item_selected = Signal(QTreeWidgetItem, int)
     
     def __init__(self, header_labels=None, placeholder_text=None):
         """

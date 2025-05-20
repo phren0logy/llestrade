@@ -3,7 +3,7 @@ Worker thread for processing PDF files with Azure Document Intelligence.
 """
 
 import os
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 from pdf_utils import (
     process_pdfs_with_azure,
@@ -13,9 +13,9 @@ from pdf_utils import (
 class AzureProcessingThread(QThread):
     """Worker thread for processing PDF files with Azure Document Intelligence."""
 
-    progress_signal = pyqtSignal(int, str)
-    finished_signal = pyqtSignal(dict)
-    error_signal = pyqtSignal(str)
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(dict)
+    error_signal = Signal(str)
 
     def __init__(self, pdf_files, output_dir, azure_endpoint=None, azure_key=None):
         """Initialize the thread with the PDF files to process with Azure."""

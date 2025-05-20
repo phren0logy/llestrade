@@ -4,7 +4,7 @@ Provides UI for selecting files or directories with validation.
 """
 
 import os
-from PyQt6.QtWidgets import (
+from PySide6.QtWidgets import (
     QWidget,
     QHBoxLayout,
     QVBoxLayout,

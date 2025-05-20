@@ -4,7 +4,7 @@ Worker thread for processing PDF files.
 
 import os
 
-from PyQt6.QtCore import QThread, pyqtSignal
+from PySide6.QtCore import QThread, Signal
 
 from pdf_utils import (
     get_pdf_page_count,
@@ -17,9 +17,9 @@ from pdf_utils import (
 class PDFProcessingThread(QThread):
     """Worker thread for processing PDF files."""
 
-    progress_signal = pyqtSignal(int, str)
-    finished_signal = pyqtSignal(list)
-    error_signal = pyqtSignal(str)
+    progress_signal = Signal(int, str)
+    finished_signal = Signal(list)
+    error_signal = Signal(str)
 
     def __init__(self, pdf_files, output_dir, max_pages=1750, overlap=10):
         """Initialize the thread with the PDF files to process."""
