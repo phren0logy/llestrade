@@ -99,7 +99,8 @@ class BaseLLMClient(abc.ABC):
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries for API requests
             thinking_budget_tokens: Budget for "thinking" tokens in extended thinking mode
-            default_system_prompt: Default system prompt to use when none is provided
+            default_system_prompt: Default system prompt to use when none is provided.
+                                 If None, will try to load from PromptManager.
             debug: Debug mode flag
         """
         self.timeout = timeout
@@ -107,11 +108,27 @@ class BaseLLMClient(abc.ABC):
         self.thinking_budget_tokens = thinking_budget_tokens
         self.debug = debug
 
-        # Set default system prompt if not provided
-        if default_system_prompt is None:
-            self.default_system_prompt = "You are an advanced assistant designed to help a forensic psychiatrist. Your task is to analyze and objectively document case information in a formal clinical style, maintaining professional psychiatric documentation standards. Distinguish between information from the subject and objective findings. Report specific details such as dates, frequencies, dosages, and other relevant clinical data. Document without emotional language or judgment."
-        else:
-            self.default_system_prompt = default_system_prompt
+        # Try to import PromptManager for system prompt
+        try:
+            from prompt_manager import PromptManager
+            prompt_manager = PromptManager()
+            self.default_system_prompt = prompt_manager.get_system_prompt()
+            if debug:
+                logging.info("Loaded system prompt from PromptManager")
+        except Exception as e:
+            if debug:
+                logging.warning(f"Could not load PromptManager, using default system prompt: {e}")
+            # Fall back to provided or default prompt
+            if default_system_prompt is not None:
+                self.default_system_prompt = default_system_prompt
+            else:
+                self.default_system_prompt = (
+                    "You are an advanced assistant designed to help a forensic psychiatrist. "
+                    "Your task is to analyze and objectively document case information in a formal clinical style, "
+                    "maintaining professional psychiatric documentation standards. Distinguish between information "
+                    "from the subject and objective findings. Report specific details such as dates, frequencies, "
+                    "dosages, and other relevant clinical data. Document without emotional language or judgment."
+                )
 
         # Load environment variables
         self._load_env_vars()
@@ -1468,13 +1485,26 @@ class LLMClient:
             "Initializing legacy LLMClient - consider using LLMClientFactory for new code"
         )
 
+        # Try to get system prompt from PromptManager
+        system_prompt = default_system_prompt
+        if default_system_prompt is None:
+            try:
+                from prompt_manager import PromptManager
+                prompt_manager = PromptManager()
+                system_prompt = prompt_manager.get_system_prompt()
+                if debug:
+                    logging.info("Loaded system prompt from PromptManager")
+            except Exception as e:
+                if debug:
+                    logging.warning(f"Could not load PromptManager: {e}")
+
         # Create clients for each provider
         self.anthropic_client = LLMClientFactory.create_client(
             provider="anthropic",
             timeout=timeout,
             max_retries=max_retries,
             thinking_budget_tokens=thinking_budget_tokens,
-            default_system_prompt=default_system_prompt,
+            default_system_prompt=system_prompt,
             api_key=anthropic_api_key,
             debug=debug,
         )
@@ -1484,7 +1514,7 @@ class LLMClient:
             timeout=timeout,
             max_retries=max_retries,
             thinking_budget_tokens=thinking_budget_tokens,
-            default_system_prompt=default_system_prompt,
+            default_system_prompt=system_prompt,
             api_key=google_api_key,
             debug=debug,
         )
@@ -1493,7 +1523,7 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.thinking_budget_tokens = thinking_budget_tokens
-        self.default_system_prompt = self.anthropic_client.default_system_prompt
+        self.default_system_prompt = system_prompt or self.anthropic_client.default_system_prompt
         self.debug = debug
 
     def _load_env_vars(self):

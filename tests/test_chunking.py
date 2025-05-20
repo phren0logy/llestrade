@@ -16,10 +16,8 @@ class MockClient:
 class TestChunking(unittest.TestCase):
     def test_api_call_reduction(self):
         # Create a document with 30 paragraphs
-        paragraphs = [f"This is paragraph {i}. " * 20 for i in range(30)]
-        text = "
-
-".join(paragraphs)
+        paragraphs = [f"This is paragraph {i}." + " Some more text. " * 19 for i in range(30)]
+        text = "\n\n".join(paragraphs)
         
         # Use our mock client to track API calls
         client = MockClient()

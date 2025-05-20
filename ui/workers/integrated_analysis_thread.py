@@ -5,17 +5,19 @@ Worker thread for generating an integrated analysis with Claude's thinking model
 import logging
 import os
 import time
-import traceback
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple
 
-from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QThread, Signal, QObject
 
 from llm_utils import (
+    LLMClientFactory,
+    LLMClient,
     AnthropicClient,
     GeminiClient,
-    LLMClientFactory,
     cached_count_tokens,
 )
+from prompt_manager import PromptManager
 
 
 class IntegratedAnalysisThread(QThread):
@@ -497,8 +499,20 @@ class IntegratedAnalysisThread(QThread):
                 40, "Sending for analysis..."
             )
 
-            # Use specific model based on token count
-            system_prompt = f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
+            # Get system prompt from template
+            try:
+                app_dir = Path(__file__).parent.parent.parent
+                template_dir = app_dir / 'prompt_templates'
+                prompt_manager = PromptManager(template_dir=template_dir)
+                system_prompt = prompt_manager.get_template(
+                    "document_analysis_system_prompt",
+                    subject_name=self.subject_name,
+                    subject_dob=self.subject_dob,
+                    case_info=self.case_info
+                )
+            except Exception as e:
+                logging.error(f"Error loading system prompt template: {e}")
+                system_prompt = f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
 
             # Check if we should use Gemini's extended thinking for large token counts
             if use_gemini:

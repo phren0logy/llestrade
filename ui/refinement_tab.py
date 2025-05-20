@@ -5,6 +5,7 @@ Handles the report refinement with extended thinking functionality.
 
 import os
 import time
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
 from file_utils import read_file_content, read_file_preview, write_file_content
 from llm_utils import LLMClientFactory
+from prompt_manager import PromptManager
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.results_viewer import ResultsViewer
@@ -37,14 +39,23 @@ class RefinementThread(QThread):
     finished_signal = Signal()
 
     def __init__(
-        self, report_path, instructions, template_path=None, transcript_path=None
+        self, report_path, instructions, template_path=None, transcript_path=None, prompt_manager=None
     ):
-        """Initialize the refinement thread."""
+        """Initialize the refinement thread.
+        
+        Args:
+            report_path: Path to the report file
+            instructions: Instructions for refinement
+            template_path: Optional path to template file
+            transcript_path: Optional path to transcript file
+            prompt_manager: Optional PromptManager instance
+        """
         super().__init__()
         self.report_path = report_path
         self.instructions = instructions
         self.template_path = template_path
         self.transcript_path = transcript_path
+        self.prompt_manager = prompt_manager
 
     def run(self):
         """Run the report refinement process."""
@@ -79,40 +90,21 @@ class RefinementThread(QThread):
                 thinking_budget_tokens=32000,  # Allocate generous thinking budget
             )
 
-            # Create refinement prompt
-            prompt = f"""
-            Please help refine the following report, following these instructions:
-            
-            {self.instructions}
-            
-            Here is the report:
-            
-            <draft>
-            {report_content}
-            </draft>
-            """
-
-            # Add template content if available
-            if template_content:
-                prompt += f"""
-                
-                Here is the template to follow:
-                
-                <template>
-                {template_content}
-                </template>
-                """
-
-            # Add transcript content if available
-            if transcript_content:
-                prompt += f"""
-                
-                Here is the transcript:
-                
-                <transcript>
-                {transcript_content}
-                </transcript>
-                """
+            # Build the refinement prompt using the prompt manager
+            if hasattr(self, 'prompt_manager') and self.prompt_manager is not None:
+                try:
+                    prompt = self.prompt_manager.get_template(
+                        "refinement_prompt",
+                        instructions=self.instructions,
+                        report_content=report_content,
+                        template_section=f"<template>\n{template_content}\n</template>" if template_content else "",
+                        transcript_section=f"<transcript>\n{transcript_content}\n</transcript>" if transcript_content else ""
+                    )
+                except Exception as e:
+                    self.update_signal.emit(f"Error building prompt: {str(e)}")
+                    prompt = self._build_fallback_prompt(report_content, template_content, transcript_content)
+            else:
+                prompt = self._build_fallback_prompt(report_content, template_content, transcript_content)
 
             # Generate response with thinking
             self.update_signal.emit("Sending report to Claude for refinement...")
@@ -170,6 +162,9 @@ class RefinementTab(BaseTab):
         self.current_template_path = None
         self.current_transcript_path = None
         self.refinement_thread = None
+        
+        # Initialize prompt manager
+        self.prompt_manager = self._initialize_prompt_manager()
 
         # Initialize the base tab
         super().__init__(parent, status_bar)
@@ -277,20 +272,97 @@ class RefinementTab(BaseTab):
         # Connect signals after all UI elements are created
         self.instruction_text.textChanged.connect(self.check_ready_state)
 
-        # Set initial instruction text
-        default_instruction = """This draft report, wrapped in <draft> tags, is a rough draft of a forensic psychiatric report. Perform the following steps in sequential order to improve the report:
-        1. Ignore the contents of block quotes. The errors belong to the source doucument being quoted. Never modify the contents of block quotes.
-        2. Check each section for information that is repeated in other sections. Put this information in the most appropriate section. If a template is provided, it will be wrapped in <template> tags. If duplicate information is found, after placing it in the most appropriate section, reference that section in other parts of the report where that information was removed.
-        3. After making those changes, revise the document for readability. Preserve details that are important for accurate diagnosis and formulation. Make sure that verbs are in past tense for information that came from the interview. Do not use the word "denied," instead say "did not report," "did not endorse," etc.
-        4. Check the report against a transcript, if provided. The transcript is wrapped in <transcript> tags. Pay careful attention to direct quotes. Minor changes in directly quoteed statements from the transcript, such as punctuation and capitalization, or removal of words with an elipsis, are acceptable and do not need to be changed.
-        5. Use the words instead of numerals for one thorugh 10, and numbers for 11 and above. Spell out decades, such as "twenties" instead of 20s.
-        6. Some information may not appear in the transcript, such as quotes from other documents or psychometric testing. Do not make changes to this information that does not appear in the transcript. Do make a note of it in your thinking.
-        7. Output only the final revised report."""
-        self.instruction_text.setText(default_instruction)
+        # Set initial instruction text from template
+        try:
+            default_instruction = self.prompt_manager.get_template("refinement_instructions")
+            self.instruction_text.setText(default_instruction)
+        except Exception as e:
+            logging.error(f"Failed to load refinement instructions: {e}")
+            # Fallback to hardcoded instructions if template loading fails
+            default_instruction = """This draft report, wrapped in <draft> tags, is a rough draft of a forensic psychiatric report. Perform the following steps in sequential order to improve the report:
+            1. Ignore the contents of block quotes. The errors belong to the source document being quoted. Never modify the contents of block quotes.
+            2. Check each section for information that is repeated in other sections. Put this information in the most appropriate section. If a template is provided, it will be wrapped in <template> tags. If duplicate information is found, after placing it in the most appropriate section, reference that section in other parts of the report where that information was removed.
+            3. After making those changes, revise the document for readability. Preserve details that are important for accurate diagnosis and formulation. Make sure that verbs are in past tense for information that came from the interview. Do not use the word "denied," instead say "did not report," "did not endorse," etc.
+            4. Check the report against a transcript, if provided. The transcript is wrapped in <transcript> tags. Pay careful attention to direct quotes. Minor changes in directly quoted statements from the transcript, such as punctuation and capitalization, or removal of words with an ellipsis, are acceptable and do not need to be changed.
+            5. Use words instead of numerals for one through ten, and numbers for 11 and above. Spell out decades, such as "twenties" instead of 20s.
+            6. Some information may not appear in the transcript, such as quotes from other documents or psychometric testing. Do not make changes to this information that does not appear in the transcript. Do make a note of it in your thinking.
+            7. Output only the final revised report."""
+            self.instruction_text.setText(default_instruction)
 
         # Update UI state
         self.check_ready_state()
 
+    def _initialize_prompt_manager(self) -> PromptManager:
+        """Initialize and return a PromptManager instance.
+        
+        Returns:
+            PromptManager: Initialized prompt manager
+        """
+        try:
+            # Look for prompt templates in the application directory
+            app_dir = Path(__file__).parent.parent
+            template_dir = app_dir / 'prompt_templates'
+            
+            # Fall back to current directory if not found
+            if not template_dir.exists():
+                template_dir = Path('prompt_templates')
+                
+            return PromptManager(template_dir=template_dir)
+            
+        except Exception as e:
+            logging.error(f"Failed to initialize prompt manager: {e}")
+            # Return a dummy prompt manager that will use fallback prompts
+            return type('DummyPromptManager', (), {
+                'get_template': lambda self, name, **kwargs: ""
+            })()
+            
+    def _build_fallback_prompt(self, report_content: str, template_content: str = "", transcript_content: str = "") -> str:
+        """Build a fallback prompt when template loading fails.
+        
+        Args:
+            report_content: Content of the report
+            template_content: Optional template content
+            transcript_content: Optional transcript content
+            
+        Returns:
+            Formatted prompt string
+        """
+        prompt = f"""
+        Please help refine the following report, following these instructions:
+        
+        {self.instructions}
+        
+        Here is the report:
+        
+        <draft>
+        {report_content}
+        </draft>
+        """
+
+        # Add template content if available
+        if template_content:
+            prompt += f"""
+            
+            Here is the template to follow:
+            
+            <template>
+            {template_content}
+            </template>
+            """
+
+        # Add transcript content if available
+        if transcript_content:
+            prompt += f"""
+            
+            Here is the transcript:
+            
+            <transcript>
+            {transcript_content}
+            </transcript>
+            """
+            
+        return prompt
+            
     def on_report_selected(self, file_path):
         """Handle report file selection."""
         self.current_report_path = file_path
@@ -347,7 +419,7 @@ class RefinementTab(BaseTab):
         self.workflow_indicator.set_status_message(status_message)
 
     def refine_report(self):
-        """Process the report with Claude's extended thinking."""
+        """Start the report refinement process."""
         if not self.current_report_path:
             self.show_status("Please select a report file")
             return
@@ -363,10 +435,11 @@ class RefinementTab(BaseTab):
 
         # Create and start the refinement thread
         self.refinement_thread = RefinementThread(
-            self.current_report_path,
-            instructions,
-            self.current_template_path,
-            self.current_transcript_path,
+            report_path=self.current_report_path,
+            instructions=instructions,
+            template_path=self.current_template_path,
+            transcript_path=self.current_transcript_path,
+            prompt_manager=self.prompt_manager
         )
 
         # Connect signals

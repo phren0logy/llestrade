@@ -1,0 +1,12 @@
+Please help refine the following report, following these instructions:
+
+{instructions}
+
+Here is the report:
+
+<draft>
+{report_content}
+</draft>
+
+{template_section}
+{transcript_section}

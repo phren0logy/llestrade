@@ -7,9 +7,11 @@ import os
 import time
 import logging
 from typing import Dict, Any
+from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from llm_utils import LLMClientFactory
+from prompt_manager import PromptManager
 
 class PDFPromptThread(QThread):
     """Thread for processing PDFs with Claude in the background."""
@@ -51,8 +53,15 @@ class PDFPromptThread(QThread):
             self.update_signal.emit("Sending PDF and prompt to Claude (this may take a while)...")
             self.progress_signal.emit(20, 100)
             
-            # Process the PDF with Claude, enabling extended thinking
-            system_prompt = "You are an advanced assistant designed to help a forensic psychiatrist. Your task is to analyze and objectively document case information in a formal clinical style, maintaining professional psychiatric documentation standards. Distinguish between information from the subject and objective findings. Report specific details such as dates, frequencies, dosages, and other relevant clinical data. Document without emotional language or judgment."
+            # Initialize PromptManager
+            try:
+                app_dir = Path(__file__).parent.parent.parent
+                template_dir = app_dir / 'prompt_templates'
+                prompt_manager = PromptManager(template_dir=template_dir)
+                system_prompt = prompt_manager.get_system_prompt()
+            except Exception as e:
+                logging.error(f"Error initializing PromptManager: {e}")
+                system_prompt = "You are an advanced assistant designed to help a forensic psychiatrist. Your task is to analyze and objectively document case information in a formal clinical style, maintaining professional psychiatric documentation standards."
             
             self.update_signal.emit("Processing with Claude's PDF handling and extended thinking...")
             self.progress_signal.emit(40, 100)
