@@ -31,7 +31,7 @@ class PromptManager:
             logging.warning(f"Template directory not found: {self.template_dir}")
             return
             
-        for template_file in self.template_dir.glob("*.txt"):
+        for template_file in self.template_dir.glob("*.md"):
             try:
                 with open(template_file, 'r', encoding='utf-8') as f:
                     self.templates[template_file.stem] = f.read()

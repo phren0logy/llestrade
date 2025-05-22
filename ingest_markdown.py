@@ -1,4 +1,8 @@
 from langchain_text_splitters import MarkdownHeaderTextSplitter
+from prompt_manager import PromptManager
+
+# Initialize prompt manager
+prompt_manager = PromptManager()
 
 
 def ingest_and_split_markdown(file_path: str) -> list:
@@ -61,18 +65,8 @@ def generate_template_fragments(markdown_parts: list) -> list:
             fragment += f"\n<template>{content}\n</template>\n"
 
         # Add instructions for the LLM
-        fragment += """\nINSTRUCTIONS: Generate a section of a comprehensive forensic psychiatric evaluation report from the provided template, wrapped in <template> tags. Use the information from the interview transcript provided above wrapped in <transript> tags. Start by organizing the relevant information, including direct quotes. Remove information that is obviously not relevant to this section of the report. After organizing the information and determining the most relevant content, write the report section. Use the provided markdown headers for each section. Avoid bullets and answer in complete paragraphs, except when creating tables.
-        Use the direct quotes and exact language from the source document without changes. Refer to the subject by name, such as Mr. Doe or Ms. Smith. When attributing quotes to the subject, use past tense and vary the verb choice similar to the examples below.
-        
-        <example_attribution>
-        Ms. Smith stated...
-        Mr. Doe reported...
-        Ms. Doe recalled...
-        Mr. Smith explained...
-        According to Ms. Doe...
-        Ms. Smith told me...
-        </example_attribution>
-        """
+        instructions = prompt_manager.get_template('report_generation_instructions')
+        fragment += f"\n{instructions}"
 
         # Add this template to the list
         templates.append({
