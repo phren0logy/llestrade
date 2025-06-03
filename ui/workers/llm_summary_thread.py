@@ -5,10 +5,11 @@ Worker thread for summarizing markdown files with Claude.
 import logging
 import os
 import time
-
-from PySide6.QtCore import QThread, Signal
 from pathlib import Path
 
+from PySide6.QtCore import QThread, Signal
+
+from app_config import get_configured_llm_client
 from llm_utils import LLMClientFactory, cached_count_tokens
 from prompt_manager import PromptManager
 
@@ -167,186 +168,216 @@ def chunk_document_with_overlap(text, client, max_chunk_size=60000, overlap=1000
 
 from pathlib import Path
 
+
 class LLMSummaryThread(QThread):
     """Worker thread for summarizing markdown files with Claude."""
 
     progress_signal = Signal(int, str)
+    file_progress = Signal(int, str)
+    file_finished = Signal(dict)
+    file_error = Signal(str)
+    
     finished_signal = Signal(dict)
     error_signal = Signal(str)
 
     def __init__(
-        self, markdown_files, output_dir, subject_name, subject_dob, case_info
+        self, 
+        parent,
+        markdown_files, 
+        output_dir, 
+        subject_name, 
+        subject_dob, 
+        case_info,
+        status_panel,
+        llm_provider_id,
+        llm_model_name
     ):
         """Initialize the thread with the markdown files to summarize."""
-        super().__init__()
+        super().__init__(parent)
         self.markdown_files = markdown_files
         self.output_dir = output_dir
         self.subject_name = subject_name
         self.subject_dob = subject_dob
         self.case_info = case_info
+        self.status_panel = status_panel
+        self.llm_provider_id = llm_provider_id
+        self.llm_model_name = llm_model_name
         self.llm_client = None
-        self._initialize_llm_client()
 
     def _initialize_llm_client(self):
-        """Initialize LLM client with better error handling."""
+        """Initialize LLM client using specified provider and model."""
         try:
-            # Skip initialization if client already exists
-            if self.llm_client:
-                self.progress_signal.emit(0, "Using existing LLM client")
-                return
+            if self.llm_client and self.llm_client.is_initialized:
+                self.status_panel.append_details("LLM client already initialized.")
+                return True
 
-            self.progress_signal.emit(0, "Initializing LLM client...")
-            from llm_utils import LLMClientFactory
+            self.status_panel.append_details(
+                f"Initializing LLM client: Provider ID: {self.llm_provider_id}, Model: {self.llm_model_name}"
+            )
+            
+            client_info = get_configured_llm_client(
+                provider_id_override=self.llm_provider_id,
+                model_override=self.llm_model_name
+            )
 
-            self.llm_client = LLMClientFactory.create_client(provider="auto")
-            # Test connection by sending a simple request
-            test_result = cached_count_tokens(self.llm_client, text="Test connection")
-            if not test_result["success"]:
-                error_msg = f"LLM client initialization test failed: {test_result.get('error', 'Unknown error')}"
-                logging.error(error_msg)
-                self.progress_signal.emit(0, error_msg)
+            if client_info and client_info["client"]:
+                self.llm_client = client_info["client"]
+                if self.llm_client.is_initialized:
+                    self.status_panel.append_details(
+                        f"Successfully initialized LLM client: {client_info['provider_label']} ({client_info['effective_model_name']})"
+                    )
+                    return True
+                else:
+                    error_msg = f"LLM client for {client_info['provider_label']} could not be initialized (is_initialized flag is false)."
+                    self.status_panel.append_error(error_msg)
+                    logging.error(error_msg)
+                    self.error_signal.emit(error_msg)
+                    return False
             else:
-                self.progress_signal.emit(0, "LLM client initialized successfully")
+                error_msg = f"Failed to get configured LLM client for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Check app_config logs."
+                self.status_panel.append_error(error_msg)
+                logging.error(error_msg)
+                self.error_signal.emit(error_msg)
+                return False
         except Exception as e:
-            error_msg = f"Error initializing LLM client: {str(e)}"
-            logging.error(error_msg)
-            self.progress_signal.emit(0, error_msg)
+            error_msg = f"Exception initializing LLM client ({self.llm_provider_id}/{self.llm_model_name}): {str(e)}"
+            self.status_panel.append_error(error_msg)
+            logging.exception(error_msg)
+            self.error_signal.emit(error_msg)
+            return False
 
     def run(self):
         """Run the LLM summarization operations."""
-        try:
-            # Verify LLM client is properly initialized
-            if not self.llm_client:
-                self._initialize_llm_client()
-                if not self.llm_client:
-                    raise Exception("Failed to initialize LLM client")
+        if not self._initialize_llm_client():
+            self.finished_signal.emit({
+                "total": len(self.markdown_files),
+                "processed": 0,
+                "skipped": 0,
+                "failed": len(self.markdown_files),
+                "files": [],
+                "status": "error",
+                "message": "LLM client initialization failed. No files processed."
+            })
+            return
 
-            # Send initial progress
+        try:
+            if not self.llm_client or not self.llm_client.is_initialized:
+                for markdown_path in self.markdown_files:
+                    self.file_error.emit(f"LLM client not available for {os.path.basename(markdown_path)}.")
+                self.finished_signal.emit({
+                    "total": len(self.markdown_files),
+                    "processed": 0,
+                    "skipped": 0,
+                    "failed": len(self.markdown_files),
+                    "files": [],
+                    "status": "error",
+                    "message": "LLM client became unavailable. No files processed."
+                })    
+                return
+
             self.progress_signal.emit(
                 0, f"Starting LLM summarization for {len(self.markdown_files)} files"
             )
 
-            # Process files in batches to update progress
-            total_files = len(self.markdown_files)
             results = {
-                "total": total_files,
+                "total": len(self.markdown_files),
                 "processed": 0,
                 "skipped": 0,
                 "failed": 0,
                 "files": [],
             }
 
-            # Process each file and update progress
             for i, markdown_path in enumerate(self.markdown_files):
                 try:
-                    # Update progress
-                    progress_pct = int((i / total_files) * 100)
-                    self.progress_signal.emit(
-                        progress_pct, f"Summarizing: {os.path.basename(markdown_path)}"
-                    )
+                    current_file_basename = os.path.basename(markdown_path)
+                    self.file_progress.emit(0, f"Starting: {current_file_basename}")
 
-                    # Get basename for output file
                     basename = os.path.splitext(os.path.basename(markdown_path))[0]
                     summary_file = os.path.join(
                         self.output_dir, f"{basename}_summary.md"
                     )
 
-                    # Check if already processed
                     if os.path.exists(summary_file):
+                        self.file_progress.emit(100, f"Skipped: {current_file_basename} (already exists)")
                         results["skipped"] += 1
-                        results["files"].append(
-                            {
-                                "file": markdown_path,
-                                "markdown": markdown_path,
-                                "status": "skipped",
-                                "summary": summary_file,
-                            }
-                        )
+                        results["files"].append({
+                            "path": markdown_path,
+                            "summary_path": summary_file,
+                            "status": "skipped",
+                        })
+                        self.file_finished.emit(results["files"][-1])
                         continue
 
-                    # Process the file with Claude
-                    try:
-                        self.progress_signal.emit(
-                            0,
-                            f"Starting file processing: {os.path.basename(markdown_path)}",
-                        )
-                        summary_path = self.summarize_markdown_file(
-                            markdown_path, summary_file
-                        )
-                        self.progress_signal.emit(
-                            0,
-                            f"Successfully summarized: {os.path.basename(markdown_path)}",
-                        )
+                    self.file_progress.emit(10, f"Reading: {current_file_basename}")
+                    with open(markdown_path, "r", encoding="utf-8") as f:
+                        markdown_content = f.read()
+                    self.file_progress.emit(
+                        0, f"Successfully read file contents: {len(markdown_content)} bytes"
+                    )
 
-                        # Update results
+                    self.file_progress.emit(20, f"Summarizing: {current_file_basename} with {self.llm_client.provider}")
+                    summary_content = self.summarize_markdown_file(
+                        markdown_path, summary_file, markdown_content
+                    )
+                    self.file_progress.emit(80, f"Finalizing: {current_file_basename}")
+
+                    if summary_content:
+                        with open(summary_file, "w", encoding="utf-8") as f:
+                            f.write(summary_content)
                         results["processed"] += 1
-                        results["files"].append(
-                            {
-                                "file": markdown_path,
-                                "markdown": markdown_path,
-                                "status": "success",  # Use "success" to be consistent
-                                "summary": summary_path,
-                            }
-                        )
-                    except Exception as e:
-                        import traceback
-
-                        error_details = traceback.format_exc()
-                        error_msg = f"Summarization error for {os.path.basename(markdown_path)}: {str(e)}\n{error_details}"
-                        self.progress_signal.emit(0, error_msg)
-
-                        # Add to failed results
+                        results["files"].append({
+                            "path": markdown_path,
+                            "summary_path": summary_file,
+                            "status": "processed",
+                        })
+                        self.status_panel.append_details(f"Successfully summarized: {current_file_basename}")
+                        self.file_progress.emit(100, f"Completed: {current_file_basename}")
+                        self.file_finished.emit(results["files"][-1])
+                    else:
                         results["failed"] += 1
-                        results["files"].append(
-                            {
-                                "file": markdown_path,
-                                "markdown": markdown_path,
-                                "status": "failed",
-                                "error": str(e),
-                                "error_details": error_details,
-                            }
-                        )
-                except Exception as e:
-                    import traceback
-
-                    error_msg = str(e)
-                    error_details = traceback.format_exc()
-                    # Log detailed error information
-                    self.progress_signal.emit(
-                        0,
-                        f"Error processing {os.path.basename(markdown_path)}: {error_msg}\n{error_details}",
-                    )
-
-                    results["failed"] += 1
-                    results["files"].append(
-                        {
-                            "file": markdown_path,
-                            "markdown": markdown_path,
+                        results["files"].append({
+                            "path": markdown_path,
+                            "summary_path": summary_file,
                             "status": "failed",
-                            "error": error_msg,
-                            "error_details": error_details,
-                        }
-                    )
+                            "error": "Summarization returned no content or failed internally."
+                        })
+                        self.status_panel.append_error(f"Failed to summarize: {current_file_basename} - No content from LLM.")
+                        self.file_error.emit(f"Summarization failed for {current_file_basename}: No content.")
 
-            # Signal completion with results
-            self.progress_signal.emit(100, "Summarization complete")
+                except Exception as e:
+                    error_message = f"Error summarizing {os.path.basename(markdown_path)}: {str(e)}"
+                    logging.exception(error_message)
+                    self.status_panel.append_error(error_message)
+                    results["failed"] += 1
+                    results["files"].append({
+                        "path": markdown_path,
+                        "summary_path": os.path.join(self.output_dir, f"{basename}_summary.md"),
+                        "status": "failed",
+                        "error": str(e),
+                    })
+                    self.file_error.emit(error_message)
+                finally:
+                    overall_progress_pct = int(((i + 1) / len(self.markdown_files)) * 100)
+                    self.progress_signal.emit(overall_progress_pct, f"Processed {i+1}/{len(self.markdown_files)} files")
+
+            results["status"] = "completed" if results["failed"] == 0 else "partial_error"
             self.finished_signal.emit(results)
 
         except Exception as e:
-            import traceback
-
-            error_msg = f"Error during LLM summarization: {str(e)}"
-            error_details = traceback.format_exc()
-            self.progress_signal.emit(0, f"{error_msg}\n{error_details}")
-
-            # Also emit the error signal for the UI to handle
-            self.error_signal.emit(error_msg)
-
-            # Make sure we don't crash silently
-            import logging
-
-            logging.error(f"Critical error in LLM summarization thread: {error_msg}")
-            logging.error(error_details)
+            run_error_msg = f"Critical error in LLM summary thread: {str(e)}"
+            logging.exception(run_error_msg)
+            self.status_panel.append_error(run_error_msg)
+            self.error_signal.emit(run_error_msg)
+            if not results or results.get("status") not in ["completed", "partial_error", "error"]:
+                self.finished_signal.emit({
+                    "total": len(self.markdown_files),
+                    "processed": results.get("processed", 0) if results else 0,
+                    "skipped": results.get("skipped", 0) if results else 0,
+                    "failed": len(self.markdown_files) - (results.get("processed", 0) if results else 0) - (results.get("skipped", 0) if results else 0),
+                    "files": results.get("files", []) if results else [],
+                    "status": "error",
+                    "message": run_error_msg
+                })
 
     def create_summary_prompt(self, document_name, markdown_content):
         """
@@ -577,16 +608,17 @@ class LLMSummaryThread(QThread):
         # If we get here, we've exhausted all retries
         raise Exception(f"Failed to get API response after {max_retries} attempts")
 
-    def summarize_markdown_file(self, markdown_path, summary_file):
+    def summarize_markdown_file(self, markdown_path, summary_file, markdown_content):
         """
         Summarize a markdown file using the LLM, with chunking for large files.
 
         Args:
             markdown_path: Path to the markdown file
             summary_file: Path to save the summary
+            markdown_content: Content of the markdown file
 
         Returns:
-            Path to the summary file
+            Summary content
         """
         try:
             # Log beginning of file processing
@@ -615,35 +647,6 @@ class LLMSummaryThread(QThread):
                     )
             except Exception as e:
                 raise Exception(f"Error accessing file: {str(e)}")
-
-            # Read the markdown content
-            try:
-                self.progress_signal.emit(0, f"Reading file: {document_name}")
-                with open(markdown_path, "r", encoding="utf-8") as f:
-                    markdown_content = f.read()
-                self.progress_signal.emit(
-                    0, f"Successfully read file contents: {len(markdown_content)} bytes"
-                )
-            except UnicodeDecodeError:
-                # Try with different encoding if UTF-8 fails
-                try:
-                    self.progress_signal.emit(
-                        0, f"UTF-8 decoding failed, trying latin-1"
-                    )
-                    with open(markdown_path, "r", encoding="latin-1") as f:
-                        markdown_content = f.read()
-                    self.progress_signal.emit(
-                        0,
-                        f"Successfully read file with latin-1 encoding: {len(markdown_content)} bytes",
-                    )
-                except Exception as e:
-                    raise Exception(f"Failed to read file with any encoding: {str(e)}")
-            except PermissionError:
-                raise Exception(f"Permission denied when reading file: {markdown_path}")
-            except Exception as e:
-                raise Exception(f"Error reading markdown file: {str(e)}")
-
-            document_name = os.path.basename(markdown_path)
 
             # Verify output directory is writable
             output_dir = os.path.dirname(summary_file)
@@ -1105,7 +1108,7 @@ Use extended thinking to work through the document summaries systematically befo
                 self.progress_signal.emit(0, f"Error writing summary file: {str(e)}")
                 raise Exception(f"Error writing summary file: {str(e)}")
 
-            return summary_file
+            return final_content
 
         except Exception as e:
             # Add full traceback for debugging

@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from app_config import get_available_providers_and_models, get_configured_llm_client
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 from llm_utils import LLMClientFactory, cached_count_tokens
 from ui.base_tab import BaseTab
@@ -49,6 +50,9 @@ class AnalysisTab(BaseTab):
         self.markdown_directory = None
         self.results_output_directory = None
         self._refreshing = False  # Flag to prevent recursion
+        self.selected_llm_provider_id = None
+        self.selected_llm_model_name = None
+        self.available_llms = []
 
         # Initialize the base tab
         super().__init__(parent, status_bar)
@@ -138,9 +142,22 @@ class AnalysisTab(BaseTab):
         selector_group.setLayout(selector_layout)
         main_layout.addWidget(selector_group)
 
+        # Add status panel (moved earlier to be available for LLM selector initialization)
+        self.status_panel = StatusPanel()
+
         # Create operation buttons group
         operations_group = QGroupBox("Analysis Operations")
         operations_layout = QVBoxLayout()
+
+        # LLM Selector
+        llm_selector_layout = QHBoxLayout()
+        llm_selector_layout.addWidget(QLabel("Select LLM for Analysis:"))
+        self.llm_selector_combo = QComboBox()
+        self.llm_selector_combo.setToolTip("Choose the LLM to use for summarization and analysis.")
+        llm_selector_layout.addWidget(self.llm_selector_combo)
+        operations_layout.addLayout(llm_selector_layout)
+        self._populate_llm_selector()
+        self.llm_selector_combo.currentIndexChanged.connect(self._on_llm_selection_changed)
 
         # LLM Summarization button
         self.llm_process_button = QPushButton("Generate Summaries with LLM")
@@ -214,12 +231,56 @@ class AnalysisTab(BaseTab):
         viewer_group.setLayout(viewer_layout)
         main_layout.addWidget(viewer_group)
 
-        # Add status panel at the bottom
-        self.status_panel = StatusPanel()
+        # Add status panel at the bottom (original position, now add it to layout here)
         main_layout.addWidget(self.status_panel)
 
         # Set the main layout
         self.layout.addLayout(main_layout)
+
+    def _populate_llm_selector(self):
+        """Populates the LLM selector ComboBox."""
+        self.available_llms = get_available_providers_and_models()
+        self.llm_selector_combo.clear()
+        if not self.available_llms:
+            self.llm_selector_combo.addItem("No LLMs configured or available")
+            self.llm_selector_combo.setEnabled(False)
+            self.selected_llm_provider_id = None
+            self.selected_llm_model_name = None
+            return
+
+        self.llm_selector_combo.setEnabled(True)
+        for i, llm_config in enumerate(self.available_llms):
+            self.llm_selector_combo.addItem(llm_config["display_name"], userData=llm_config)
+        
+        # Set initial selection if any
+        if self.available_llms:
+            self._on_llm_selection_changed(0) # Trigger initial selection
+
+    def _on_llm_selection_changed(self, index):
+        """Handles changes in the LLM selector ComboBox."""
+        if index < 0 or not self.available_llms:
+            self.selected_llm_provider_id = None
+            self.selected_llm_model_name = None
+            # Disable buttons if no LLM is selected
+            self.llm_process_button.setEnabled(False)
+            self.integrate_button.setEnabled(False)
+            return
+
+        selected_data = self.llm_selector_combo.itemData(index)
+        if selected_data:
+            self.selected_llm_provider_id = selected_data["id"]
+            self.selected_llm_model_name = selected_data["model"]
+            self.status_panel.append_details(
+                f"LLM for Analysis set to: {selected_data['display_name']}"
+            )
+            # Update button states based on selection and other conditions
+            self.check_workflow_state()
+        else:
+            # Handle case where itemData might be None unexpectedly
+            self.selected_llm_provider_id = None
+            self.selected_llm_model_name = None
+            self.llm_process_button.setEnabled(False)
+            self.integrate_button.setEnabled(False)
 
     def on_markdown_folder_selected(self, directory):
         """Handle selection of markdown folder directory."""
@@ -413,7 +474,20 @@ class AnalysisTab(BaseTab):
             self.show_status(f"Error previewing file: {str(e)}")
 
     def safely_summarize_with_llm(self):
-        """Safely summarize markdown files with LLM after validating directories."""
+        """Initiate LLM summarization safely after checks."""
+        if (
+            not self.markdown_directory
+            or not self.results_output_directory
+            or not self.selected_llm_provider_id
+            or not self.selected_llm_model_name
+        ):
+            QMessageBox.warning(
+                self,
+                "Missing Information",
+                "Please ensure all required fields are filled out.",
+            )
+            return
+
         # Check if markdown directory is selected and exists
         if not hasattr(self, "markdown_directory") or not self.markdown_directory:
             QMessageBox.warning(
@@ -486,97 +560,109 @@ class AnalysisTab(BaseTab):
         self.summarize_with_llm()
 
     def summarize_with_llm(self):
-        """Summarize the markdown files with LLM."""
-        # Get the subject name and case information
+        """Process markdown files to generate summaries using LLM."""
+        if (
+            not self.markdown_directory
+            or not self.results_output_directory
+            or not self.selected_llm_provider_id
+            or not self.selected_llm_model_name
+        ):
+            self.status_panel.append_error(
+                "Markdown directory, results output directory, or LLM not selected."
+            )
+            return
+
+        markdown_files = self.get_markdown_files()
+        if not markdown_files:
+            QMessageBox.warning(
+                self, "No Markdown Files", "No markdown files found in the selected directory."
+            )
+            return
+
+        output_dir = os.path.join(self.results_output_directory, "summaries")
+        os.makedirs(output_dir, exist_ok=True)
+
         subject_name = self.subject_input.text().strip()
         subject_dob = self.dob_input.text().strip()
         case_info = self.case_info_input.toPlainText().strip()
 
-        # Validate required fields
+        # Validate subject information (moved here from individual thread)
         if not subject_name:
-            QMessageBox.warning(
-                self,
-                "Missing Information",
-                "Please enter the subject's name before summarizing.",
-            )
+            QMessageBox.warning(self, "Missing Information", "Please enter subject's name.")
             return
-
         if not subject_dob:
-            QMessageBox.warning(
-                self,
-                "Missing Information",
-                "Please enter the subject's date of birth before summarizing.",
-            )
+            QMessageBox.warning(self, "Missing Information", "Please enter subject's DOB.")
             return
-
-        # Validate date of birth format
         if not re.match(r"^\d{4}-\d{2}-\d{2}$", subject_dob):
-            QMessageBox.warning(
-                self,
-                "Invalid Date Format",
-                "Please enter the date of birth in YYYY-MM-DD format.",
-            )
+            QMessageBox.warning(self, "Invalid Date Format", "Subject DOB must be YYYY-MM-DD.")
             return
-
-        # Get markdown files from the selected markdown directory
-        markdown_files = self.get_markdown_files()
-        if not markdown_files:
-            QMessageBox.warning(
-                self,
-                "No Files Found",
-                "No markdown files found for summarization. Please check the selected directory.",
-            )
-            return
-
-        # Set output directory to the root directory instead of a subdirectory
-        output_dir = self.results_output_directory
-        self.status_panel.append_details(f"Using output directory: {output_dir}")
 
         # Update workflow indicator
-        self.workflow_indicator.update_status(WorkflowStep.SUMMARIZE_LLM, "in_progress")
+        self.workflow_indicator.update_status(
+            WorkflowStep.SUMMARIZE_LLM, "in_progress"
+        )
+        self.llm_process_button.setEnabled(False)
 
         # ----- NEW APPROACH: Process files one at a time to avoid thread issues -----
         self.process_files_sequentially(
-            markdown_files, output_dir, subject_name, subject_dob, case_info
+            markdown_files, 
+            output_dir, 
+            subject_name, 
+            subject_dob, 
+            case_info,
+            self.selected_llm_provider_id,  # Pass LLM info
+            self.selected_llm_model_name    # Pass LLM info
         )
 
     def process_files_sequentially(
-        self, markdown_files, output_dir, subject_name, subject_dob, case_info
+        self, markdown_files, output_dir, subject_name, subject_dob, case_info,
+        llm_provider_id, llm_model_name # Added LLM params
     ):
-        """Process files one at a time to avoid thread issues."""
-        # Create progress dialog
-        self.progress_dialog = QProgressDialog(
-            "Summarizing documents with LLM...",
-            "Cancel",
-            0,
-            len(markdown_files),
-            self,
-        )
-        self.progress_dialog.setWindowTitle("LLM Summarization")
-        self.progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.progress_dialog.setMinimumDuration(0)
-        self.progress_dialog.setValue(0)
-        self.progress_dialog.show()
-
-        # Initialize results
-        self.summary_results = {
-            "total": len(markdown_files),
-            "processed": 0,
-            "skipped": 0,
-            "failed": 0,
-            "files": [],
-        }
-
-        # Set up processing of first file
-        self.current_file_index = 0
-        self.markdown_files = markdown_files
+        """Processes files sequentially for summarization."""
+        self.files_to_process = markdown_files
         self.output_dir = output_dir
         self.subject_name = subject_name
         self.subject_dob = subject_dob
         self.case_info = case_info
+        self.processed_files_count = 0
+        self.total_files_count = len(markdown_files)
+        self.llm_provider_id_for_summary = llm_provider_id # Store for process_next_file
+        self.llm_model_name_for_summary = llm_model_name # Store for process_next_file
 
-        # Process files one at a time using a timer to avoid blocking the UI
-        QTimer.singleShot(100, self.process_next_file)
+        if self.total_files_count > 0:
+            # Setup progress dialog for the entire batch
+            self.progress_dialog = QProgressDialog(
+                "Summarizing documents with LLM...",
+                "Cancel",
+                0,
+                self.total_files_count,
+                self,
+            )
+            self.progress_dialog.setWindowTitle("LLM Summarization")
+            self.progress_dialog.setWindowModality(Qt.WindowModality.ApplicationModal)
+            self.progress_dialog.setMinimumDuration(0)
+            self.progress_dialog.setValue(0)
+            self.progress_dialog.show()
+
+            # Initialize results
+            self.summary_results = {
+                "total": self.total_files_count,
+                "processed": 0,
+                "skipped": 0,
+                "failed": 0,
+                "files": [],
+            }
+
+            # Set up processing of first file
+            self.current_file_index = 0
+            self.markdown_files = markdown_files
+            self.output_dir = output_dir
+            self.subject_name = subject_name
+            self.subject_dob = subject_dob
+            self.case_info = case_info
+
+            # Process files one at a time using a timer to avoid blocking the UI
+            QTimer.singleShot(100, self.process_next_file)
 
     def process_next_file(self):
         """Process the next file in the queue."""
@@ -596,7 +682,7 @@ class AnalysisTab(BaseTab):
         self.progress_dialog.setValue(self.current_file_index)
         self.progress_dialog.setLabelText(f"Processing: {basename}")
         self.show_status(
-            f"Summarizing file {self.current_file_index + 1} of {len(self.markdown_files)}: {basename}"
+            f"Summarizing file {self.current_file_index + 1}/{len(self.markdown_files)}: {basename}"
         )
 
         # Check if already processed
@@ -624,11 +710,15 @@ class AnalysisTab(BaseTab):
         try:
             # Create LLM thread for just this file
             self.single_file_thread = LLMSummaryThread(
+                self,
                 markdown_files=[current_file],
                 output_dir=self.output_dir,
                 subject_name=self.subject_name,
                 subject_dob=self.subject_dob,
                 case_info=self.case_info,
+                status_panel=self.status_panel, # Pass status panel for detailed logging by thread
+                llm_provider_id=self.llm_provider_id_for_summary, # Pass stored LLM info
+                llm_model_name=self.llm_model_name_for_summary  # Pass stored LLM info
             )
 
             # Connect signals
@@ -967,198 +1057,77 @@ class AnalysisTab(BaseTab):
         self.status_panel.append_details(message)
 
     def generate_integrated_analysis(self):
-        """Generate an integrated analysis from the combined summary."""
-        # Get the subject name and case information
-        subject_name = self.subject_input.text().strip()
-        subject_dob = self.dob_input.text().strip()
-        case_info = self.case_info_input.toPlainText().strip()
-
-        # Validate required fields
-        if not subject_name:
+        """Generates an integrated analysis from combined summaries and markdown files."""
+        if (
+            not self.results_output_directory
+            or not self.markdown_directory
+            or not self.selected_llm_provider_id
+            or not self.selected_llm_model_name
+        ):
             QMessageBox.warning(
                 self,
                 "Missing Information",
-                "Please enter the subject's name before generating an integrated analysis.",
+                "Please ensure that the results output directory, markdown directory, and LLM are selected.",
             )
             return
 
-        if not subject_dob:
-            QMessageBox.warning(
-                self,
-                "Missing Information",
-                "Please enter the subject's date of birth before generating an integrated analysis.",
-            )
-            return
+        subject_name = self.subject_input.text()
+        subject_dob = self.dob_input.text()
+        case_info = self.case_info_input.toPlainText()
 
-        if not case_info:
-            QMessageBox.warning(
-                self,
-                "Missing Information",
-                "Please enter case information before generating an integrated analysis.",
-            )
-            return
-
-        # Get the combined summary file
-        combined_file = os.path.join(
-            self.results_output_directory, "combined_summary.md"
-        )
-        if not os.path.exists(combined_file):
-            QMessageBox.warning(
-                self,
-                "No Combined Summary",
-                "No combined summary file found. Please combine summaries first.",
-            )
-            return
-
-        # Update workflow indicator
-        self.workflow_indicator.update_status(
-            WorkflowStep.INTEGRATE_ANALYSIS, "in_progress"
+        combined_summary_filename = f"{subject_name}_Combined_Summaries.md" if subject_name else "Combined_Summaries.md"
+        combined_summary_path = os.path.join(
+            self.results_output_directory, "summaries", combined_summary_filename
         )
 
-        # Create a progress dialog
+        if not os.path.exists(combined_summary_path):
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"Combined summary file not found at: {combined_summary_path}. "
+                "Please generate and combine summaries first.",
+            )
+            return
+            
+        # Original markdown files
+        original_markdown_files = self.get_markdown_files()
+        if not original_markdown_files:
+            QMessageBox.warning(
+                self, "No Markdown Files", "No markdown files found in the selected directory."
+            )
+            return
+
         progress_dialog = QProgressDialog(
-            "Generating integrated analysis...",
-            "Cancel",
-            0,
-            100,
-            self,
+            "Generating Integrated Analysis...", "Cancel", 0, 0, self
         )
-        progress_dialog.setWindowTitle("Integrated Analysis")
         progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
-        progress_dialog.setValue(5)
-        progress_dialog.setLabelText("Initializing LLM clients...")
+        progress_dialog.setAutoClose(False)
+        progress_dialog.setAutoReset(False)
         progress_dialog.show()
-        QApplication.processEvents()  # Ensure UI updates
-        
-        # Check if the combined summary is particularly large
-        try:
-            from llm_utils import LLMClientFactory
 
-            # First try to create an Anthropic client (preferred for most analyses)
-            self.status_panel.append_details("Attempting to initialize Claude client first...")
-            anthropic_client = LLMClientFactory.create_client(provider="anthropic")
-            
-            # Check if Claude was initialized successfully
-            if hasattr(anthropic_client, 'is_initialized') and anthropic_client.is_initialized:
-                self.status_panel.append_details("✅ Successfully initialized Claude client")
-                use_claude_client = True
-                
-                # No need to explicitly initialize Gemini unless we detect the file is very large
-                try:
-                    # Estimate file size by reading it
-                    with open(combined_file, 'r', encoding='utf-8') as f:
-                        content = f.read()
-                        # Rough estimate: 1 token is approximately 4 characters
-                        estimated_tokens = len(content) // 4
-                        self.status_panel.append_details(f"Estimated token count: ~{estimated_tokens}")
-                        
-                        # Only try Gemini for very large files (>180k tokens)
-                        if estimated_tokens > 180000:
-                            self.status_panel.append_details("File is very large (>180k tokens), initializing Gemini as alternative...")
-                            try_gemini = True
-                        else:
-                            self.status_panel.append_details("File is within Claude's size limits, using Claude")
-                            try_gemini = False
-                except Exception as e:
-                    self.status_panel.append_details(f"Error estimating file size: {str(e)}")
-                    try_gemini = False
-            else:
-                self.status_panel.append_details("❌ Failed to initialize Claude client, will try Gemini")
-                use_claude_client = False
-                try_gemini = True
-        except Exception as e:
-            self.status_panel.append_details(f"Error initializing Claude client: {str(e)}")
-            use_claude_client = False
-            try_gemini = True
-            
-        # Only try initializing Gemini if needed based on the above logic
-        use_gemini_client = False
-        if try_gemini:
-            try:
-                self.status_panel.append_details("Attempting to initialize Gemini client...")
-                # Create a Gemini client directly
-                gemini_client = LLMClientFactory.create_client(provider="gemini")
-                
-                # Check if it was successfully initialized
-                if hasattr(gemini_client, 'is_initialized') and gemini_client.is_initialized:
-                    self.status_panel.append_details("✅ Successfully initialized Gemini client")
-                    use_gemini_client = True
-                else:
-                    self.status_panel.append_details("❌ Failed to initialize Gemini client")
-                    use_gemini_client = False
-            except Exception as e:
-                self.status_panel.append_details(f"Error initializing Gemini client: {str(e)}")
-                use_gemini_client = False
+        self.integrate_button.setEnabled(False)
 
-        # Create a worker thread for integrated analysis
-        self.integrated_thread = IntegratedAnalysisThread(
-            combined_file,
+        # Create and start the integrated analysis thread
+        self.integrated_analysis_thread = IntegratedAnalysisThread(
+            self,
+            combined_summary_path,
+            original_markdown_files,
             self.results_output_directory,
             subject_name,
             subject_dob,
             case_info,
+            self.status_panel,
+            progress_dialog,
+            self.selected_llm_provider_id,
+            self.selected_llm_model_name
         )
-        
-        # Choose which client to initialize based on our decision logic
-        progress_dialog.setValue(8)
-        if use_claude_client and not try_gemini:
-            # Prefer Claude client for most cases
-            progress_dialog.setLabelText("Setting up Claude client for analysis thread...")
-            QApplication.processEvents()  # Ensure UI updates
-            
-            try:
-                # Reinitialize the thread with Claude
-                if hasattr(self.integrated_thread, 'reinitialize_llm_client'):
-                    success = self.integrated_thread.reinitialize_llm_client(provider="anthropic")
-                    if success:
-                        self.status_panel.append_details("✅ Reinitialized thread with Claude client")
-                    else:
-                        self.status_panel.append_details("❌ Failed to reinitialize thread with Claude")
-            except Exception as e:
-                self.status_panel.append_details(f"Error setting up Claude client: {str(e)}")
-        elif use_gemini_client:
-            # Use Gemini for large files or when Claude fails
-            progress_dialog.setLabelText("Setting up Gemini client for analysis thread...")
-            QApplication.processEvents()  # Ensure UI updates
-            
-            try:
-                # Call the reinitialize method on the thread directly with "gemini"
-                if hasattr(self.integrated_thread, 'reinitialize_llm_client'):
-                    success = self.integrated_thread.reinitialize_llm_client(provider="gemini")
-                    if success:
-                        self.status_panel.append_details("✅ Reinitialized thread with Gemini client")
-                    else:
-                        self.status_panel.append_details("❌ Failed to reinitialize thread with Gemini")
-                elif hasattr(self.integrated_thread, 'force_init_gemini_client'):
-                    success = self.integrated_thread.force_init_gemini_client()
-                    if success:
-                        self.status_panel.append_details("✅ Forced Gemini client initialization")
-                    else:
-                        self.status_panel.append_details("❌ Failed to force Gemini client")
-            except Exception as e:
-                self.status_panel.append_details(f"Error setting up Gemini client: {str(e)}")
-        else:
-            # If both failed, let the thread try auto-detection
-            self.status_panel.append_details("Both clients failed initialization, trying thread's auto-detection")
-
-        # Connect signals
-        self.integrated_thread.progress_signal.connect(
-            lambda pct, msg: self.update_progress(progress_dialog, pct, msg)
+        self.integrated_analysis_thread.finished_signal.connect(
+            self.on_integrated_analysis_finished
         )
-        self.integrated_thread.finished_signal.connect(
-            lambda success, message, file_path: self.on_integrated_analysis_finished(
-                success, message, file_path, progress_dialog
-            )
+        self.integrated_analysis_thread.error_signal.connect(
+            self.on_integrated_analysis_error
         )
-        self.integrated_thread.error_signal.connect(
-            lambda error: self.on_integrated_analysis_error(error, progress_dialog)
-        )
-
-        # Connect cancel signal
-        progress_dialog.canceled.connect(self.integrated_thread.terminate)
-
-        # Start the thread
-        self.integrated_thread.start()
+        self.integrated_analysis_thread.start()
 
     def on_integrated_analysis_finished(
         self, success, message, file_path, progress_dialog

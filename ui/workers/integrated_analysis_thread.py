@@ -4,17 +4,19 @@ Worker thread for generating an integrated analysis with Claude's thinking model
 
 import logging
 import os
+import threading
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from PySide6.QtCore import QThread, Signal, QObject
+from PySide6.QtCore import QObject, QThread, Signal
 
+from app_config import get_configured_llm_client
 from llm_utils import (
-    LLMClientFactory,
-    LLMClient,
     AnthropicClient,
     GeminiClient,
+    LLMClient,
+    LLMClientFactory,
     cached_count_tokens,
 )
 from prompt_manager import PromptManager
@@ -27,764 +29,277 @@ class IntegratedAnalysisThread(QThread):
     finished_signal = Signal(bool, str, str)  # success, message, file_path
     error_signal = Signal(str)
 
-    def __init__(self, combined_file, output_dir, subject_name, subject_dob, case_info):
-        """Initialize the thread with the combined summary file."""
-        super().__init__()
-        self.combined_file = combined_file
+    def __init__(self, 
+                 parent, 
+                 combined_summary_path, 
+                 original_markdown_files, 
+                 output_dir, 
+                 subject_name, 
+                 subject_dob, 
+                 case_info,
+                 status_panel, 
+                 progress_dialog, # This is QProgressDialog instance
+                 llm_provider_id, 
+                 llm_model_name):
+        """Initialize the thread."""
+        super().__init__(parent)
+        self.combined_summary_path = combined_summary_path
+        self.original_markdown_files = original_markdown_files
         self.output_dir = output_dir
         self.subject_name = subject_name
         self.subject_dob = subject_dob
         self.case_info = case_info
+        self.status_panel = status_panel
+        self.progress_dialog = progress_dialog # Store the QProgressDialog
+        self.llm_provider_id = llm_provider_id
+        self.llm_model_name = llm_model_name
         
-        # Check for API keys in environment variables
-        self._check_api_keys()
-        
-        # Attempt to initialize LLM clients with detailed error logging
+        self.llm_client: Optional[LLMClient] = None
+        self.llm_client_provider_label: Optional[str] = None
+        self.llm_client_effective_model: Optional[str] = None
+
+    def _initialize_llm_client(self) -> bool:
+        """Initialize LLM client using specified provider and model."""
         try:
-            # Try auto detection first
-            self.llm_client = LLMClientFactory.create_client(provider="auto")
-            logging.info("LLM client initialized using auto provider selection")
+            self.progress_signal.emit(5, f"Initializing LLM: {self.llm_provider_id} ({self.llm_model_name})...")
+            self.status_panel.append_details(
+                f"Attempting to initialize LLM client for integrated analysis: Provider ID: {self.llm_provider_id}, Model: {self.llm_model_name}"
+            )
             
-            # Log which provider was selected
-            if isinstance(self.llm_client, AnthropicClient) and self.llm_client.is_initialized:
-                logging.info("Using Anthropic Claude as the LLM provider")
-            elif isinstance(self.llm_client, GeminiClient) and self.llm_client.is_initialized:
-                logging.info("Using Google Gemini as the LLM provider")
-            else:
-                # If auto detection failed, explicitly try Gemini
-                logging.warning("Auto provider selection failed, trying Gemini explicitly")
-                self.llm_client = LLMClientFactory.create_client(provider="gemini")
-                
-                if isinstance(self.llm_client, GeminiClient) and self.llm_client.is_initialized:
-                    logging.info("Successfully initialized Gemini as fallback")
+            client_info = get_configured_llm_client(
+                provider_id_override=self.llm_provider_id,
+                model_override=self.llm_model_name
+            )
+
+            if client_info and client_info.get("client"):
+                self.llm_client = client_info["client"]
+                if self.llm_client.is_initialized:
+                    self.llm_client_provider_label = client_info.get("provider_label", self.llm_provider_id)
+                    self.llm_client_effective_model = client_info.get("effective_model_name", self.llm_model_name)
+                    self.status_panel.append_details(
+                        f"Successfully initialized LLM client: {self.llm_client_provider_label} ({self.llm_client_effective_model}) for integrated analysis."
+                    )
+                    self.progress_signal.emit(10, f"LLM client {self.llm_client_provider_label} initialized.")
+                    return True
                 else:
-                    logging.error("Failed to initialize any LLM provider")
-        except Exception as e:
-            logging.error(f"Error initializing LLM client: {str(e)}")
-            # Create a placeholder client to avoid NoneType errors
-            self.llm_client = LLMClientFactory.create_client(provider="auto")
-
-    def _check_api_keys(self):
-        """Check and log API key availability."""
-        try:
-            import os
-
-            # Check for Gemini key
-            gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            if gemini_key:
-                masked_key = f"{gemini_key[:4]}...{gemini_key[-4:]}" if len(gemini_key) > 8 else "[too short]"
-                logging.info(f"Found Gemini API key: {masked_key}")
+                    error_msg = f"LLM client for {client_info.get('provider_label', self.llm_provider_id)} could not be initialized (is_initialized flag is false)."
+                    self.status_panel.append_error(error_msg)
+                    logging.error(error_msg)
+                    self.error_signal.emit(error_msg)
+                    return False
             else:
-                logging.error("No Gemini API key found in environment variables")
-                
-            # Check for Anthropic key
-            anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
-            if anthropic_key:
-                masked_key = f"{anthropic_key[:4]}...{anthropic_key[-4:]}" if len(anthropic_key) > 8 else "[too short]"
-                logging.info(f"Found Anthropic API key: {masked_key}")
-            else:
-                logging.error("No Anthropic API key found in environment variables")
-                
+                error_msg = f"Failed to get configured LLM client for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
+                self.status_panel.append_error(error_msg)
+                logging.error(error_msg)
+                self.error_signal.emit(error_msg)
+                return False
         except Exception as e:
-            logging.error(f"Error checking API keys: {str(e)}")
+            error_msg = f"Exception initializing LLM client ({self.llm_provider_id}/{self.llm_model_name}) for integrated analysis: {str(e)}"
+            self.status_panel.append_error(error_msg)
+            logging.exception(error_msg)
+            self.error_signal.emit(error_msg)
+            return False
 
-    def process_api_response(self, prompt, system_prompt, use_gemini=False):
-        """Process API response with detailed error handling and retries."""
+    def process_api_response(self, prompt: str, system_prompt: str) -> Optional[Dict[str, Any]]:
+        """Process API response with detailed error handling and retries using the configured LLM client."""
         max_retries = 3
         retry_count = 0
-        retry_delay = 2  # seconds
-        timeout_seconds = 600  # 10 minutes timeout for long analysis
+        retry_delay = 5  # seconds, increased from 2
+        timeout_seconds = 900  # 15 minutes timeout for potentially very long analysis
 
-        # Force using Gemini if explicitly requested or if we detect our client is a GeminiClient
-        if not use_gemini and isinstance(self.llm_client, GeminiClient) and self.llm_client.is_initialized:
-            use_gemini = True
-            self.progress_signal.emit(40, "Detected Gemini client, switching to Gemini mode")
+        if not self.llm_client or not self.llm_client.is_initialized:
+            err_msg = "LLM client not initialized. Cannot process API response."
+            self.status_panel.append_error(err_msg)
+            self.error_signal.emit(err_msg)
+            return None
 
         while retry_count < max_retries:
             try:
-                # Log which provider is being used
-                if use_gemini:
-                    provider = "Google Gemini"
-                    self.progress_signal.emit(
-                        45, "Using Gemini API for large token context"
-                    )
-                else:
-                    provider = "Anthropic Claude"
-                    self.progress_signal.emit(45, "Using Claude API")
-
+                provider_name = self.llm_client_provider_label or self.llm_client.provider
                 self.progress_signal.emit(
                     50,
-                    f"Sending request to {provider} (attempt {retry_count + 1}/{max_retries})...",
+                    f"Sending request to {provider_name} (Attempt {retry_count + 1}/{max_retries})...",
                 )
-
-                # Create a detailed log of the API parameters
-                self.progress_signal.emit(
-                    50, f"System prompt length: {len(system_prompt)} chars"
-                )
-                self.progress_signal.emit(50, f"Prompt length: {len(prompt)} chars")
-
-                # Time the API call for debugging
-                start_time = time.time()
-
-                # Set a timer to update the progress dialog and keep UI responsive during long API calls
-                elapsed = 0
-                last_update = 0
-
-                # Create a background task with progress updates
-                from PySide6.QtCore import QEventLoop, QTimer
-
-                # Prepare the request parameters - same parameters for both clients
-                # Let each client handle the system_prompt appropriately
-                request_params = {
-                    "prompt_text": prompt,
-                    "system_prompt": system_prompt,
-                    "temperature": 0.1,
-                }
+                self.status_panel.append_details(f"Sending request to {provider_name} for integrated analysis. Attempt {retry_count + 1}.")
                 
-                # Add model parameter for Claude
-                if not use_gemini:
-                    request_params["model"] = "claude-3-7-sonnet-20250219"
+                # Log prompt lengths for debugging
+                # self.status_panel.append_details(f"System prompt length: {len(system_prompt)} chars, User prompt length: {len(prompt)} chars")
 
-                # Create an event to track API response completion
-                response = None
-                api_error = None
+                start_time = time.time()
                 api_complete = False
+                response_data = None
+                api_error = None
 
-                # Start the API call in the current thread, but use a timer to update progress
-                # This won't block the UI thread but will keep our current thread busy
-                def make_api_call():
-                    nonlocal response, api_error, api_complete
+                def make_api_call_wrapper():
+                    nonlocal response_data, api_error, api_complete
                     try:
-                        # Check client type and use appropriate method
-                        if use_gemini:
-                            # First check if we have a GeminiClient available
-                            gemini_available = False
-                            
-                            # Check if we have a direct GeminiClient
-                            if isinstance(self.llm_client, GeminiClient) and self.llm_client.is_initialized:
-                                gemini_available = True
-                                self.progress_signal.emit(
-                                    45, "Using direct Gemini client for large token context"
-                                )
-                                response = self.llm_client.generate_response(**request_params)
-                            
-                            # Check if we have a LLMClient with Gemini methods
-                            elif hasattr(self.llm_client, "gemini_initialized") and self.llm_client.gemini_initialized:
-                                gemini_available = True
-                                self.progress_signal.emit(
-                                    45, "Using LLMClient's Gemini interface for large token context"
-                                )
-                                # Make a copy of request_params for Gemini since parameter names might differ
-                                gemini_params = request_params.copy()
-                                
-                                # Check if generate_response_with_gemini expects max_output_tokens instead of max_tokens
-                                if hasattr(self.llm_client, "generate_response_with_gemini"):
-                                    # Add the model parameter explicitly for Gemini
-                                    gemini_params["model"] = "gemini-2.5-pro-preview-05-06"
-                                    
-                                    # Convert max_tokens to max_output_tokens if needed
-                                    if "max_tokens" in gemini_params and not hasattr(self.llm_client.generate_response_with_gemini, "max_tokens"):
-                                        gemini_params["max_output_tokens"] = gemini_params.pop("max_tokens")
-                                        
-                                    response = self.llm_client.generate_response_with_gemini(**gemini_params)
-                            
-                            # Fall back to Claude if Gemini is not available
-                            if not gemini_available:
-                                self.progress_signal.emit(
-                                    45, "Gemini client not available, falling back to Claude"
-                                )
-                                # Try to use Claude with standard parameters, it might reject if too large
-                                try:
-                                    # Add model parameter for Claude
-                                    claude_params = request_params.copy()
-                                    claude_params["model"] = "claude-3-7-sonnet-20250219"
-                                    response = self.llm_client.generate_response(**claude_params)
-                                except Exception as claude_error:
-                                    # If Claude fails (likely due to token limit), log this and pass the error up
-                                    self.progress_signal.emit(
-                                        45, f"Claude also failed: {str(claude_error)}"
-                                    )
-                                    raise Exception(f"Gemini not available and Claude failed: {str(claude_error)}")
-                        else:
-                            # Use Anthropic client
-                            response = self.llm_client.generate_response(**request_params)
-                        
+                        request_params = {
+                            "prompt_text": prompt,
+                            "system_prompt": system_prompt,
+                            "temperature": 0.1, # Default, can be adjusted if needed
+                            "model": self.llm_client_effective_model # Use the specific model for the client
+                        }
+                        # Some clients might not expect a model param if it's part of their endpoint (e.g. Azure)
+                        # The create_client in llm_utils should handle this, but good to be mindful.
+                        # For now, we assume model is generally required or ignored if not applicable by the client.
+
+                        self.status_panel.append_details(f"Using model: {self.llm_client_effective_model} with {provider_name}") 
+                        response_data = self.llm_client.generate_response(**request_params)
                         api_complete = True
                     except Exception as e:
                         api_error = e
                         api_complete = True
-
-                # Start API call in a parallel thread
-                import threading
-
-                api_thread = threading.Thread(target=make_api_call)
+                
+                api_thread = threading.Thread(target=make_api_call_wrapper)
                 api_thread.daemon = True
                 api_thread.start()
 
-                # Update progress while waiting for the API call to complete
-                wait_interval = 1.0  # Update every second
+                last_progress_update_time = start_time
                 while not api_complete:
-                    # Update elapsed time
-                    elapsed = time.time() - start_time
-
-                    # Send progress update every 5 seconds
-                    if elapsed - last_update >= 5:
+                    elapsed_time = time.time() - start_time
+                    if time.time() - last_progress_update_time >= 5:
                         self.progress_signal.emit(
-                            52,
-                            f"Still waiting for response from {provider}... (elapsed: {int(elapsed)}s)",
+                            50 + int((elapsed_time / timeout_seconds) * 40), # Progress from 50 to 90 during API call
+                            f"Waiting for {provider_name}... ({int(elapsed_time)}s elapsed)",
                         )
-                        last_update = elapsed
+                        last_progress_update_time = time.time()
+                    
+                    if elapsed_time > timeout_seconds:
+                        api_thread.join(0.1) # Attempt to clean up thread
+                        raise TimeoutError(f"API request to {provider_name} timed out after {timeout_seconds}s.")
+                    
+                    time.sleep(0.5) # Polling interval
 
-                    # Check for timeout
-                    if elapsed > timeout_seconds:
-                        self.progress_signal.emit(
-                            50, f"API request timed out after {timeout_seconds} seconds"
-                        )
-                        api_thread.join(0.1)  # Try to join but don't block
-                        raise Exception(
-                            f"API request timed out after {timeout_seconds} seconds"
-                        )
-
-                    # Sleep briefly to avoid hammering the CPU
-                    time.sleep(wait_interval)
-
-                    # Process UI events
-                    QApplication.processEvents()
-
-                # Check for API errors
                 if api_error:
-                    raise api_error
+                    raise api_error # Raise the error caught in the thread
 
-                # Log response time
-                elapsed_time = time.time() - start_time
-                self.progress_signal.emit(
-                    75, f"API response received in {elapsed_time:.2f} seconds"
-                )
-
-                # Check response
-                if not response["success"]:
-                    error_msg = response.get("error", "Unknown error")
-                    self.progress_signal.emit(
-                        50, f"LLM API returned error: {error_msg}"
-                    )
-
-                    # Check for specific error types that should trigger retry
-                    if (
-                        "rate limit" in error_msg.lower()
-                        or "timeout" in error_msg.lower()
-                    ):
-                        if retry_count < max_retries - 1:
-                            retry_count += 1
-                            wait_time = retry_delay * (
-                                2**retry_count
-                            )  # Exponential backoff
-                            self.progress_signal.emit(
-                                50,
-                                f"Retrying in {wait_time} seconds... (attempt {retry_count + 1}/{max_retries})",
-                            )
-                            time.sleep(wait_time)
-                            continue
-
-                    # If we get here, either we've exhausted retries or it's a non-retryable error
-                    raise Exception(f"LLM API error: {error_msg}")
-
-                self.progress_signal.emit(
-                    78, f"LLM response received: {len(response['content'])} chars"
-                )
-
-                # Check if the response is empty
-                if not response.get("content"):
-                    self.progress_signal.emit(50, "LLM returned empty response")
-                    raise Exception("LLM returned empty response")
-
-                # Log token usage for debugging
-                if "usage" in response:
-                    usage = response["usage"]
-                    self.progress_signal.emit(
-                        79,
-                        f"Token usage - Input: {usage.get('input_tokens', 'unknown')}, Output: {usage.get('output_tokens', 'unknown')}",
-                    )
-
-                return response
-
-            except Exception as e:
-                error_details = traceback.format_exc()
-
-                # Determine if we should retry
-                should_retry = False
-                error_msg = str(e).lower()
-
-                # Common retryable errors
-                retryable_errors = [
-                    "timeout",
-                    "connection",
-                    "network",
-                    "rate limit",
-                    "too many requests",
-                    "server error",
-                    "503",
-                    "502",
-                    "504",
-                    "429",
-                    "500",
-                ]
-
-                for err in retryable_errors:
-                    if err in error_msg:
-                        should_retry = True
-                        break
-
-                if should_retry and retry_count < max_retries - 1:
-                    retry_count += 1
-                    wait_time = retry_delay * (2**retry_count)  # Exponential backoff
-                    self.progress_signal.emit(
-                        50,
-                        f"Retryable error: {str(e)}. Retrying in {wait_time} seconds... (attempt {retry_count + 1}/{max_retries})",
-                    )
-                    time.sleep(wait_time)
+                if response_data and response_data.get("success"):
+                    self.status_panel.append_details(f"Successfully received response from {provider_name}.")
+                    self.progress_signal.emit(90, f"Response received from {provider_name}.")
+                    return response_data
                 else:
-                    # We've exhausted retries or hit a non-retryable error
-                    self.progress_signal.emit(
-                        50,
-                        f"Error in API processing (final): {str(e)}\n{error_details}",
-                    )
-                    raise Exception(f"API processing error: {str(e)}")
-
-        # If we get here, we've exhausted all retries
-        raise Exception(f"Failed to get API response after {max_retries} attempts")
-
-    def force_init_gemini_client(self):
-        """Force initialization of Gemini client specifically, regardless of what was auto-detected."""
-        try:
-            self.progress_signal.emit(5, "Explicitly initializing Gemini client...")
+                    error_detail = response_data.get("error", "Unknown API error") if response_data else "No response data"
+                    self.status_panel.append_error(f"API call to {provider_name} failed: {error_detail}")
+                    # Don't retry on client-side validation errors typically (e.g. bad API key, quota)
+                    # but allow retry for server errors or timeouts.
+                    # For simplicity here, we retry on any failure from the API response success=false.
+                    if retry_count < max_retries - 1:
+                        self.status_panel.append_details(f"Retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2 # Exponential backoff
+                    else:
+                         raise Exception(f"API call failed after {max_retries} retries: {error_detail}")
             
-            # Directly create a fresh Gemini client
-            # Get the API key from environment variables
-            import os
-
-            from llm_utils import GeminiClient
-            gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-            
-            if not gemini_key:
-                self.progress_signal.emit(8, "No Gemini API key found in environment variables")
-                return False
-                
-            # Create a new client directly
-            self.llm_client = LLMClientFactory.create_client(provider="gemini")
-            
-            # Verify it's actually a GeminiClient and initialized
-            if isinstance(self.llm_client, GeminiClient) and self.llm_client.is_initialized:
-                self.progress_signal.emit(10, "Successfully initialized dedicated Gemini client")
-                return True
-            else:
-                self.progress_signal.emit(10, "Failed to initialize Gemini client properly")
-                return False
-        except Exception as e:
-            self.progress_signal.emit(10, f"Error initializing Gemini client: {str(e)}")
-            return False
+            except TimeoutError as te:
+                self.status_panel.append_error(f"Timeout error with {provider_name} (Attempt {retry_count + 1}): {str(te)}")
+                logging.error(f"TimeoutError during API call: {str(te)}")
+                if retry_count < max_retries - 1:
+                    time.sleep(retry_delay)
+                else:
+                    self.error_signal.emit(f"API request timed out after {max_retries} attempts.")
+                    return None # Or raise an exception
+            except Exception as e:
+                self.status_panel.append_error(f"Error with {provider_name} (Attempt {retry_count + 1}): {str(e)}")
+                logging.exception(f"Exception during API call to {provider_name}")
+                if retry_count < max_retries - 1:
+                    # Check if it's a known non-retryable error type if possible
+                    time.sleep(retry_delay)
+                else:
+                    self.error_signal.emit(f"Failed after {max_retries} attempts: {str(e)}")
+                    return None # Or raise an exception
+            retry_count += 1
+        
+        self.error_signal.emit(f"API processing failed definitively after {max_retries} retries.")
+        return None
 
     def run(self):
-        """Run the integrated analysis."""
+        """Run the integrated analysis operations."""
+        if not self._initialize_llm_client():
+            self.finished_signal.emit(False, "LLM client initialization failed.", "")
+            return
+
         try:
-            # Define the output file path
-            integrated_file = os.path.join(self.output_dir, "integrated_analysis.md")
-            thinking_tokens_file = os.path.join(
-                self.output_dir, "integrated_analysis_thinking_tokens.md"
-            )
-
-            # Check if the integrated analysis already exists
-            if os.path.exists(integrated_file):
-                self.progress_signal.emit(
-                    100, "Integrated analysis file already exists, skipping generation."
-                )
-                success_message = (
-                    f"Using existing integrated analysis file for {self.subject_name}"
-                )
-                self.finished_signal.emit(True, success_message, integrated_file)
-                return
-
-            # Send initial progress
-            self.progress_signal.emit(0, "Starting integrated analysis...")
-            
-            # First, try to force initialize Gemini client
-            gemini_initialized = self.force_init_gemini_client()
-            
-            # If Gemini initialization failed, check the current client
-            if not gemini_initialized:
-                self.progress_signal.emit(5, "Checking current LLM client...")
-                if not hasattr(self.llm_client, 'is_initialized') or not self.llm_client.is_initialized:
-                    self.progress_signal.emit(5, "Main LLM client not initialized, creating auto client...")
-                    try:
-                        # Try creating an auto client as fallback
-                        self.llm_client = LLMClientFactory.create_client(provider="auto")
-                        if self.llm_client.is_initialized:
-                            self.progress_signal.emit(8, f"Successfully created fallback client: {self.llm_client.__class__.__name__}")
-                        else:
-                            self.progress_signal.emit(8, "Warning: Failed to initialize any LLM client")
-                    except Exception as e:
-                        self.progress_signal.emit(8, f"Error creating fallback client: {str(e)}")
-
-            # Read the combined summary content
-            with open(self.combined_file, "r", encoding="utf-8") as f:
+            self.progress_signal.emit(15, "Reading combined summary file...")
+            self.status_panel.append_details(f"Reading combined summary file: {self.combined_summary_path}")
+            with open(self.combined_summary_path, "r", encoding="utf-8") as f:
                 combined_content = f.read()
+            self.status_panel.append_details(f"Combined summary length: {len(combined_content)} characters.")
 
-            # Update progress
-            self.progress_signal.emit(20, "Creating prompt for analysis...")
+            # Read original markdown files content
+            original_docs_content = ""
+            self.progress_signal.emit(20, "Reading original documents...")
+            self.status_panel.append_details(f"Reading {len(self.original_markdown_files)} original documents.")
+            for i, md_file in enumerate(self.original_markdown_files):
+                try:
+                    with open(md_file, "r", encoding="utf-8") as f_md:
+                        content = f_md.read()
+                        original_docs_content += f"\n\n--- DOCUMENT: {os.path.basename(md_file)} ---\n\n{content}"
+                    self.status_panel.append_details(f"Read original document: {os.path.basename(md_file)} ({len(content)} chars)")
+                except Exception as e:
+                    self.status_panel.append_warning(f"Could not read original document {os.path.basename(md_file)}: {e}")    
+            self.status_panel.append_details(f"Total original documents content length: {len(original_docs_content)} characters.")
 
-            # Create the prompt for analysis
-            prompt = self.create_integrated_prompt(combined_content)
+            self.progress_signal.emit(25, "Creating integrated analysis prompt...")
+            prompt_text, system_prompt = self.create_integrated_prompt(combined_content, original_docs_content)
+            self.status_panel.append_details("Integrated analysis prompt created.")
+            # self.status_panel.append_details(f"System Prompt: {system_prompt[:200]}...")
+            # self.status_panel.append_details(f"User Prompt: {prompt_text[:200]}...")
 
-            # Count tokens to determine which LLM to use
-            self.progress_signal.emit(
-                30, "Calculating token usage to select appropriate model..."
-            )
-            token_count_result = cached_count_tokens(self.llm_client, text=prompt)
+            self.progress_signal.emit(30, "Requesting integrated analysis from LLM...")
+            response = self.process_api_response(prompt=prompt_text, system_prompt=system_prompt)
 
-            # Determine token count and decide whether to use Gemini
-            use_gemini = False
-            if token_count_result["success"]:
-                token_count = token_count_result["token_count"]
-                self.progress_signal.emit(35, f"Token count: {token_count}")
+            if response and response.get("success"):
+                integrated_analysis_content = response.get("content", "")
+                if not integrated_analysis_content.strip():
+                    self.status_panel.append_error("LLM returned an empty integrated analysis.")
+                    self.finished_signal.emit(False, "LLM returned an empty analysis.", "")
+                    return
 
-                # Only use Gemini for very large token counts (>180k)
-                if token_count > 180000:  # Increased threshold to only use Gemini for very large contexts
-                    use_gemini = True
-                    self.progress_signal.emit(38, "Using Gemini for large token count (>180k)")
-                else:
-                    # Check if we have a GeminiClient already - prefer it if available
-                    from llm_utils import GeminiClient
-                    if isinstance(self.llm_client, GeminiClient) and self.llm_client.is_initialized:
-                        use_gemini = True
-                        self.progress_signal.emit(38, "Using Gemini client that's already initialized")
-                    else:
-                        self.progress_signal.emit(38, "Using Claude for token count <= 180k")
+                self.progress_signal.emit(95, "Saving integrated analysis...")
+                
+                output_filename = f"{self.subject_name}_Integrated_Analysis_{time.strftime('%Y%m%d_%H%M%S')}.md"
+                output_path = Path(self.output_dir) / "integrated_analysis" / output_filename
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(integrated_analysis_content)
+                
+                self.status_panel.append_details(f"Integrated analysis saved to: {output_path}")
+                self.progress_signal.emit(100, "Integrated analysis complete.")
+                self.finished_signal.emit(True, "Integrated analysis generated successfully.", str(output_path))
             else:
-                # If token counting fails, check what client we have
-                from llm_utils import AnthropicClient, GeminiClient
-                if isinstance(self.llm_client, GeminiClient) and self.llm_client.is_initialized:
-                    use_gemini = True
-                    self.progress_signal.emit(35, "Token counting failed, using Gemini by client type")
-                elif isinstance(self.llm_client, AnthropicClient) and self.llm_client.is_initialized:
-                    use_gemini = False
-                    self.progress_signal.emit(35, "Token counting failed, using Claude by client type")
-                else:
-                    # Default to Claude if token count fails, only try Gemini if Claude unavailable
-                    use_gemini = False  
-                    self.progress_signal.emit(35, "Token counting failed, using Claude as default")
-                    
-                    # Try to initialize Claude first
-                    try:
-                        self.progress_signal.emit(36, "Attempting to initialize Claude client...")
-                        claude_client = self.reinitialize_llm_client(provider="anthropic")
-                        if claude_client:
-                            use_gemini = False
-                            self.progress_signal.emit(37, "Successfully initialized Claude client")
-                        else:
-                            # Only try Gemini if Claude fails
-                            self.progress_signal.emit(37, "Claude initialization failed, trying Gemini as fallback...")
-                            gemini_initialized = self.force_init_gemini_client()
-                            use_gemini = gemini_initialized
-                    except Exception as e:
-                        self.progress_signal.emit(36, f"Error initializing clients: {str(e)}")
-                        # Default to trying Claude anyway
-                        use_gemini = False
-            
-            # Log the final decision
-            self.progress_signal.emit(
-                40, f"Final decision: Using {'Gemini' if use_gemini else 'Claude'} for analysis..."
-            )
-
-            # Update progress
-            self.progress_signal.emit(
-                40, "Sending for analysis..."
-            )
-
-            # Get system prompt from template
-            try:
-                app_dir = Path(__file__).parent.parent.parent
-                template_dir = app_dir / 'prompt_templates'
-                prompt_manager = PromptManager(template_dir=template_dir)
-                system_prompt = prompt_manager.get_template(
-                    "document_analysis_system_prompt",
-                    subject_name=self.subject_name,
-                    subject_dob=self.subject_dob,
-                    case_info=self.case_info
-                )
-            except Exception as e:
-                logging.error(f"Error loading system prompt template: {e}")
-                system_prompt = f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
-
-            # Check if we should use Gemini's extended thinking for large token counts
-            if use_gemini:
-                self.progress_signal.emit(42, "Using Gemini for extended token context...")
-                
-                # Verify we have a properly initialized Gemini client
-                from llm_utils import GeminiClient
-                if not isinstance(self.llm_client, GeminiClient) or not self.llm_client.is_initialized:
-                    self.progress_signal.emit(43, "Gemini client not properly initialized, forcing reinitialization...")
-                    gemini_initialized = self.force_init_gemini_client()
-                    
-                    if not gemini_initialized:
-                        self.progress_signal.emit(44, "Gemini reinitialization failed, falling back to Claude...")
-                        # Force Claude to be used
-                        use_gemini = False
-                
-                # Proceed with Gemini if still selected after verification
-                if use_gemini:
-                    self.progress_signal.emit(43, "Using Gemini's extended thinking capabilities...")
-                    
-                    # Only use direct extended thinking API
-                    try:
-                        # Set a timer to prevent hanging indefinitely
-                        import threading
-                        import time
-                        
-                        api_complete = False
-                        api_error = None
-                        api_response = None
-                        
-                        # Define the API call function - only use extended thinking
-                        def make_api_call():
-                            nonlocal api_complete, api_error, api_response
-                            try:
-                                api_response = self.llm_client.generate_response_with_extended_thinking(
-                                    prompt_text=prompt,
-                                    system_prompt=system_prompt,
-                                    model="gemini-2.5-pro-preview-05-06",
-                                    temperature=0.5,
-                                    thinking_budget_tokens=token_count // 2 if token_count_result["success"] else 20000,
-                                )
-                                api_complete = True
-                            except Exception as e:
-                                api_error = e
-                                api_complete = True
-                        
-                        # Create and start the thread
-                        api_thread = threading.Thread(target=make_api_call)
-                        api_thread.daemon = True
-                        api_thread.start()
-                        
-                        # Wait with progress updates
-                        timeout = 600  # 10-minute timeout
-                        start_time = time.time()
-                        wait_interval = 1.0
-                        
-                        while not api_complete and (time.time() - start_time) < timeout:
-                            elapsed = time.time() - start_time
-                            if elapsed % 10 < 0.5:  # Update roughly every 10 seconds
-                                self.progress_signal.emit(
-                                    44, f"Waiting for Gemini extended thinking response... ({int(elapsed)}s elapsed)"
-                                )
-                            time.sleep(wait_interval)
-                        
-                        # Check if we timed out
-                        if not api_complete:
-                            self.progress_signal.emit(
-                                44, f"Gemini API call timed out after {timeout} seconds"
-                            )
-                            raise Exception(f"Gemini API call timed out after {timeout} seconds")
-                        
-                        # Check if there was an error
-                        if api_error:
-                            raise api_error
-                        
-                        # Check if the response is empty or invalid
-                        if not api_response or not api_response.get("success", False):
-                            error_msg = api_response.get("error", "Unknown error") if api_response else "No response"
-                            self.progress_signal.emit(45, f"Gemini API error: {error_msg}")
-                            raise Exception(f"Gemini API error: {error_msg}")
-                            
-                        # Check if the content is empty
-                        if not api_response.get("content") or len(api_response.get("content", "")) == 0:
-                            self.progress_signal.emit(45, "Received empty response from Gemini")
-                            raise Exception("Gemini returned empty response content")
-                            
-                        # Check if thinking tokens were returned
-                        if not api_response.get("thinking") or len(api_response.get("thinking", "")) == 0:
-                            self.progress_signal.emit(46, "Warning: No thinking tokens received from Gemini")
-                            
-                        # Use the response
-                        response = api_response
-                        self.progress_signal.emit(48, "Gemini extended thinking successful")
-                        
-                    except Exception as e:
-                        self.progress_signal.emit(44, f"Error with Gemini extended thinking: {str(e)}")
-                        self.progress_signal.emit(47, "Falling back to Claude as last resort...")
-                        use_gemini = False
-                        
-            # Use Claude's extended thinking if not using Gemini
-            if not use_gemini and hasattr(self.llm_client, "generate_response_with_extended_thinking"):
-                self.progress_signal.emit(42, "Using Claude's extended thinking capabilities...")
-
-                # Set a reasonable thinking budget
-                thinking_budget_tokens = (
-                    min(16000, token_count // 2)
-                    if token_count_result["success"]
-                    else 16000
-                )
-
-                # Generate with extended thinking
-                response = self.llm_client.generate_response_with_extended_thinking(
-                    prompt_text=prompt,
-                    system_prompt=system_prompt,
-                    model="claude-3-7-sonnet-20250219",
-                    temperature=0.1,
-                    thinking_budget_tokens=thinking_budget_tokens,
-                )
-            elif not use_gemini:
-                # Use our process_api_response method for regular API calls
-                self.progress_signal.emit(42, "Using standard API request...")
-                response = self.process_api_response(prompt, system_prompt, use_gemini)
-
-            # Update progress
-            self.progress_signal.emit(90, "Processing response...")
-
-            if not response["success"]:
-                raise Exception(
-                    f"LLM processing failed: {response.get('error', 'Unknown error')}"
-                )
-                
-            # Save thinking tokens to a separate file if available
-            if (
-                response["success"]
-                and "thinking" in response
-                and response["thinking"]
-            ):
-                self.progress_signal.emit(
-                    82, "Saving thinking tokens to separate file..."
-                )
-
-                # Create thinking tokens content with header information
-                thinking_content = f"""# Thinking Tokens for Integrated Analysis of {self.subject_name}
-
-## Subject Information
-- **Subject Name**: {self.subject_name}
-- **Date of Birth**: {self.subject_dob}
-- **Generated**: {time.strftime('%Y-%m-%d %H:%M:%S')}
-- **Model**: {response.get("model", "Unknown")}
-- **Provider**: {response.get("provider", "Unknown")}
-
-## Thinking Process
-{response["thinking"]}
-"""
-                # Write thinking tokens to file
-                with open(thinking_tokens_file, "w", encoding="utf-8") as f:
-                    f.write(thinking_content)
-
-                self.progress_signal.emit(
-                    85, f"Thinking tokens saved to {thinking_tokens_file}"
-                )
-            else:
-                self.progress_signal.emit(
-                    82, "No thinking tokens available in the response"
-                )
-
-            # Write the integrated analysis to a file
-            with open(integrated_file, "w", encoding="utf-8") as f:
-                f.write(f"# Integrated Analysis for {self.subject_name}\n\n")
-                f.write(f"**Date of Birth:** {self.subject_dob}\n\n")
-                f.write(f"**Model Used:** {response.get('model', 'Unknown')}\n")
-                f.write(f"**Provider:** {response.get('provider', 'Unknown')}\n\n")
-                f.write(f"*Generated on: {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n")
-                f.write(response["content"])
-
-            # Update progress
-            self.progress_signal.emit(100, "Integrated analysis complete!")
-
-            # Signal completion
-            success_message = (
-                f"Successfully generated integrated analysis for {self.subject_name}"
-            )
-            self.finished_signal.emit(True, success_message, integrated_file)
+                error_msg = response.get("error", "Integrated analysis failed. No content generated or API error.") if response else "Integrated analysis failed due to API communication issue."
+                self.status_panel.append_error(f"Failed to generate integrated analysis: {error_msg}")
+                self.error_signal.emit(f"Integrated Analysis Generation Failed: {error_msg}") # This is the general error for the dialog
+                self.finished_signal.emit(False, error_msg, "") # This signals the AnalysisTab about completion with failure
 
         except Exception as e:
-            error_message = f"Error during integrated analysis: {str(e)}"
-            self.error_signal.emit(error_message)
+            error_msg = f"Error during integrated analysis: {str(e)}"
+            logging.exception(error_msg)
+            self.status_panel.append_error(error_msg)
+            self.error_signal.emit(error_msg) # General error for the dialog
+            self.finished_signal.emit(False, error_msg, "") # Completion with failure
 
-    def create_integrated_prompt(self, combined_content):
-        """
-        Create a prompt for the LLM to generate an integrated analysis.
+    def create_integrated_prompt(self, combined_content: str, original_docs_content: str) -> Tuple[str, str]:
+        """Create the prompt for the integrated analysis."""
+        # Use PromptManager to get the integrated analysis prompt template
+        prompt_manager = PromptManager()
+        template_data = prompt_manager.get_prompt_template("integrated_analysis")
+        system_prompt_template = template_data.get("system_prompt", "")
+        user_prompt_template = template_data.get("user_prompt", "")
 
-        Args:
-            combined_content: Content of the combined summary file
+        # Prepare placeholders
+        placeholders = {
+            "subject_name": self.subject_name,
+            "subject_dob": self.subject_dob,
+            "case_info": self.case_info,
+            "combined_summaries": combined_content,
+            "original_documents": original_docs_content # Added placeholder
+        }
 
-        Returns:
-            Prompt string
-        """
-        return f"""
-## Combined Document Summaries
-<combined_summaries>
-{combined_content}
-</combined_summaries>
+        # Populate system prompt
+        system_prompt = system_prompt_template.format(**placeholders) if system_prompt_template else ""
+        # Populate user prompt
+        user_prompt = user_prompt_template.format(**placeholders)
 
-# Integrated Document Analysis Task
-
-## Subject Information
-- **Subject Name**: {self.subject_name}
-- **Date of Birth**: {self.subject_dob}
-
-## Case Background
-{self.case_info}
-
-## Instructions
-I'm providing you with multiple document summaries that contain information about the subject (or subjects). The summaries are from markdown versions of original PDF documents. Please analyze all of these summaries and create a comprehensive integrated report per subject that includes:
-
-1. **Executive Summary**: A clear, concise overview of the subject based on all documents (700-1000 words).
-
-2. **Comprehensive Timeline**: Create a single, unified timeline that combines all events from the individual document timelines. The timeline should:
-   - Be in chronological order (oldest to newest)
-   - Be formatted as a markdown table with columns for Date, Event, Significance, and Source Document Name(s)
-   - Create or preserve all markdown links to the original PDF page number in the format [Page x](./pdfs/<filename.pdf>#page=<page_number>)
-   - Calculate the subject's age at each significant event when relevant (using DOB: {self.subject_dob})
-   - Remove duplicate events, preserving multiple Source Document Names
-   - Resolve any conflicting information if possible (noting discrepancies) - document all resolved and unresolved discrepancies in a separate section
-   - Include source information when possible, including the original file name and page number
-
-3. **Key Findings**: Synthesize the most important information about:
-   - Family relationships and social history
-   - Educational and employment background
-   - Legal history and interactions with authorities
-   - Substance use and treatment history
-   - Medical and psychiatric history
-   - Notable patterns of behavior
-   - Adverse life events
-
-4. **Significant Observations**: Highlight particularly noteworthy information that appears across multiple documents or seems especially relevant.
-
-5. **Create or preserve all markdown links to the original PDF page number in the format [file  name.pdf: Page x](./pdfs/<filename.pdf>#page=<page_number>)
-
-Please use your thinking capabilities to connect information across documents, identify patterns, and create a coherent narrative from these separate summaries. When information appears contradictory, note the discrepancy rather than trying to resolve it definitively.
-
-Before finalizing results, do a review for accuracy, with attention to both exact quotes and markdown links to original PDFs.
-"""
-
-    def reinitialize_llm_client(self, provider="auto"):
-        """
-        Reinitialize the LLM client with an explicit provider if needed.
-        
-        Args:
-            provider: The provider to use ("auto", "anthropic", or "gemini")
-        
-        Returns:
-            bool: True if successful, False otherwise
-        """
-        try:
-            logging.info(f"Reinitializing LLM client with provider={provider}")
-            self.llm_client = LLMClientFactory.create_client(provider=provider)
-            
-            if self.llm_client.is_initialized:
-                logging.info(f"Successfully reinitialized LLM client with provider={provider}")
-                
-                # Log which provider was selected
-                if isinstance(self.llm_client, AnthropicClient):
-                    logging.info("Using Anthropic Claude as the LLM provider")
-                elif isinstance(self.llm_client, GeminiClient):
-                    logging.info("Using Google Gemini as the LLM provider")
-                
-                return True
-            else:
-                logging.error(f"Failed to initialize LLM client with provider={provider}")
-                return False
-        except Exception as e:
-            logging.error(f"Error reinitializing LLM client: {str(e)}")
-            return False
+        return user_prompt, system_prompt

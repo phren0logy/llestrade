@@ -1,0 +1,26 @@
+{
+  "selected_llm_provider_id": "anthropic",
+  "llm_provider_configs": {
+    "anthropic": {
+      "enabled": true,
+      "label": "Anthropic Claude",
+      "default_model": "claude-3-7-sonnet-latest"
+    },
+    "gemini": {
+      "enabled": true,
+      "label": "Google Gemini",
+      "default_model": "gemini-2.5-pro-preview-05-06"
+    },
+    "azure_openai": {
+      "enabled": true,
+      "label": "Azure OpenAI",
+      "default_deployment_name": "gpt-41",
+      "azure_endpoint": null,
+      "api_version": null
+    }
+  },
+  "general_settings": {
+    "debug_mode": false,
+    "default_system_prompt": "You are a helpful AI assistant."
+  }
+}

@@ -6,6 +6,11 @@ Brings together all UI components and implements the main window functionality.
 import os
 import sys
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+
+load_dotenv() # Load default .env file
+
 # macOS Qt plugin fix: set Qt plugin path before loading any Qt modules
 # This MUST be done before importing ANY PySide6 modules
 if sys.platform == "darwin":  # macOS specific fix

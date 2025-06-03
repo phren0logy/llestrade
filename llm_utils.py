@@ -12,6 +12,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
+import openai  # Added for Azure OpenAI
+import tiktoken  # Added for Azure OpenAI token counting
 from dotenv import load_dotenv
 
 # Configure logging
@@ -1366,6 +1368,338 @@ class GeminiClient(BaseLLMClient):
 
 
 # -----------------------
+# Azure OpenAI Client
+# -----------------------
+
+
+class AzureOpenAIClient(BaseLLMClient):
+    """Client for the Azure OpenAI API."""
+
+    def __init__(
+        self,
+        timeout: float = 600.0,
+        max_retries: int = 2,
+        thinking_budget_tokens: int = 16000, # Maintained for BaseLLMClient compatibility
+        default_system_prompt: Optional[str] = None,
+        api_key: Optional[str] = None, # AZURE_OPENAI_API_KEY
+        azure_endpoint: Optional[str] = None, # AZURE_OPENAI_ENDPOINT
+        api_version: Optional[str] = None, # OPENAI_API_VERSION
+        debug: bool = False,
+    ):
+        """
+        Initialize the Azure OpenAI client.
+
+        Args:
+            timeout: Request timeout in seconds
+            max_retries: Maximum number of retries for API requests
+            thinking_budget_tokens: Maintained for API compatibility, not directly used.
+            default_system_prompt: Default system prompt to use when none is provided
+            api_key: Optional Azure OpenAI API key
+            azure_endpoint: Optional Azure OpenAI endpoint
+            api_version: Optional Azure OpenAI API version
+            debug: Debug mode flag
+        """
+        super().__init__(
+            timeout=timeout,
+            max_retries=max_retries,
+            thinking_budget_tokens=thinking_budget_tokens,
+            default_system_prompt=default_system_prompt,
+            debug=debug,
+        )
+
+        self.client = None
+        self._init_client(api_key, azure_endpoint, api_version)
+
+    def _init_client(
+        self, 
+        api_key: Optional[str] = None,
+        azure_endpoint: Optional[str] = None,
+        api_version: Optional[str] = None
+    ):
+        """
+        Initialize the Azure OpenAI client.
+
+        Args:
+            api_key: Optional Azure OpenAI API key
+            azure_endpoint: Optional Azure OpenAI endpoint
+            api_version: Optional Azure OpenAI API version
+        """
+        try:
+            # API key
+            current_api_key = api_key or os.getenv("AZURE_OPENAI_API_KEY")
+            if not current_api_key:
+                logging.error("AZURE_OPENAI_API_KEY environment variable not set.")
+                return
+            if current_api_key == "your_azure_openai_api_key":
+                logging.error("AZURE_OPENAI_API_KEY is set to the template value.")
+                return
+
+            # Endpoint
+            current_azure_endpoint = azure_endpoint or os.getenv("AZURE_OPENAI_ENDPOINT")
+            if not current_azure_endpoint:
+                logging.error("AZURE_OPENAI_ENDPOINT environment variable not set.")
+                return
+            if current_azure_endpoint == "your_azure_openai_endpoint":
+                logging.error("AZURE_OPENAI_ENDPOINT is set to the template value.")
+                return
+
+            # API Version
+            current_api_version = api_version or os.getenv("OPENAI_API_VERSION")
+            if not current_api_version:
+                logging.error("OPENAI_API_VERSION environment variable not set.")
+                return
+            if current_api_version == "your_api_version":
+                logging.error("OPENAI_API_VERSION is set to the template value.")
+                return
+
+            if len(current_api_key) > 8:
+                logging.info(
+                    f"Using Azure OpenAI API key starting with: {current_api_key[:4]}...{current_api_key[-4:]}"
+                )
+            logging.info(f"Using Azure OpenAI Endpoint: {current_azure_endpoint}")
+            logging.info(f"Using Azure OpenAI API Version: {current_api_version}")
+            
+            self.client = openai.AzureOpenAI(
+                api_key=current_api_key,
+                azure_endpoint=current_azure_endpoint,
+                api_version=current_api_version,
+                timeout=self.timeout,
+                max_retries=self.max_retries,
+            )
+            self._test_connection()
+
+        except ImportError:
+            logging.error(
+                "openai package not installed - please install with: pip install openai"
+            )
+        except Exception as e:
+            logging.error(f"Error initializing Azure OpenAI client: {str(e)}")
+            self.client = None
+
+    def _test_connection(self):
+        """Test the connection to Azure OpenAI API."""
+        if not self.client:
+            return
+        try:
+            # A lightweight way to test could be to list models,
+            # but for Azure, deployments are key.
+            # Counting tokens for a test string is a safe way to check API key and endpoint.
+            test_result = self.count_tokens(text="Test connection")
+            if not test_result["success"]:
+                logging.error(
+                    f"Azure OpenAI connection test failed: {test_result.get('error')}"
+                )
+                self.client = None
+            else:
+                logging.info("Azure OpenAI client initialized and tested successfully.")
+        except Exception as e:
+            logging.error(f"Azure OpenAI connection test failed during count_tokens: {str(e)}")
+            self.client = None
+            
+    @property
+    def is_initialized(self) -> bool:
+        """Check if the client is properly initialized."""
+        return self.client is not None
+
+    def generate_response(
+        self,
+        prompt_text: str,
+        model: str,  # This will be the Azure deployment name
+        max_tokens: int = 4000, # Typical default for many OpenAI models
+        temperature: float = 0.1,
+        system_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate a response from Azure OpenAI.
+
+        Args:
+            prompt_text: The user's prompt text
+            model: The Azure OpenAI deployment name
+            max_tokens: Maximum number of tokens to generate
+            temperature: Temperature parameter for generation (0.0 to 2.0 for OpenAI)
+            system_prompt: Optional system prompt for context
+
+        Returns:
+            A dictionary with the response content or error message
+        """
+        if not self.is_initialized:
+            return {"success": False, "error": "Azure OpenAI client not initialized", "provider": "azure_openai"}
+
+        actual_system_prompt = system_prompt or self.default_system_prompt
+        
+        messages = []
+        if actual_system_prompt:
+            messages.append({"role": "system", "content": actual_system_prompt})
+        messages.append({"role": "user", "content": prompt_text})
+
+        logging.debug(f"Azure OpenAI API Request - Deployment: {model}")
+        logging.debug(f"Azure OpenAI API Request - System prompt length: {len(actual_system_prompt or '')}")
+        logging.debug(f"Azure OpenAI API Request - User prompt length: {len(prompt_text)}")
+        logging.debug(f"Azure OpenAI API Request - Temperature: {temperature}")
+        logging.debug(f"Azure OpenAI API Request - Max tokens: {max_tokens}")
+
+        start_time = time.time()
+        try:
+            completion = self.client.chat.completions.create(
+                model=model,  # Deployment name for Azure
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            elapsed_time = time.time() - start_time
+            logging.debug(f"Azure OpenAI API Response received in {elapsed_time:.2f} seconds")
+
+            content = completion.choices[0].message.content if completion.choices else ""
+            
+            usage = {}
+            if completion.usage:
+                usage = {
+                    "input_tokens": completion.usage.prompt_tokens,
+                    "output_tokens": completion.usage.completion_tokens,
+                }
+                logging.debug(
+                    f"Azure OpenAI API Token usage - Input: {usage['input_tokens']}, Output: {usage['output_tokens']}"
+                )
+            else: # Estimate if not provided
+                input_tokens_est = self.count_tokens(messages=messages).get("token_count", 0)
+                output_tokens_est = self.count_tokens(text=content).get("token_count", 0)
+                usage = {
+                     "input_tokens": input_tokens_est,
+                     "output_tokens": output_tokens_est,
+                }
+                logging.debug(
+                    f"Azure OpenAI API Estimated Token usage - Input: {usage['input_tokens']}, Output: {usage['output_tokens']}"
+                )
+
+
+            return {
+                "success": True,
+                "content": content,
+                "usage": usage,
+                "provider": "azure_openai",
+            }
+        except openai.APIAuthenticationError as e:
+            error_message = f"Azure OpenAI Authentication Error: {str(e)}. Check your API key and endpoint."
+            logging.error(error_message)
+            return {"success": False, "error": error_message, "provider": "azure_openai"}
+        except openai.RateLimitError as e:
+            error_message = f"Azure OpenAI Rate Limit Exceeded: {str(e)}. Try again later."
+            logging.error(error_message)
+            return {"success": False, "error": error_message, "provider": "azure_openai"}
+        except openai.NotFoundError as e: # Often for incorrect deployment name
+            error_message = f"Azure OpenAI Not Found Error (check deployment name '{model}'): {str(e)}"
+            logging.error(error_message)
+            return {"success": False, "error": error_message, "provider": "azure_openai"}
+        except openai.APIConnectionError as e:
+            error_message = f"Azure OpenAI API Connection Error: {str(e)}. Check network connectivity and endpoint."
+            logging.error(error_message)
+            return {"success": False, "error": error_message, "provider": "azure_openai"}
+        except Exception as e:
+            error_message = f"Azure OpenAI API Error: {str(e)}"
+            logging.error(error_message)
+            return {"success": False, "error": error_message, "provider": "azure_openai"}
+
+    def count_tokens(
+        self,
+        messages: Optional[List[Dict[str, Any]]] = None,
+        text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Count tokens using tiktoken for Azure OpenAI models.
+
+        Args:
+            messages: List of messages to count tokens for
+            text: Plain text to count tokens for (used if messages is None)
+            model_encoding: The tiktoken encoding to use.
+
+        Returns:
+            Dictionary with token count information
+        """
+        if not self.is_initialized and not text and not messages: # Allow counting even if client fails but tiktoken is there
+             # Check if tiktoken is available for counting even if client init failed
+            try:
+                import tiktoken
+            except ImportError:
+                return {
+                    "success": False,
+                    "error": "Azure OpenAI client not initialized and tiktoken not available.",
+                }
+        
+        if text is None and messages is None:
+            return {"success": False, "error": "Either messages or text must be provided"}
+
+        try:
+            encoding = tiktoken.get_encoding("cl100k_base")
+            num_tokens = 0
+            
+            if text is not None:
+                num_tokens = len(encoding.encode(text))
+            elif messages is not None:
+                # Based on OpenAI's cookbook for counting tokens with tiktoken for chat models
+                # Ref: https://github.com/openai/openai-cookbook/blob/main/examples/how_to_count_tokens_with_tiktoken.ipynb
+                # This logic might need adjustment based on the specific Azure OpenAI model version.
+                # For now, using a common approach.
+                # Assumes gpt-3.5-turbo and gpt-4 like models.
+                tokens_per_message = 3 
+                tokens_per_name = 1 # if there's a 'name' field in a message
+
+                for message in messages:
+                    num_tokens += tokens_per_message
+                    for key, value in message.items():
+                        if isinstance(value, str):
+                             num_tokens += len(encoding.encode(value))
+                        if key == "name":
+                            num_tokens += tokens_per_name
+                num_tokens += 3  # every reply is primed with <|start|>assistant<|message|>
+            
+            return {"success": True, "token_count": num_tokens}
+
+        except ImportError:
+            logging.error("tiktoken package not installed - please install with: pip install tiktoken")
+            # Fallback to char estimation if tiktoken is missing
+            content_to_estimate = text or ""
+            if messages:
+                content_to_estimate = " ".join(m.get("content", "") for m in messages if isinstance(m.get("content"), str))
+            estimated_tokens = len(content_to_estimate) // 4
+            return {
+                "success": True,
+                "token_count": estimated_tokens,
+                "estimated": True,
+                "warning": "tiktoken not found, using character-based estimation.",
+            }
+        except Exception as e:
+            logging.error(f"Error counting tokens with tiktoken: {str(e)}")
+            return {"success": False, "error": f"Token counting error: {str(e)}"}
+
+    def generate_response_with_pdf(self, *args, **kwargs) -> Dict[str, Any]:
+        """PDF processing is not implemented for Azure OpenAI client."""
+        logging.warning("generate_response_with_pdf is not implemented for AzureOpenAIClient.")
+        return {
+            "success": False,
+            "error": "PDF processing is not implemented for Azure OpenAI client.",
+            "provider": "azure_openai",
+        }
+
+    def generate_response_with_extended_thinking(self, *args, **kwargs) -> Dict[str, Any]:
+        """Extended thinking is not implemented for Azure OpenAI client."""
+        logging.warning("generate_response_with_extended_thinking is not implemented for AzureOpenAIClient.")
+        return {
+            "success": False,
+            "error": "Extended thinking is not implemented for Azure OpenAI client.",
+            "provider": "azure_openai",
+        }
+
+    def generate_response_with_pdf_and_thinking(self, *args, **kwargs) -> Dict[str, Any]:
+        """PDF and extended thinking is not implemented for Azure OpenAI client."""
+        logging.warning("generate_response_with_pdf_and_thinking is not implemented for AzureOpenAIClient.")
+        return {
+            "success": False,
+            "error": "PDF and extended thinking is not implemented for Azure OpenAI client.",
+            "provider": "azure_openai",
+        }
+
+
+# -----------------------
 # LLM Client Factory
 # -----------------------
 
@@ -1380,19 +1714,23 @@ class LLMClientFactory:
         max_retries: int = 2,
         thinking_budget_tokens: int = 16000,
         default_system_prompt: Optional[str] = None,
-        api_key: Optional[str] = None,
+        api_key: Optional[str] = None, # Can be for Anthropic, Gemini, or Azure OpenAI
+        azure_endpoint: Optional[str] = None, # Specific to Azure OpenAI
+        api_version: Optional[str] = None, # Specific to Azure OpenAI
         debug: bool = False,
     ) -> BaseLLMClient:
         """
         Create an LLM client for the specified provider.
 
         Args:
-            provider: The LLM provider to use ("anthropic", "gemini", or "auto")
+            provider: The LLM provider to use ("anthropic", "gemini", "azure_openai", or "auto")
             timeout: Request timeout in seconds
             max_retries: Maximum number of retries for API requests
-            thinking_budget_tokens: Budget for "thinking" tokens in extended thinking mode
-            default_system_prompt: Default system prompt to use when none is provided
-            api_key: Optional API key
+            thinking_budget_tokens: Budget for "thinking" tokens
+            default_system_prompt: Default system prompt
+            api_key: Optional API key (used by the selected provider)
+            azure_endpoint: Azure OpenAI specific endpoint.
+            api_version: Azure OpenAI specific API version.
             debug: Debug mode flag
 
         Returns:
@@ -1401,38 +1739,52 @@ class LLMClientFactory:
         # Auto-detect provider based on available API keys
         if provider == "auto":
             # Try Anthropic first
-            logging.info("Trying to initialize Anthropic client...")
-            client = AnthropicClient(
+            logging.info("Auto-detection: Trying to initialize Anthropic client...")
+            anthropic_client = AnthropicClient(
                 timeout=timeout,
                 max_retries=max_retries,
                 thinking_budget_tokens=thinking_budget_tokens,
                 default_system_prompt=default_system_prompt,
-                api_key=api_key,
+                api_key=api_key, # Assumes api_key could be for Anthropic
                 debug=debug,
             )
-
-            if client.is_initialized:
-                logging.info("Automatically selected Anthropic provider")
-                return client
+            if anthropic_client.is_initialized:
+                logging.info("Automatically selected Anthropic provider.")
+                return anthropic_client
 
             # Fall back to Gemini
-            logging.info("Anthropic client initialization failed, trying Gemini...")
+            logging.info("Anthropic client initialization failed or not selected. Auto-detection: Trying Gemini...")
             gemini_client = GeminiClient(
                 timeout=timeout,
                 max_retries=max_retries,
                 thinking_budget_tokens=thinking_budget_tokens,
                 default_system_prompt=default_system_prompt,
-                api_key=api_key,
+                api_key=api_key, # Assumes api_key could be for Gemini
                 debug=debug,
             )
-            
             if gemini_client.is_initialized:
-                logging.info("Successfully initialized Gemini client")
+                logging.info("Automatically selected Gemini provider.")
                 return gemini_client
-            else:
-                logging.warning("Failed to initialize Gemini client, returning uninitialized Anthropic client as fallback")
-                return client
             
+            # Fall back to Azure OpenAI
+            logging.info("Gemini client initialization failed or not selected. Auto-detection: Trying Azure OpenAI...")
+            azure_openai_client = AzureOpenAIClient(
+                timeout=timeout,
+                max_retries=max_retries,
+                thinking_budget_tokens=thinking_budget_tokens,
+                default_system_prompt=default_system_prompt,
+                api_key=api_key, # Assumes api_key could be for Azure OpenAI
+                azure_endpoint=azure_endpoint,
+                api_version=api_version,
+                debug=debug,
+            )
+            if azure_openai_client.is_initialized:
+                logging.info("Automatically selected Azure OpenAI provider.")
+                return azure_openai_client
+
+            logging.warning("Auto-detection failed for all providers. Returning uninitialized Anthropic client as fallback.")
+            return anthropic_client # Fallback to uninitialized Anthropic
+
         # Create client for specific provider
         if provider == "anthropic":
             logging.info("Explicitly initializing Anthropic client...")
@@ -1454,8 +1806,20 @@ class LLMClientFactory:
                 api_key=api_key,
                 debug=debug,
             )
+        elif provider == "azure_openai":
+            logging.info("Explicitly initializing Azure OpenAI client...")
+            return AzureOpenAIClient(
+                timeout=timeout,
+                max_retries=max_retries,
+                thinking_budget_tokens=thinking_budget_tokens,
+                default_system_prompt=default_system_prompt,
+                api_key=api_key,
+                azure_endpoint=azure_endpoint,
+                api_version=api_version,
+                debug=debug,
+            )
         else:
-            logging.error(f"Unknown provider: {provider}")
+            logging.error(f"Unknown provider: {provider}. Supported: anthropic, gemini, azure_openai, auto.")
             raise ValueError(f"Unknown provider: {provider}")
 
 
@@ -1477,7 +1841,10 @@ class LLMClient:
         thinking_budget_tokens: int = 16000,
         default_system_prompt: Optional[str] = None,
         anthropic_api_key: Optional[str] = None,
-        google_api_key: Optional[str] = None,
+        google_api_key: Optional[str] = None, # For Gemini
+        azure_api_key: Optional[str] = None,
+        azure_endpoint: Optional[str] = None,
+        azure_api_version: Optional[str] = None,
         debug: bool = False,
     ):
         """Initialize the legacy LLM client wrapper."""
@@ -1486,17 +1853,17 @@ class LLMClient:
         )
 
         # Try to get system prompt from PromptManager
-        system_prompt = default_system_prompt
+        system_prompt_to_use = default_system_prompt
         if default_system_prompt is None:
             try:
                 from prompt_manager import PromptManager
                 prompt_manager = PromptManager()
-                system_prompt = prompt_manager.get_system_prompt()
+                system_prompt_to_use = prompt_manager.get_system_prompt()
                 if debug:
-                    logging.info("Loaded system prompt from PromptManager")
+                    logging.info("Loaded system prompt from PromptManager for legacy client")
             except Exception as e:
                 if debug:
-                    logging.warning(f"Could not load PromptManager: {e}")
+                    logging.warning(f"Could not load PromptManager for legacy client: {e}")
 
         # Create clients for each provider
         self.anthropic_client = LLMClientFactory.create_client(
@@ -1504,7 +1871,7 @@ class LLMClient:
             timeout=timeout,
             max_retries=max_retries,
             thinking_budget_tokens=thinking_budget_tokens,
-            default_system_prompt=system_prompt,
+            default_system_prompt=system_prompt_to_use,
             api_key=anthropic_api_key,
             debug=debug,
         )
@@ -1514,8 +1881,20 @@ class LLMClient:
             timeout=timeout,
             max_retries=max_retries,
             thinking_budget_tokens=thinking_budget_tokens,
-            default_system_prompt=system_prompt,
+            default_system_prompt=system_prompt_to_use,
             api_key=google_api_key,
+            debug=debug,
+        )
+        
+        self.azure_openai_client = LLMClientFactory.create_client(
+            provider="azure_openai",
+            timeout=timeout,
+            max_retries=max_retries,
+            thinking_budget_tokens=thinking_budget_tokens,
+            default_system_prompt=system_prompt_to_use,
+            api_key=azure_api_key,
+            azure_endpoint=azure_endpoint,
+            api_version=azure_api_version,
             debug=debug,
         )
 
@@ -1523,7 +1902,15 @@ class LLMClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.thinking_budget_tokens = thinking_budget_tokens
-        self.default_system_prompt = system_prompt or self.anthropic_client.default_system_prompt
+        # Use the system prompt from the first initialized client or the provided one
+        if self.anthropic_initialized:
+             self.default_system_prompt = self.anthropic_client.default_system_prompt
+        elif self.gemini_initialized:
+             self.default_system_prompt = self.gemini_client.default_system_prompt
+        elif self.azure_openai_initialized:
+             self.default_system_prompt = self.azure_openai_client.default_system_prompt
+        else:
+             self.default_system_prompt = system_prompt_to_use or "Default system prompt placeholder."
         self.debug = debug
 
     def _load_env_vars(self):
@@ -1571,27 +1958,61 @@ class LLMClient:
             and self.gemini_client.is_initialized
         )
 
+    @property
+    def azure_openai_initialized(self):
+        """Check if Azure OpenAI client is initialized."""
+        return (
+            isinstance(self.azure_openai_client, AzureOpenAIClient)
+            and self.azure_openai_client.is_initialized
+        )
+
     def generate_response(
         self,
         prompt_text: str,
-        model: str = "gemini-2.5-pro-preview-05-06",
-        max_tokens: int = 200000,
+        model: str = "gemini-2.5-pro-preview-05-06", # Default model, may need context
+        max_tokens: int = 200000, # General default, provider might override
         temperature: float = 0.1,
         system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Generate a response, preferring Anthropic if available."""
+        """
+        Generate a response, preferring Anthropic, then Gemini, then Azure OpenAI if available.
+        The 'model' parameter should be appropriate for the client being used.
+        """
+        # Note: The `model` parameter needs to be suitable for the chosen client.
+        # This legacy method doesn't easily know which client will be chosen if multiple are initialized.
+        # Caller should ideally use the specific client or factory for better control.
+
         if self.anthropic_initialized:
+            # Assuming 'model' is an Anthropic model if this branch is taken.
+            # If 'model' is for Gemini/Azure, this call might fail or use a default Anthropic model.
+            # For true multi-provider support with specific models, use the factory.
+            anthropic_model = model if "claude" in model.lower() else "claude-3-haiku-20240307" # A sensible default
             return self.anthropic_client.generate_response(
                 prompt_text=prompt_text,
-                model=model,
+                model=anthropic_model, # Use a model name suitable for Anthropic
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system_prompt=system_prompt,
             )
         elif self.gemini_initialized:
+            gemini_model = model if "gemini" in model.lower() else "gemini-1.5-flash" # A sensible default
             return self.gemini_client.generate_response(
                 prompt_text=prompt_text,
-                model=model,
+                model=gemini_model, # Use a model name suitable for Gemini
+                max_tokens=max_tokens,
+                temperature=temperature,
+                system_prompt=system_prompt,
+            )
+        elif self.azure_openai_initialized:
+            # For Azure, 'model' is the deployment name. This is highly context-specific.
+            # The default 'model' arg "gemini-2.5-pro-preview-05-06" is not an Azure deployment.
+            # This highlights a weakness in the legacy client's generic generate_response.
+            # A better approach for the caller would be to provide a known Azure deployment name.
+            # If 'model' is not an Azure deployment name, this call will likely fail.
+            # We'll pass 'model' as is, assuming the caller knows it's for Azure.
+            return self.azure_openai_client.generate_response(
+                prompt_text=prompt_text,
+                model=model, # This MUST be an Azure deployment name
                 max_tokens=max_tokens,
                 temperature=temperature,
                 system_prompt=system_prompt,
@@ -1599,7 +2020,7 @@ class LLMClient:
         else:
             return {
                 "success": False,
-                "error": "No LLM clients initialized",
+                "error": "No LLM clients initialized in legacy client",
                 "content": None,
             }
 
@@ -1685,15 +2106,17 @@ class LLMClient:
         messages: Optional[List[Dict[str, Any]]] = None,
         text: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Count tokens, preferring Anthropic if available."""
+        """Count tokens, preferring Anthropic, then Gemini, then Azure OpenAI."""
         if self.anthropic_initialized:
             return self.anthropic_client.count_tokens(messages=messages, text=text)
         elif self.gemini_initialized:
             return self.gemini_client.count_tokens(messages=messages, text=text)
+        elif self.azure_openai_initialized:
+            return self.azure_openai_client.count_tokens(messages=messages, text=text)
         else:
             return {
                 "success": False,
-                "error": "No LLM clients initialized",
+                "error": "No LLM clients initialized in legacy client",
             }
 
     def generate_response_with_gemini_thinking(
