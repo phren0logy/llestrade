@@ -284,9 +284,9 @@ class AnthropicClient(BaseLLMClient):
     def generate_response(
         self,
         prompt_text: str,
-        model: str = "claude-3-7-sonnet-20250219",
+        model: str = "claude-sonnet-3-7-latest",
         max_tokens: int = 32000,
-        temperature: float = 0.7,
+        temperature: float = 0.1,
         system_prompt: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -399,7 +399,7 @@ class AnthropicClient(BaseLLMClient):
         self,
         prompt_text: str,
         pdf_file_path: str,
-        model: str = "claude-3-7-sonnet-20250219",
+        model: str = "claude-3-7-sonnet-latest",
         max_tokens: int = 32000,
         temperature: float = 0.0,
         system_prompt: Optional[str] = None,
@@ -523,7 +523,7 @@ class AnthropicClient(BaseLLMClient):
     def generate_response_with_extended_thinking(
         self,
         prompt_text: str,
-        model: str = "claude-3-7-sonnet-20250219",
+        model: str = "claude-3-7-sonnet-latest",
         max_tokens: int = 32000,
         temperature: float = 1.0,  # Fixed at 1.0 as required by Anthropic for thinking
         system_prompt: Optional[str] = None,
@@ -641,7 +641,7 @@ class AnthropicClient(BaseLLMClient):
         self,
         prompt_text: str,
         pdf_file_path: str,
-        model: str = "claude-3-7-sonnet-20250219",
+        model: str = "claude-3-7-sonnet-latest",
         max_tokens: int = 32000,
         temperature: float = 1.0,
         system_prompt: Optional[str] = None,
@@ -789,7 +789,7 @@ class AnthropicClient(BaseLLMClient):
             # Count tokens using the messages.count_tokens method
             try:
                 response = self.client.messages.count_tokens(
-                    model="claude-3-7-sonnet-20250219", messages=messages
+                    model="claude-3-7-sonnet-latest", messages=messages
                 )
 
                 # Handle different response structures

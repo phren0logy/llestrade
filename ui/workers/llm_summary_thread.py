@@ -165,6 +165,8 @@ def chunk_document_with_overlap(text, client, max_chunk_size=60000, overlap=1000
         return [text]
 
 
+from pathlib import Path
+
 class LLMSummaryThread(QThread):
     """Worker thread for summarizing markdown files with Claude."""
 
@@ -358,56 +360,32 @@ class LLMSummaryThread(QThread):
             Prompt string
         """
         self.progress_signal.emit(0, f"Creating prompt for {document_name}")
-        prompt = f"""
-## Document Content
-<document-content>
-{markdown_content}
-</document-content>
+        
+        # Construct the path to the prompt template file
+        # Assuming this script is in ui/workers/ and prompts are in prompt_templates/
+        # Adjust the path as necessary based on your project structure
+        current_script_path = Path(__file__).resolve()
+        project_root = current_script_path.parent.parent # ui/workers -> ui -> project_root
+        prompt_template_path = project_root / "prompt_templates" / "document_summary_prompt.md"
 
-# Document Analysis Task
+        try:
+            with open(prompt_template_path, "r", encoding="utf-8") as f:
+                prompt_template = f.read()
+        except FileNotFoundError:
+            # Fallback or error handling if the template file is not found
+            self.progress_signal.emit(0, f"ERROR: Prompt template file not found at {prompt_template_path}")
+            # You might want to return a default prompt or raise an exception
+            # For now, returning an error message in the prompt itself
+            return f"ERROR: Prompt template file not found at {prompt_template_path}. Please check the path."
 
-## Document Information
-- **Subject Name**: {self.subject_name}
-- **Date of Birth**: {self.subject_dob}
-- **Original Document**: (The {document_name} is a markdown file that was converted from a PDF. Change the extension from .md to .pdf)
-
-## Case Background
-{self.case_info}
-
-## Instructions
-Please analyze the document content above, wrapped in "document-content" tags, and provide a comprehensive summary that includes:
-
-- Key facts and information about the subject
-- Significant events and dates mentioned
-- Family and romantic relationships
-- Early childhood history
-- Educational history
-- Employment history
-- Military career history
-- Legal issues or encounters with law enforcement
-- Substance use and treatment history
-- Medical and psychiatric history
-- Any notable statements or quotes
-- Notable patterns of behavior
-- Adverse life events
-- A timeline of events in a markdown table format with columns for Date, Event, and Significance
-
-Include the page number for all extracted items.
-Create a markdown link to [filename.pdf: Page x](./pdfs/<filename.pdf>#page=<page_number>) for each page number referenced.
-When a range of pages is referenced, link the first page but include the range in the text.
-
-## Timeline Instructions
-- Create a timeline of events in a markdown table format with columns for Date, Event, and Significance, and Page Number
-- Using the subject's date of birth ({self.subject_dob}), calculate the subject's age at each event when relevant
-- When exact dates aren't provided, estimate years when possible and mark them with "(est.)"
-- Organize the timeline chronologically with the most recent events at the bottom
-- If there are multiple events on the same date, list them in the order they occurred
-- If there are multiple events with the same date and significance, list them in the order they occurred
-
-Keep your analysis focused on factual information directly stated in the document.
-
-Before finalizing results, do a review for accuracy, with attention to exact quotes and markdown links to original PDFs.
-"""
+        prompt = prompt_template.format(
+            document_content=markdown_content,
+            subject_name=self.subject_name,
+            subject_dob=self.subject_dob,
+            document_name=document_name,
+            case_info=self.case_info
+        )
+        
         self.progress_signal.emit(0, f"Prompt created: {len(prompt)} characters")
         return prompt
 
