@@ -172,6 +172,11 @@ class BaseLLMClient(abc.ABC):
         """Check if the client is properly initialized."""
         pass
 
+    @abc.abstractproperty
+    def provider(self) -> str:
+        """Return the provider name for this client."""
+        pass
+
 
 # -----------------------
 # Anthropic Client
@@ -283,10 +288,15 @@ class AnthropicClient(BaseLLMClient):
         """Check if the client is properly initialized."""
         return self.client is not None
 
+    @property
+    def provider(self) -> str:
+        """Return the provider name for this client."""
+        return "anthropic"
+
     def generate_response(
         self,
         prompt_text: str,
-        model: str = "claude-sonnet-3-7-latest",
+        model: str = "claude-3-7-sonnet-latest",
         max_tokens: int = 32000,
         temperature: float = 0.1,
         system_prompt: Optional[str] = None,
@@ -975,6 +985,11 @@ class GeminiClient(BaseLLMClient):
         """Check if the client is properly initialized."""
         return self.client is not None
 
+    @property
+    def provider(self) -> str:
+        """Return the provider name for this client."""
+        return "gemini"
+
     def generate_response(
         self,
         prompt_text: str,
@@ -1500,6 +1515,11 @@ class AzureOpenAIClient(BaseLLMClient):
     def is_initialized(self) -> bool:
         """Check if the client is properly initialized."""
         return self.client is not None
+
+    @property
+    def provider(self) -> str:
+        """Return the provider name for this client."""
+        return "azure_openai"
 
     def generate_response(
         self,

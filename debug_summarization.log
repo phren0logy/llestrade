@@ -1,0 +1,377 @@
+2025-06-06 14:44:07,919 - __main__ - INFO - 🚀 Starting LLM Summarization Diagnostic Tests
+2025-06-06 14:44:07,919 - __main__ - INFO - ============================================================
+2025-06-06 14:44:07,919 - __main__ - INFO - 🔍 Testing environment setup...
+2025-06-06 14:44:07,919 - __main__ - INFO - ✅ .env file found
+2025-06-06 14:44:08,377 - __main__ - INFO - ✅ Successfully imported required modules
+2025-06-06 14:44:08,377 - __main__ - INFO - ============================================================
+2025-06-06 14:44:08,377 - __main__ - INFO - 🔍 Testing LLM client initialization...
+2025-06-06 14:44:08,377 - __main__ - INFO - 📞 Calling get_configured_llm_client with default settings...
+2025-06-06 14:44:08,378 - root - INFO - Attempting to initialize LLM client: Anthropic Claude (ID: anthropic) with model/deployment: 'claude-3-7-sonnet-latest'
+2025-06-06 14:44:08,378 - root - INFO - Explicitly initializing Anthropic client...
+2025-06-06 14:44:08,378 - root - DEBUG - Loaded template: document_analysis_system_prompt
+2025-06-06 14:44:08,379 - root - DEBUG - Loaded template: refinement_instructions
+2025-06-06 14:44:08,379 - root - DEBUG - Loaded template: report_generation_instructions
+2025-06-06 14:44:08,379 - root - DEBUG - Loaded template: refinement_prompt
+2025-06-06 14:44:08,379 - root - DEBUG - Loaded template: document_summary_prompt
+2025-06-06 14:44:08,379 - root - DEBUG - Loaded template: system_prompt
+2025-06-06 14:44:08,379 - root - DEBUG - Loaded template: section_processing
+2025-06-06 14:44:08,467 - root - INFO - Using Anthropic API key starting with: sk-a...oQAA
+2025-06-06 14:44:08,541 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages/count_tokens', 'files': None, 'idempotency_key': 'stainless-python-retry-665730d6-9bad-4b96-a7b5-ee3c1311e7cc', 'json_data': {'messages': [{'role': 'user', 'content': 'Test connection'}], 'model': 'claude-3-7-sonnet-latest'}}
+2025-06-06 14:44:08,557 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens
+2025-06-06 14:44:08,558 - httpcore.connection - DEBUG - connect_tcp.started host='api.anthropic.com' port=443 local_address=None timeout=600.0 socket_options=[(65535, 8, True), (6, 257, 60), (6, 258, 5)]
+2025-06-06 14:44:08,619 - httpcore.connection - DEBUG - connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x110d9e660>
+2025-06-06 14:44:08,619 - httpcore.connection - DEBUG - start_tls.started ssl_context=<ssl.SSLContext object at 0x110d6b050> server_hostname='api.anthropic.com' timeout=600.0
+2025-06-06 14:44:08,652 - httpcore.connection - DEBUG - start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x110d9e900>
+2025-06-06 14:44:08,653 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:08,653 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:44:08,653 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:44:08,653 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:44:08,653 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:08,828 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:44:08 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'18'), (b'Connection', b'keep-alive'), (b'request-id', b'req_011CPshSpzARg9XKqeNe6J9x'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb16decd47efce-PDX')])
+2025-06-06 14:44:08,829 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens "HTTP/1.1 200 OK"
+2025-06-06 14:44:08,829 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:44:08,829 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:44:08,829 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:44:08,829 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:44:08,829 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages/count_tokens "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:44:08 GMT', 'content-type': 'application/json', 'content-length': '18', 'connection': 'keep-alive', 'request-id': 'req_011CPshSpzARg9XKqeNe6J9x', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb16decd47efce-PDX'})
+2025-06-06 14:44:08,829 - anthropic._base_client - DEBUG - request_id: req_011CPshSpzARg9XKqeNe6J9x
+2025-06-06 14:44:08,830 - root - INFO - Anthropic client initialized and tested successfully
+2025-06-06 14:44:08,830 - root - INFO - Successfully initialized LLM client: Anthropic Claude
+2025-06-06 14:44:08,830 - __main__ - INFO - ✅ Client info received: <class 'dict'>
+2025-06-06 14:44:08,830 - __main__ - INFO - 📋 Client info keys: ['client', 'provider_id', 'provider_label', 'effective_model_name']
+2025-06-06 14:44:08,830 - __main__ - INFO - ✅ Client extracted: <class 'llm_utils.AnthropicClient'>
+2025-06-06 14:44:08,830 - __main__ - INFO - 🔍 Provider: anthropic
+2025-06-06 14:44:08,830 - __main__ - INFO - 🔍 Is initialized: True
+2025-06-06 14:44:08,830 - __main__ - INFO - 🎉 Client is properly initialized!
+2025-06-06 14:44:08,830 - __main__ - INFO - ============================================================
+2025-06-06 14:44:08,830 - __main__ - INFO - 🔍 Testing simple API call...
+2025-06-06 14:44:08,830 - __main__ - INFO - 📞 Making API call...
+2025-06-06 14:44:08,830 - root - DEBUG - Anthropic API Request - System prompt length: 57
+2025-06-06 14:44:08,830 - root - DEBUG - Anthropic API Request - User prompt length: 67
+2025-06-06 14:44:08,830 - root - DEBUG - Anthropic API Request - Temperature: 0.1
+2025-06-06 14:44:08,830 - root - DEBUG - Anthropic API Request - Max tokens: 32000
+2025-06-06 14:44:08,831 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages', 'files': None, 'idempotency_key': 'stainless-python-retry-56f329be-1b5c-4f5e-b6aa-ab35be72071d', 'json_data': {'max_tokens': 32000, 'messages': [{'role': 'user', 'content': "Please respond with exactly 'API test successful' and nothing else."}], 'model': 'claude-3-7-sonnet-latest', 'system': 'You are a helpful assistant. Follow instructions exactly.', 'temperature': 0.1}}
+2025-06-06 14:44:08,832 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages
+2025-06-06 14:44:08,832 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:08,832 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:44:08,832 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:44:08,832 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:44:08,832 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:12,269 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:44:12 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'anthropic-ratelimit-input-tokens-limit', b'200000'), (b'anthropic-ratelimit-input-tokens-remaining', b'200000'), (b'anthropic-ratelimit-input-tokens-reset', b'2025-06-06T21:44:11Z'), (b'anthropic-ratelimit-output-tokens-limit', b'80000'), (b'anthropic-ratelimit-output-tokens-remaining', b'80000'), (b'anthropic-ratelimit-output-tokens-reset', b'2025-06-06T21:44:12Z'), (b'anthropic-ratelimit-requests-limit', b'4000'), (b'anthropic-ratelimit-requests-remaining', b'3999'), (b'anthropic-ratelimit-requests-reset', b'2025-06-06T21:44:09Z'), (b'anthropic-ratelimit-tokens-limit', b'280000'), (b'anthropic-ratelimit-tokens-remaining', b'280000'), (b'anthropic-ratelimit-tokens-reset', b'2025-06-06T21:44:11Z'), (b'request-id', b'req_011CPshSqkJnjfL6PVMrmrgJ'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb16dfee34efce-PDX'), (b'Content-Encoding', b'gzip')])
+2025-06-06 14:44:12,270 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2025-06-06 14:44:12,270 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:44:12,279 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:44:12,279 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:44:12,279 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:44:12,279 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:44:12 GMT', 'content-type': 'application/json', 'transfer-encoding': 'chunked', 'connection': 'keep-alive', 'anthropic-ratelimit-input-tokens-limit': '200000', 'anthropic-ratelimit-input-tokens-remaining': '200000', 'anthropic-ratelimit-input-tokens-reset': '2025-06-06T21:44:11Z', 'anthropic-ratelimit-output-tokens-limit': '80000', 'anthropic-ratelimit-output-tokens-remaining': '80000', 'anthropic-ratelimit-output-tokens-reset': '2025-06-06T21:44:12Z', 'anthropic-ratelimit-requests-limit': '4000', 'anthropic-ratelimit-requests-remaining': '3999', 'anthropic-ratelimit-requests-reset': '2025-06-06T21:44:09Z', 'anthropic-ratelimit-tokens-limit': '280000', 'anthropic-ratelimit-tokens-remaining': '280000', 'anthropic-ratelimit-tokens-reset': '2025-06-06T21:44:11Z', 'request-id': 'req_011CPshSqkJnjfL6PVMrmrgJ', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb16dfee34efce-PDX', 'content-encoding': 'gzip'})
+2025-06-06 14:44:12,279 - anthropic._base_client - DEBUG - request_id: req_011CPshSqkJnjfL6PVMrmrgJ
+2025-06-06 14:44:12,293 - root - DEBUG - Anthropic API Response received in 3.46 seconds
+2025-06-06 14:44:12,293 - root - DEBUG - Anthropic API Token usage - Input: 31, Output: 6
+2025-06-06 14:44:12,293 - __main__ - INFO - ✅ API call completed
+2025-06-06 14:44:12,293 - __main__ - INFO - 📋 Response type: <class 'dict'>
+2025-06-06 14:44:12,293 - __main__ - INFO - 📋 Response keys: ['success', 'content', 'usage', 'provider']
+2025-06-06 14:44:12,293 - __main__ - INFO - 🎉 API call successful!
+2025-06-06 14:44:12,293 - __main__ - INFO - 📝 Response content length: 19
+2025-06-06 14:44:12,293 - __main__ - INFO - 📝 Response preview: API test successful...
+2025-06-06 14:44:12,293 - __main__ - INFO - ============================================================
+2025-06-06 14:44:12,293 - __main__ - INFO - 🔍 Testing complete summarization workflow...
+2025-06-06 14:44:12,293 - __main__ - ERROR - 💥 Exception during workflow test: type object 'PySide6.QtCore.QCoreApplication' has no attribute 'getInstance'
+Traceback (most recent call last):
+  File "/Users/andy/Documents/GitHub/2025-03-11-report-drafter/tests/debug_llm_summarization.py", line 179, in test_summarization_workflow
+    app = QCoreApplication.getInstance()
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'PySide6.QtCore.QCoreApplication' has no attribute 'getInstance'. Did you mean: 'instance'?
+2025-06-06 14:44:12,297 - __main__ - ERROR - ❌ Summarization workflow test failed
+2025-06-06 14:44:12,297 - __main__ - ERROR - ❌ Diagnostic tests failed - check logs above for details
+2025-06-06 14:44:12,319 - httpcore.connection - DEBUG - close.started
+2025-06-06 14:44:12,320 - httpcore.connection - DEBUG - close.complete
+2025-06-06 14:44:29,355 - __main__ - INFO - 🚀 Starting LLM Summarization Diagnostic Tests
+2025-06-06 14:44:29,355 - __main__ - INFO - ============================================================
+2025-06-06 14:44:29,355 - __main__ - INFO - 🔍 Testing environment setup...
+2025-06-06 14:44:29,355 - __main__ - INFO - ✅ .env file found
+2025-06-06 14:44:29,634 - __main__ - INFO - ✅ Successfully imported required modules
+2025-06-06 14:44:29,635 - __main__ - INFO - ============================================================
+2025-06-06 14:44:29,635 - __main__ - INFO - 🔍 Testing LLM client initialization...
+2025-06-06 14:44:29,635 - __main__ - INFO - 📞 Calling get_configured_llm_client with default settings...
+2025-06-06 14:44:29,635 - root - INFO - Attempting to initialize LLM client: Anthropic Claude (ID: anthropic) with model/deployment: 'claude-3-7-sonnet-latest'
+2025-06-06 14:44:29,635 - root - INFO - Explicitly initializing Anthropic client...
+2025-06-06 14:44:29,635 - root - DEBUG - Loaded template: document_analysis_system_prompt
+2025-06-06 14:44:29,635 - root - DEBUG - Loaded template: refinement_instructions
+2025-06-06 14:44:29,635 - root - DEBUG - Loaded template: report_generation_instructions
+2025-06-06 14:44:29,635 - root - DEBUG - Loaded template: refinement_prompt
+2025-06-06 14:44:29,635 - root - DEBUG - Loaded template: document_summary_prompt
+2025-06-06 14:44:29,635 - root - DEBUG - Loaded template: system_prompt
+2025-06-06 14:44:29,635 - root - DEBUG - Loaded template: section_processing
+2025-06-06 14:44:29,679 - root - INFO - Using Anthropic API key starting with: sk-a...oQAA
+2025-06-06 14:44:29,705 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages/count_tokens', 'files': None, 'idempotency_key': 'stainless-python-retry-684b391c-8321-49e9-be86-739404b642f8', 'json_data': {'messages': [{'role': 'user', 'content': 'Test connection'}], 'model': 'claude-3-7-sonnet-latest'}}
+2025-06-06 14:44:29,718 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens
+2025-06-06 14:44:29,719 - httpcore.connection - DEBUG - connect_tcp.started host='api.anthropic.com' port=443 local_address=None timeout=600.0 socket_options=[(65535, 8, True), (6, 257, 60), (6, 258, 5)]
+2025-06-06 14:44:29,780 - httpcore.connection - DEBUG - connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x11515eed0>
+2025-06-06 14:44:29,780 - httpcore.connection - DEBUG - start_tls.started ssl_context=<ssl.SSLContext object at 0x11512b050> server_hostname='api.anthropic.com' timeout=600.0
+2025-06-06 14:44:29,808 - httpcore.connection - DEBUG - start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x114f4b260>
+2025-06-06 14:44:29,809 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:29,809 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:44:29,809 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:44:29,809 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:44:29,809 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:29,963 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:44:30 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'18'), (b'Connection', b'keep-alive'), (b'request-id', b'req_011CPshUPPbSakTuUGtYfHDX'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb1762fb2887ab-PDX')])
+2025-06-06 14:44:29,964 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens "HTTP/1.1 200 OK"
+2025-06-06 14:44:29,964 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:44:29,964 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:44:29,964 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:44:29,964 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:44:29,964 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages/count_tokens "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:44:30 GMT', 'content-type': 'application/json', 'content-length': '18', 'connection': 'keep-alive', 'request-id': 'req_011CPshUPPbSakTuUGtYfHDX', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb1762fb2887ab-PDX'})
+2025-06-06 14:44:29,964 - anthropic._base_client - DEBUG - request_id: req_011CPshUPPbSakTuUGtYfHDX
+2025-06-06 14:44:29,965 - root - INFO - Anthropic client initialized and tested successfully
+2025-06-06 14:44:29,965 - root - INFO - Successfully initialized LLM client: Anthropic Claude
+2025-06-06 14:44:29,965 - __main__ - INFO - ✅ Client info received: <class 'dict'>
+2025-06-06 14:44:29,965 - __main__ - INFO - 📋 Client info keys: ['client', 'provider_id', 'provider_label', 'effective_model_name']
+2025-06-06 14:44:29,965 - __main__ - INFO - ✅ Client extracted: <class 'llm_utils.AnthropicClient'>
+2025-06-06 14:44:29,965 - __main__ - INFO - 🔍 Provider: anthropic
+2025-06-06 14:44:29,965 - __main__ - INFO - 🔍 Is initialized: True
+2025-06-06 14:44:29,965 - __main__ - INFO - 🎉 Client is properly initialized!
+2025-06-06 14:44:29,965 - __main__ - INFO - ============================================================
+2025-06-06 14:44:29,966 - __main__ - INFO - 🔍 Testing simple API call...
+2025-06-06 14:44:29,966 - __main__ - INFO - 📞 Making API call...
+2025-06-06 14:44:29,966 - root - DEBUG - Anthropic API Request - System prompt length: 57
+2025-06-06 14:44:29,966 - root - DEBUG - Anthropic API Request - User prompt length: 67
+2025-06-06 14:44:29,966 - root - DEBUG - Anthropic API Request - Temperature: 0.1
+2025-06-06 14:44:29,966 - root - DEBUG - Anthropic API Request - Max tokens: 32000
+2025-06-06 14:44:29,968 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages', 'files': None, 'idempotency_key': 'stainless-python-retry-419d535e-b8db-4a29-a8d4-1b6e22be4fe8', 'json_data': {'max_tokens': 32000, 'messages': [{'role': 'user', 'content': "Please respond with exactly 'API test successful' and nothing else."}], 'model': 'claude-3-7-sonnet-latest', 'system': 'You are a helpful assistant. Follow instructions exactly.', 'temperature': 0.1}}
+2025-06-06 14:44:29,968 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages
+2025-06-06 14:44:29,969 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:29,969 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:44:29,969 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:44:29,969 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:44:29,969 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:44:32,942 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:44:33 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'anthropic-ratelimit-input-tokens-limit', b'200000'), (b'anthropic-ratelimit-input-tokens-remaining', b'200000'), (b'anthropic-ratelimit-input-tokens-reset', b'2025-06-06T21:44:32Z'), (b'anthropic-ratelimit-output-tokens-limit', b'80000'), (b'anthropic-ratelimit-output-tokens-remaining', b'80000'), (b'anthropic-ratelimit-output-tokens-reset', b'2025-06-06T21:44:32Z'), (b'anthropic-ratelimit-requests-limit', b'4000'), (b'anthropic-ratelimit-requests-remaining', b'3999'), (b'anthropic-ratelimit-requests-reset', b'2025-06-06T21:44:30Z'), (b'anthropic-ratelimit-tokens-limit', b'280000'), (b'anthropic-ratelimit-tokens-remaining', b'280000'), (b'anthropic-ratelimit-tokens-reset', b'2025-06-06T21:44:32Z'), (b'request-id', b'req_011CPshUQ42gc1NuJzUx8gJC'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb1763fd3f87ab-PDX'), (b'Content-Encoding', b'gzip')])
+2025-06-06 14:44:32,942 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2025-06-06 14:44:32,942 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:44:32,944 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:44:32,944 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:44:32,944 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:44:32,944 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:44:33 GMT', 'content-type': 'application/json', 'transfer-encoding': 'chunked', 'connection': 'keep-alive', 'anthropic-ratelimit-input-tokens-limit': '200000', 'anthropic-ratelimit-input-tokens-remaining': '200000', 'anthropic-ratelimit-input-tokens-reset': '2025-06-06T21:44:32Z', 'anthropic-ratelimit-output-tokens-limit': '80000', 'anthropic-ratelimit-output-tokens-remaining': '80000', 'anthropic-ratelimit-output-tokens-reset': '2025-06-06T21:44:32Z', 'anthropic-ratelimit-requests-limit': '4000', 'anthropic-ratelimit-requests-remaining': '3999', 'anthropic-ratelimit-requests-reset': '2025-06-06T21:44:30Z', 'anthropic-ratelimit-tokens-limit': '280000', 'anthropic-ratelimit-tokens-remaining': '280000', 'anthropic-ratelimit-tokens-reset': '2025-06-06T21:44:32Z', 'request-id': 'req_011CPshUQ42gc1NuJzUx8gJC', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb1763fd3f87ab-PDX', 'content-encoding': 'gzip'})
+2025-06-06 14:44:32,944 - anthropic._base_client - DEBUG - request_id: req_011CPshUQ42gc1NuJzUx8gJC
+2025-06-06 14:44:32,949 - root - DEBUG - Anthropic API Response received in 2.98 seconds
+2025-06-06 14:44:32,949 - root - DEBUG - Anthropic API Token usage - Input: 31, Output: 6
+2025-06-06 14:44:32,949 - __main__ - INFO - ✅ API call completed
+2025-06-06 14:44:32,949 - __main__ - INFO - 📋 Response type: <class 'dict'>
+2025-06-06 14:44:32,949 - __main__ - INFO - 📋 Response keys: ['success', 'content', 'usage', 'provider']
+2025-06-06 14:44:32,949 - __main__ - INFO - 🎉 API call successful!
+2025-06-06 14:44:32,949 - __main__ - INFO - 📝 Response content length: 19
+2025-06-06 14:44:32,949 - __main__ - INFO - 📝 Response preview: API test successful...
+2025-06-06 14:44:32,949 - __main__ - INFO - ============================================================
+2025-06-06 14:44:32,949 - __main__ - INFO - 🔍 Testing complete summarization workflow...
+2025-06-06 14:44:32,952 - __main__ - INFO - 📝 Creating test markdown file...
+2025-06-06 14:44:32,953 - __main__ - INFO - ✅ Test file created: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp5a06vcpn.md
+2025-06-06 14:44:32,953 - __main__ - INFO - 📊 File size: 455 bytes
+2025-06-06 14:44:32,953 - __main__ - INFO - 📂 Output directory: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmpu9wx8q7d
+2025-06-06 14:44:32,953 - __main__ - INFO - 🧵 Creating LLMSummaryThread...
+2025-06-06 14:44:32,953 - __main__ - INFO - 🔄 Running summarization synchronously...
+2025-06-06 14:44:32,953 - __main__ - ERROR - 💥 Exception during workflow test: name 'logger' is not defined
+Traceback (most recent call last):
+  File "/Users/andy/Documents/GitHub/2025-03-11-report-drafter/tests/debug_llm_summarization.py", line 206, in test_summarization_workflow
+    thread.run()
+  File "/Users/andy/Documents/GitHub/2025-03-11-report-drafter/ui/workers/llm_summary_thread.py", line 205, in run
+    logger.info("🚀 LLMSummaryThread.run() started")
+    ^^^^^^
+NameError: name 'logger' is not defined
+2025-06-06 14:44:32,955 - __main__ - ERROR - ❌ Summarization workflow test failed
+2025-06-06 14:44:32,955 - __main__ - ERROR - ❌ Diagnostic tests failed - check logs above for details
+2025-06-06 14:44:32,976 - httpcore.connection - DEBUG - close.started
+2025-06-06 14:44:32,976 - httpcore.connection - DEBUG - close.complete
+2025-06-06 14:46:07,734 - __main__ - INFO - 🚀 Starting LLM Summarization Diagnostic Tests
+2025-06-06 14:46:07,734 - __main__ - INFO - ============================================================
+2025-06-06 14:46:07,734 - __main__ - INFO - 🔍 Testing environment setup...
+2025-06-06 14:46:07,734 - __main__ - INFO - ✅ .env file found
+2025-06-06 14:46:08,125 - __main__ - INFO - ✅ Successfully imported required modules
+2025-06-06 14:46:08,125 - __main__ - INFO - ============================================================
+2025-06-06 14:46:08,125 - __main__ - INFO - 🔍 Testing LLM client initialization...
+2025-06-06 14:46:08,125 - __main__ - INFO - 📞 Calling get_configured_llm_client with default settings...
+2025-06-06 14:46:08,125 - root - INFO - Attempting to initialize LLM client: Anthropic Claude (ID: anthropic) with model/deployment: 'claude-3-7-sonnet-latest'
+2025-06-06 14:46:08,125 - root - INFO - Explicitly initializing Anthropic client...
+2025-06-06 14:46:08,125 - root - DEBUG - Loaded template: document_analysis_system_prompt
+2025-06-06 14:46:08,126 - root - DEBUG - Loaded template: refinement_instructions
+2025-06-06 14:46:08,126 - root - DEBUG - Loaded template: report_generation_instructions
+2025-06-06 14:46:08,126 - root - DEBUG - Loaded template: refinement_prompt
+2025-06-06 14:46:08,126 - root - DEBUG - Loaded template: document_summary_prompt
+2025-06-06 14:46:08,126 - root - DEBUG - Loaded template: system_prompt
+2025-06-06 14:46:08,127 - root - DEBUG - Loaded template: section_processing
+2025-06-06 14:46:08,237 - root - INFO - Using Anthropic API key starting with: sk-a...oQAA
+2025-06-06 14:46:08,266 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages/count_tokens', 'files': None, 'idempotency_key': 'stainless-python-retry-8647a0ad-4e71-4401-b731-8f2bd7fab019', 'json_data': {'messages': [{'role': 'user', 'content': 'Test connection'}], 'model': 'claude-3-7-sonnet-latest'}}
+2025-06-06 14:46:08,279 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens
+2025-06-06 14:46:08,280 - httpcore.connection - DEBUG - connect_tcp.started host='api.anthropic.com' port=443 local_address=None timeout=600.0 socket_options=[(65535, 8, True), (6, 257, 60), (6, 258, 5)]
+2025-06-06 14:46:08,312 - httpcore.connection - DEBUG - connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x12295e5a0>
+2025-06-06 14:46:08,312 - httpcore.connection - DEBUG - start_tls.started ssl_context=<ssl.SSLContext object at 0x12292b050> server_hostname='api.anthropic.com' timeout=600.0
+2025-06-06 14:46:08,348 - httpcore.connection - DEBUG - start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x1228ee780>
+2025-06-06 14:46:08,348 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:08,348 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:46:08,348 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:46:08,348 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:46:08,348 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:08,506 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:46:08 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'18'), (b'Connection', b'keep-alive'), (b'request-id', b'req_011CPshbefobDFmgxtMv7cxQ'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb19cade30c3af-PDX')])
+2025-06-06 14:46:08,507 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens "HTTP/1.1 200 OK"
+2025-06-06 14:46:08,507 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:46:08,507 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:46:08,507 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:46:08,507 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:46:08,507 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages/count_tokens "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:46:08 GMT', 'content-type': 'application/json', 'content-length': '18', 'connection': 'keep-alive', 'request-id': 'req_011CPshbefobDFmgxtMv7cxQ', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb19cade30c3af-PDX'})
+2025-06-06 14:46:08,507 - anthropic._base_client - DEBUG - request_id: req_011CPshbefobDFmgxtMv7cxQ
+2025-06-06 14:46:08,508 - root - INFO - Anthropic client initialized and tested successfully
+2025-06-06 14:46:08,508 - root - INFO - Successfully initialized LLM client: Anthropic Claude
+2025-06-06 14:46:08,508 - __main__ - INFO - ✅ Client info received: <class 'dict'>
+2025-06-06 14:46:08,508 - __main__ - INFO - 📋 Client info keys: ['client', 'provider_id', 'provider_label', 'effective_model_name']
+2025-06-06 14:46:08,508 - __main__ - INFO - ✅ Client extracted: <class 'llm_utils.AnthropicClient'>
+2025-06-06 14:46:08,508 - __main__ - INFO - 🔍 Provider: anthropic
+2025-06-06 14:46:08,508 - __main__ - INFO - 🔍 Is initialized: True
+2025-06-06 14:46:08,508 - __main__ - INFO - 🎉 Client is properly initialized!
+2025-06-06 14:46:08,509 - __main__ - INFO - ============================================================
+2025-06-06 14:46:08,509 - __main__ - INFO - 🔍 Testing simple API call...
+2025-06-06 14:46:08,509 - __main__ - INFO - 📞 Making API call...
+2025-06-06 14:46:08,509 - root - DEBUG - Anthropic API Request - System prompt length: 57
+2025-06-06 14:46:08,509 - root - DEBUG - Anthropic API Request - User prompt length: 67
+2025-06-06 14:46:08,509 - root - DEBUG - Anthropic API Request - Temperature: 0.1
+2025-06-06 14:46:08,509 - root - DEBUG - Anthropic API Request - Max tokens: 32000
+2025-06-06 14:46:08,511 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages', 'files': None, 'idempotency_key': 'stainless-python-retry-e8b02f15-0d5e-43df-8220-037fe48a0f06', 'json_data': {'max_tokens': 32000, 'messages': [{'role': 'user', 'content': "Please respond with exactly 'API test successful' and nothing else."}], 'model': 'claude-3-7-sonnet-latest', 'system': 'You are a helpful assistant. Follow instructions exactly.', 'temperature': 0.1}}
+2025-06-06 14:46:08,512 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages
+2025-06-06 14:46:08,512 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:08,512 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:46:08,512 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:46:08,512 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:46:08,512 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:11,325 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:46:11 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'anthropic-ratelimit-input-tokens-limit', b'200000'), (b'anthropic-ratelimit-input-tokens-remaining', b'200000'), (b'anthropic-ratelimit-input-tokens-reset', b'2025-06-06T21:46:10Z'), (b'anthropic-ratelimit-output-tokens-limit', b'80000'), (b'anthropic-ratelimit-output-tokens-remaining', b'80000'), (b'anthropic-ratelimit-output-tokens-reset', b'2025-06-06T21:46:11Z'), (b'anthropic-ratelimit-requests-limit', b'4000'), (b'anthropic-ratelimit-requests-remaining', b'3999'), (b'anthropic-ratelimit-requests-reset', b'2025-06-06T21:46:08Z'), (b'anthropic-ratelimit-tokens-limit', b'280000'), (b'anthropic-ratelimit-tokens-remaining', b'280000'), (b'anthropic-ratelimit-tokens-reset', b'2025-06-06T21:46:10Z'), (b'request-id', b'req_011CPshbfNxxYuE3NWn1hsoi'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb19cbd81bc3af-PDX'), (b'Content-Encoding', b'gzip')])
+2025-06-06 14:46:11,326 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2025-06-06 14:46:11,326 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:46:11,326 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:46:11,327 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:46:11,327 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:46:11,327 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:46:11 GMT', 'content-type': 'application/json', 'transfer-encoding': 'chunked', 'connection': 'keep-alive', 'anthropic-ratelimit-input-tokens-limit': '200000', 'anthropic-ratelimit-input-tokens-remaining': '200000', 'anthropic-ratelimit-input-tokens-reset': '2025-06-06T21:46:10Z', 'anthropic-ratelimit-output-tokens-limit': '80000', 'anthropic-ratelimit-output-tokens-remaining': '80000', 'anthropic-ratelimit-output-tokens-reset': '2025-06-06T21:46:11Z', 'anthropic-ratelimit-requests-limit': '4000', 'anthropic-ratelimit-requests-remaining': '3999', 'anthropic-ratelimit-requests-reset': '2025-06-06T21:46:08Z', 'anthropic-ratelimit-tokens-limit': '280000', 'anthropic-ratelimit-tokens-remaining': '280000', 'anthropic-ratelimit-tokens-reset': '2025-06-06T21:46:10Z', 'request-id': 'req_011CPshbfNxxYuE3NWn1hsoi', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb19cbd81bc3af-PDX', 'content-encoding': 'gzip'})
+2025-06-06 14:46:11,328 - anthropic._base_client - DEBUG - request_id: req_011CPshbfNxxYuE3NWn1hsoi
+2025-06-06 14:46:11,342 - root - DEBUG - Anthropic API Response received in 2.83 seconds
+2025-06-06 14:46:11,342 - root - DEBUG - Anthropic API Token usage - Input: 31, Output: 6
+2025-06-06 14:46:11,342 - __main__ - INFO - ✅ API call completed
+2025-06-06 14:46:11,342 - __main__ - INFO - 📋 Response type: <class 'dict'>
+2025-06-06 14:46:11,342 - __main__ - INFO - 📋 Response keys: ['success', 'content', 'usage', 'provider']
+2025-06-06 14:46:11,342 - __main__ - INFO - 🎉 API call successful!
+2025-06-06 14:46:11,342 - __main__ - INFO - 📝 Response content length: 19
+2025-06-06 14:46:11,342 - __main__ - INFO - 📝 Response preview: API test successful...
+2025-06-06 14:46:11,342 - __main__ - INFO - ============================================================
+2025-06-06 14:46:11,342 - __main__ - INFO - 🔍 Testing complete summarization workflow...
+2025-06-06 14:46:11,345 - __main__ - INFO - 📝 Creating test markdown file...
+2025-06-06 14:46:11,346 - __main__ - INFO - ✅ Test file created: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp99f5dcvy.md
+2025-06-06 14:46:11,346 - __main__ - INFO - 📊 File size: 455 bytes
+2025-06-06 14:46:11,347 - __main__ - INFO - 📂 Output directory: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp10qfy1yb
+2025-06-06 14:46:11,347 - __main__ - INFO - 🧵 Creating LLMSummaryThread...
+2025-06-06 14:46:11,347 - __main__ - INFO - 🔄 Running summarization synchronously...
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 🚀 LLMSummaryThread.run() started
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 📁 Files to process: 1
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 📂 Output directory: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp10qfy1yb
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 👤 Subject: Test Patient
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 🏗️ LLM Provider: anthropic, Model: claude-3-7-sonnet-latest
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 📄 File 1: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp99f5dcvy.md
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 📊 File 1 size: 455 bytes
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 🔧 Initializing LLM client...
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 🔧 Starting LLM client initialization...
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 🏷️ Provider ID: anthropic
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 🏷️ Model Name: claude-3-7-sonnet-latest
+2025-06-06 14:46:11,347 - ui.workers.llm_summary_thread - INFO - 📞 Calling get_configured_llm_client...
+2025-06-06 14:46:11,347 - root - INFO - Attempting to initialize LLM client: Anthropic Claude (ID: anthropic) with model/deployment: 'claude-3-7-sonnet-latest'
+2025-06-06 14:46:11,347 - root - INFO - Explicitly initializing Anthropic client...
+2025-06-06 14:46:11,348 - root - DEBUG - Loaded template: document_analysis_system_prompt
+2025-06-06 14:46:11,348 - root - DEBUG - Loaded template: refinement_instructions
+2025-06-06 14:46:11,348 - root - DEBUG - Loaded template: report_generation_instructions
+2025-06-06 14:46:11,348 - root - DEBUG - Loaded template: refinement_prompt
+2025-06-06 14:46:11,348 - root - DEBUG - Loaded template: document_summary_prompt
+2025-06-06 14:46:11,348 - root - DEBUG - Loaded template: system_prompt
+2025-06-06 14:46:11,348 - root - DEBUG - Loaded template: section_processing
+2025-06-06 14:46:11,349 - root - INFO - Using Anthropic API key starting with: sk-a...oQAA
+2025-06-06 14:46:11,370 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages/count_tokens', 'files': None, 'idempotency_key': 'stainless-python-retry-95cf9dfc-6bcb-4b9f-99a9-09b9c4852df2', 'json_data': {'messages': [{'role': 'user', 'content': 'Test connection'}], 'model': 'claude-3-7-sonnet-latest'}}
+2025-06-06 14:46:11,370 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens
+2025-06-06 14:46:11,370 - httpcore.connection - DEBUG - connect_tcp.started host='api.anthropic.com' port=443 local_address=None timeout=600.0 socket_options=[(65535, 8, True), (6, 257, 60), (6, 258, 5)]
+2025-06-06 14:46:11,400 - httpcore.connection - DEBUG - connect_tcp.complete return_value=<httpcore._backends.sync.SyncStream object at 0x1229d6c30>
+2025-06-06 14:46:11,400 - httpcore.connection - DEBUG - start_tls.started ssl_context=<ssl.SSLContext object at 0x122bb7350> server_hostname='api.anthropic.com' timeout=600.0
+2025-06-06 14:46:11,436 - httpcore.connection - DEBUG - start_tls.complete return_value=<httpcore._backends.sync.SyncStream object at 0x1229d6300>
+2025-06-06 14:46:11,436 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:11,436 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:46:11,436 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:46:11,436 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:46:11,436 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:11,633 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:46:11 GMT'), (b'Content-Type', b'application/json'), (b'Content-Length', b'18'), (b'Connection', b'keep-alive'), (b'request-id', b'req_011CPshbswmH5eWUNrWviGbm'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb19de2bb10024-PDX')])
+2025-06-06 14:46:11,633 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages/count_tokens "HTTP/1.1 200 OK"
+2025-06-06 14:46:11,634 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:46:11,634 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:46:11,634 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:46:11,634 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:46:11,634 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages/count_tokens "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:46:11 GMT', 'content-type': 'application/json', 'content-length': '18', 'connection': 'keep-alive', 'request-id': 'req_011CPshbswmH5eWUNrWviGbm', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb19de2bb10024-PDX'})
+2025-06-06 14:46:11,634 - anthropic._base_client - DEBUG - request_id: req_011CPshbswmH5eWUNrWviGbm
+2025-06-06 14:46:11,634 - root - INFO - Anthropic client initialized and tested successfully
+2025-06-06 14:46:11,634 - root - INFO - Successfully initialized LLM client: Anthropic Claude
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - ✅ get_configured_llm_client returned: <class 'dict'>
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 📋 Client info keys: ['client', 'provider_id', 'provider_label', 'effective_model_name']
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - ✅ LLM client extracted: <class 'llm_utils.AnthropicClient'>
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 🔍 Client provider: anthropic
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 🔍 Client is_initialized: True
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 🎉 LLM client initialization successful!
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - ✅ LLM client initialization successful
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 🔍 Checking LLM client availability...
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - ✅ LLM client available - Provider: anthropic
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 📡 Emitting initial progress signal...
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - ✅ Initial progress signal emitted
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 🔄 Starting file processing loop for 1 files
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 📋 Processing file 1/1: tmp99f5dcvy.md
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 📡 Emitting file progress signal (0%)...
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - ✅ File progress signal emitted
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 📝 Target summary file: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp10qfy1yb/tmp99f5dcvy_summary.md
+2025-06-06 14:46:11,635 - ui.workers.llm_summary_thread - INFO - 🔍 Checking if summary file exists: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp10qfy1yb/tmp99f5dcvy_summary.md
+2025-06-06 14:46:11,636 - ui.workers.llm_summary_thread - INFO - 📖 Reading file contents: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp99f5dcvy.md
+2025-06-06 14:46:11,636 - ui.workers.llm_summary_thread - INFO - ✅ File read successfully - 455 characters
+2025-06-06 14:46:11,636 - ui.workers.llm_summary_thread - INFO - 🤖 Starting summarization with anthropic
+2025-06-06 14:46:11,636 - ui.workers.llm_summary_thread - INFO - 🔄 Calling summarize_markdown_file...
+2025-06-06 14:46:11,638 - root - DEBUG - Loaded template: document_analysis_system_prompt
+2025-06-06 14:46:11,638 - root - DEBUG - Loaded template: refinement_instructions
+2025-06-06 14:46:11,638 - root - DEBUG - Loaded template: report_generation_instructions
+2025-06-06 14:46:11,638 - root - DEBUG - Loaded template: refinement_prompt
+2025-06-06 14:46:11,638 - root - DEBUG - Loaded template: document_summary_prompt
+2025-06-06 14:46:11,638 - root - DEBUG - Loaded template: system_prompt
+2025-06-06 14:46:11,639 - root - DEBUG - Loaded template: section_processing
+2025-06-06 14:46:11,639 - root - DEBUG - Anthropic API Request - System prompt length: 137
+2025-06-06 14:46:11,639 - root - DEBUG - Anthropic API Request - User prompt length: 2623
+2025-06-06 14:46:11,639 - root - DEBUG - Anthropic API Request - Temperature: 0.1
+2025-06-06 14:46:11,639 - root - DEBUG - Anthropic API Request - Max tokens: 32000
+2025-06-06 14:46:11,639 - anthropic._base_client - DEBUG - Request options: {'method': 'post', 'url': '/v1/messages', 'files': None, 'idempotency_key': 'stainless-python-retry-f101fa86-3778-4423-bdb3-66fe6bbb8511', 'json_data': {'max_tokens': 32000, 'messages': [{'role': 'user', 'content': '## Document Content\n\n<document-content>\n# Test Medical Record\n\n## Patient Information\n- Name: Test Patient\n- DOB: 1990-01-01\n- Date of Service: 2024-01-01\n\n## Assessment\nThis is a test document for debugging the summarization function.\nThe patient appears to be in good health with no significant concerns.\n\n## Treatment Plan\n1. Continue regular checkups\n2. Maintain current medication regimen\n3. Follow up in 6 months\n\n## Notes\nThis is a synthetic test document created for debugging purposes.\n\n</document-content>\n\n# Document Analysis Task\n\n## Document Information\n\n- **Subject Name**: Test Patient\n- **Date of Birth**: 1990-01-01\n- **Original Document**: (The tmp99f5dcvy.md is a markdown file that was converted from a PDF. Change the extension from .md to .pdf)\n\n## Case Background\n\nTest case for debugging\n\n## Instructions\n\nPlease analyze the document content above, wrapped in "document-content" tags, and provide a comprehensive summary that includes:\n\n- Key facts and information about the subject\n- Significant events and dates mentioned\n- Family and romantic relationships\n- Early childhood history\n- Educational history\n- Employment history\n- Military career history\n- Legal issues or encounters with law enforcement\n- Substance use and treatment history\n- Medical and psychiatric history\n- Any notable statements or quotes\n- Notable patterns of behavior\n- Adverse life events\n- A timeline of events in a markdown table format with columns for Date, Event, and Significance\n\nInclude the page number for all extracted items.\nCreate a markdown link to [filename.pdf: Page x](./pdfs/<filename.pdf>#page=<page_number>) for each page number referenced.\nWhen a range of pages is referenced, link the first page but include the range in the text.\n\n## Timeline Instructions\n\n- Using the subject\'s date of birth (1990-01-01), calculate the subject\'s age at each event when relevant\n- Create a timeline of events in a markdown table format with columns for Date, Age, Event, and Significance, and Page Number, where age refer\'s to the subject\'s age\n- When exact dates aren\'t provided, estimate years when possible and mark them with "(est.)"\n- Organize the timeline chronologically with the most recent events at the bottom\n- If there are multiple events on the same date, list them in the order they occurred\n- If there are multiple events with the same date and significance, list them in the order they occurred\n\nKeep your analysis focused on factual information directly stated in the document.\n\nBefore finalizing results, do a review for accuracy, with attention to exact quotes and markdown links to original PDFs.\n'}], 'model': 'claude-3-7-sonnet-latest', 'system': 'You are analyzing documents for Test Patient (DOB: 1990-01-01). The following case information provides context: Test case for debugging\n', 'temperature': 0.1}}
+2025-06-06 14:46:11,640 - anthropic._base_client - DEBUG - Sending HTTP Request: POST https://api.anthropic.com/v1/messages
+2025-06-06 14:46:11,641 - httpcore.http11 - DEBUG - send_request_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:11,641 - httpcore.http11 - DEBUG - send_request_headers.complete
+2025-06-06 14:46:11,641 - httpcore.http11 - DEBUG - send_request_body.started request=<Request [b'POST']>
+2025-06-06 14:46:11,641 - httpcore.http11 - DEBUG - send_request_body.complete
+2025-06-06 14:46:11,641 - httpcore.http11 - DEBUG - receive_response_headers.started request=<Request [b'POST']>
+2025-06-06 14:46:20,413 - httpcore.http11 - DEBUG - receive_response_headers.complete return_value=(b'HTTP/1.1', 200, b'OK', [(b'Date', b'Fri, 06 Jun 2025 21:46:20 GMT'), (b'Content-Type', b'application/json'), (b'Transfer-Encoding', b'chunked'), (b'Connection', b'keep-alive'), (b'anthropic-ratelimit-input-tokens-limit', b'200000'), (b'anthropic-ratelimit-input-tokens-remaining', b'200000'), (b'anthropic-ratelimit-input-tokens-reset', b'2025-06-06T21:46:13Z'), (b'anthropic-ratelimit-output-tokens-limit', b'80000'), (b'anthropic-ratelimit-output-tokens-remaining', b'80000'), (b'anthropic-ratelimit-output-tokens-reset', b'2025-06-06T21:46:20Z'), (b'anthropic-ratelimit-requests-limit', b'4000'), (b'anthropic-ratelimit-requests-remaining', b'3999'), (b'anthropic-ratelimit-requests-reset', b'2025-06-06T21:46:11Z'), (b'anthropic-ratelimit-tokens-limit', b'280000'), (b'anthropic-ratelimit-tokens-remaining', b'280000'), (b'anthropic-ratelimit-tokens-reset', b'2025-06-06T21:46:13Z'), (b'request-id', b'req_011CPshbtsaCZM6M9N8pGsKS'), (b'strict-transport-security', b'max-age=31536000; includeSubDomains; preload'), (b'anthropic-organization-id', b'e1435a3f-1bee-45ad-915d-d81f520ba2f7'), (b'via', b'1.1 google'), (b'cf-cache-status', b'DYNAMIC'), (b'X-Robots-Tag', b'none'), (b'Server', b'cloudflare'), (b'CF-RAY', b'94bb19df6d0b0024-PDX'), (b'Content-Encoding', b'gzip')])
+2025-06-06 14:46:20,413 - httpx - INFO - HTTP Request: POST https://api.anthropic.com/v1/messages "HTTP/1.1 200 OK"
+2025-06-06 14:46:20,414 - httpcore.http11 - DEBUG - receive_response_body.started request=<Request [b'POST']>
+2025-06-06 14:46:20,414 - httpcore.http11 - DEBUG - receive_response_body.complete
+2025-06-06 14:46:20,414 - httpcore.http11 - DEBUG - response_closed.started
+2025-06-06 14:46:20,414 - httpcore.http11 - DEBUG - response_closed.complete
+2025-06-06 14:46:20,414 - anthropic._base_client - DEBUG - HTTP Response: POST https://api.anthropic.com/v1/messages "200 OK" Headers({'date': 'Fri, 06 Jun 2025 21:46:20 GMT', 'content-type': 'application/json', 'transfer-encoding': 'chunked', 'connection': 'keep-alive', 'anthropic-ratelimit-input-tokens-limit': '200000', 'anthropic-ratelimit-input-tokens-remaining': '200000', 'anthropic-ratelimit-input-tokens-reset': '2025-06-06T21:46:13Z', 'anthropic-ratelimit-output-tokens-limit': '80000', 'anthropic-ratelimit-output-tokens-remaining': '80000', 'anthropic-ratelimit-output-tokens-reset': '2025-06-06T21:46:20Z', 'anthropic-ratelimit-requests-limit': '4000', 'anthropic-ratelimit-requests-remaining': '3999', 'anthropic-ratelimit-requests-reset': '2025-06-06T21:46:11Z', 'anthropic-ratelimit-tokens-limit': '280000', 'anthropic-ratelimit-tokens-remaining': '280000', 'anthropic-ratelimit-tokens-reset': '2025-06-06T21:46:13Z', 'request-id': 'req_011CPshbtsaCZM6M9N8pGsKS', 'strict-transport-security': 'max-age=31536000; includeSubDomains; preload', 'anthropic-organization-id': 'e1435a3f-1bee-45ad-915d-d81f520ba2f7', 'via': '1.1 google', 'cf-cache-status': 'DYNAMIC', 'x-robots-tag': 'none', 'server': 'cloudflare', 'cf-ray': '94bb19df6d0b0024-PDX', 'content-encoding': 'gzip'})
+2025-06-06 14:46:20,414 - anthropic._base_client - DEBUG - request_id: req_011CPshbtsaCZM6M9N8pGsKS
+2025-06-06 14:46:20,415 - root - DEBUG - Anthropic API Response received in 8.78 seconds
+2025-06-06 14:46:20,415 - root - DEBUG - Anthropic API Token usage - Input: 628, Output: 549
+2025-06-06 14:46:20,415 - ui.workers.llm_summary_thread - INFO - ✅ Summarization completed - Content length: 1788
+2025-06-06 14:46:20,416 - __main__ - INFO - 🔍 Expected summary file: /var/folders/gf/qhzs5pk956b6x4bttcc0lvhc0000gn/T/tmp10qfy1yb/tmp99f5dcvy_summary.md
+2025-06-06 14:46:20,416 - __main__ - INFO - 🎉 Summary file created successfully!
+2025-06-06 14:46:20,416 - __main__ - INFO - 📝 Summary length: 1788 characters
+2025-06-06 14:46:20,416 - __main__ - INFO - 📝 Summary preview: # Summary of tmp99f5dcvy.md
+
+## Document Analysis for Test Patient (DOB: 1990-01-01)
+
+# Document Analysis Summary for Test Patient
+
+## Key Facts and Information
+- Name: Test Patient
+- Date of Birth: J...
+2025-06-06 14:46:20,416 - __main__ - INFO - ============================================================
+2025-06-06 14:46:20,416 - __main__ - INFO - 🎉 All diagnostic tests completed successfully!
+2025-06-06 14:46:20,416 - __main__ - INFO - ✅ All tests passed - summarization should work correctly
+2025-06-06 14:46:20,436 - httpcore.connection - DEBUG - close.started
+2025-06-06 14:46:20,436 - httpcore.connection - DEBUG - close.complete
+2025-06-06 14:46:20,436 - httpcore.connection - DEBUG - close.started
+2025-06-06 14:46:20,436 - httpcore.connection - DEBUG - close.complete

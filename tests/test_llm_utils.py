@@ -1,5 +1,6 @@
 from llm_utils import cached_count_tokens
 
+
 def test_cached_count_tokens():
     # Mock class
     class MockClient:
@@ -15,7 +16,7 @@ def test_cached_count_tokens():
     # Should get same result and hit cache the second time
     assert result1 == result2
     
-    # Different text should return different result
-    result3 = cached_count_tokens(client, text="different text")
+    # Different text should return different result (using longer text to ensure different token count)
+    result3 = cached_count_tokens(client, text="this is a much longer different text string")
     assert result1 != result3
 

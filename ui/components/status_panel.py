@@ -4,7 +4,7 @@ Provides a collapsible panel for displaying status and log information.
 """
 
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QGroupBox, QVBoxLayout, QLabel, QTextEdit
+from PySide6.QtWidgets import QGroupBox, QLabel, QTextEdit, QVBoxLayout
 
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 
@@ -69,3 +69,11 @@ class StatusPanel(QGroupBox):
     def set_details(self, text):
         """Set the entire content of the details area."""
         self.details_area.setPlainText(text)
+    
+    def append_error(self, text):
+        """Append error text to the details area with error formatting."""
+        self.append_details(text)
+    
+    def append_warning(self, text):
+        """Append warning text to the details area with warning formatting."""
+        self.append_details(text)

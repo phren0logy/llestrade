@@ -110,8 +110,7 @@ class IntegratedAnalysisThread(QThread):
         if not self.llm_client or not self.llm_client.is_initialized:
             err_msg = "LLM client not initialized. Cannot process API response."
             self.status_panel.append_error(err_msg)
-            self.error_signal.emit(err_msg)
-            return None
+            raise Exception(err_msg)
 
         while retry_count < max_retries:
             try:
@@ -180,9 +179,6 @@ class IntegratedAnalysisThread(QThread):
                 else:
                     error_detail = response_data.get("error", "Unknown API error") if response_data else "No response data"
                     self.status_panel.append_error(f"API call to {provider_name} failed: {error_detail}")
-                    # Don't retry on client-side validation errors typically (e.g. bad API key, quota)
-                    # but allow retry for server errors or timeouts.
-                    # For simplicity here, we retry on any failure from the API response success=false.
                     if retry_count < max_retries - 1:
                         self.status_panel.append_details(f"Retrying in {retry_delay}s...")
                         time.sleep(retry_delay)
@@ -196,29 +192,27 @@ class IntegratedAnalysisThread(QThread):
                 if retry_count < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
-                    self.error_signal.emit(f"API request timed out after {max_retries} attempts.")
-                    return None # Or raise an exception
+                    raise TimeoutError(f"API request timed out after {max_retries} attempts.")
             except Exception as e:
                 self.status_panel.append_error(f"Error with {provider_name} (Attempt {retry_count + 1}): {str(e)}")
                 logging.exception(f"Exception during API call to {provider_name}")
                 if retry_count < max_retries - 1:
-                    # Check if it's a known non-retryable error type if possible
                     time.sleep(retry_delay)
                 else:
-                    self.error_signal.emit(f"Failed after {max_retries} attempts: {str(e)}")
-                    return None # Or raise an exception
+                    raise e
             retry_count += 1
         
-        self.error_signal.emit(f"API processing failed definitively after {max_retries} retries.")
-        return None
+        raise Exception(f"API processing failed definitively after {max_retries} retries.")
 
     def run(self):
         """Run the integrated analysis operations."""
-        if not self._initialize_llm_client():
-            self.finished_signal.emit(False, "LLM client initialization failed.", "")
-            return
-
         try:
+            if not self._initialize_llm_client():
+                # Initialization already emits its own error signals.
+                # It returns false if it fails. We also emit a finished signal.
+                self.finished_signal.emit(False, "LLM client initialization failed.", "")
+                return
+
             self.progress_signal.emit(15, "Reading combined summary file...")
             self.status_panel.append_details(f"Reading combined summary file: {self.combined_summary_path}")
             with open(self.combined_summary_path, "r", encoding="utf-8") as f:
@@ -261,7 +255,7 @@ class IntegratedAnalysisThread(QThread):
                 output_path = Path(self.output_dir) / "integrated_analysis" / output_filename
                 output_path.parent.mkdir(parents=True, exist_ok=True)
 
-                with open(output_path, "w", encoding="utf-8") as f:
+                with open(str(output_path), "w", encoding="utf-8") as f:
                     f.write(integrated_analysis_content)
                 
                 self.status_panel.append_details(f"Integrated analysis saved to: {output_path}")
@@ -270,15 +264,14 @@ class IntegratedAnalysisThread(QThread):
             else:
                 error_msg = response.get("error", "Integrated analysis failed. No content generated or API error.") if response else "Integrated analysis failed due to API communication issue."
                 self.status_panel.append_error(f"Failed to generate integrated analysis: {error_msg}")
-                self.error_signal.emit(f"Integrated Analysis Generation Failed: {error_msg}") # This is the general error for the dialog
-                self.finished_signal.emit(False, error_msg, "") # This signals the AnalysisTab about completion with failure
+                self.finished_signal.emit(False, error_msg, "")
 
         except Exception as e:
             error_msg = f"Error during integrated analysis: {str(e)}"
             logging.exception(error_msg)
             self.status_panel.append_error(error_msg)
-            self.error_signal.emit(error_msg) # General error for the dialog
-            self.finished_signal.emit(False, error_msg, "") # Completion with failure
+            self.error_signal.emit(error_msg)
+            self.finished_signal.emit(False, error_msg, "")
 
     def create_integrated_prompt(self, combined_content: str, original_docs_content: str) -> Tuple[str, str]:
         """Create the prompt for the integrated analysis."""

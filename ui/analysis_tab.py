@@ -34,8 +34,13 @@ from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.status_panel import StatusPanel
 from ui.components.workflow_indicator import WorkflowIndicator, WorkflowStep
+from ui.workers.directory_scanner_thread import DirectoryScannerThread
 from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
 from ui.workers.llm_summary_thread import LLMSummaryThread
+
+# Constants for directory and file names
+SUMMARIES_SUBDIR = "summaries"
+COMBINED_SUMMARY_FILENAME = "combined_summary.md"
 
 
 class AnalysisTab(BaseTab):
@@ -53,12 +58,39 @@ class AnalysisTab(BaseTab):
         self.selected_llm_provider_id = None
         self.selected_llm_model_name = None
         self.available_llms = []
+        self.file_selector = QComboBox()
+        
+        # Directory scanning attributes
+        self.directory_scanner_thread = None
+        self.scan_progress_dialog = None
+        self.cached_markdown_files = {}  # Cache for scanned directories
 
         # Initialize the base tab
         super().__init__(parent, status_bar)
 
         # Set the tab title
         self.setWindowTitle("Analysis & Integration")
+    
+    def closeEvent(self, event):
+        """Clean up resources when the tab is closed."""
+        # Stop any running directory scanner
+        if self.directory_scanner_thread and self.directory_scanner_thread.isRunning():
+            self.directory_scanner_thread.stop()
+            self.directory_scanner_thread.wait(1000)
+        
+        # Clean up LLM thread
+        if hasattr(self, 'single_file_thread') and self.single_file_thread is not None:
+            try:
+                self.single_file_thread.cleanup()
+                self.single_file_thread = None
+            except Exception:
+                pass  # Ignore cleanup errors during close
+        
+        # Close any open progress dialogs
+        if self.scan_progress_dialog:
+            self.scan_progress_dialog.close()
+        
+        super().closeEvent(event)
 
     def setup_ui(self):
         """Set up the UI components for the Analysis tab."""
@@ -206,7 +238,6 @@ class AnalysisTab(BaseTab):
         file_selector_layout = QHBoxLayout()
         file_selector_layout.addWidget(QLabel("Select a file to preview:"))
 
-        self.file_selector = QComboBox()
         self.file_selector.setToolTip("Choose a file to preview in the viewer below")
         self.file_selector.currentIndexChanged.connect(self.update_preview)
         file_selector_layout.addWidget(self.file_selector)
@@ -289,7 +320,126 @@ class AnalysisTab(BaseTab):
 
         self.markdown_directory = directory
         self.status_panel.append_details(f"Markdown directory set to: {directory}")
-        self.check_workflow_state()
+        
+        # Check if we have cached results for this directory
+        if directory in self.cached_markdown_files:
+            self.show_status(f"Using cached scan results for {os.path.basename(directory)}")
+            self.check_workflow_state()
+            return
+        
+        # Start asynchronous directory scanning
+        self.start_directory_scan(directory)
+    
+    def start_directory_scan(self, directory):
+        """Start asynchronous directory scanning with progress dialog."""
+        try:
+            # Stop any existing scan
+            if self.directory_scanner_thread and self.directory_scanner_thread.isRunning():
+                self.directory_scanner_thread.stop()
+                self.directory_scanner_thread.wait(1000)  # Wait up to 1 second
+            
+            # Create progress dialog
+            self.scan_progress_dialog = QProgressDialog(
+                f"Scanning directory: {os.path.basename(directory)}...",
+                "Cancel",
+                0,
+                100,
+                self
+            )
+            self.scan_progress_dialog.setWindowTitle("Scanning Markdown Directory")
+            self.scan_progress_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+            self.scan_progress_dialog.setMinimumDuration(500)  # Show after 500ms
+            self.scan_progress_dialog.canceled.connect(self.cancel_directory_scan)
+            
+            # Create and configure scanner thread
+            self.directory_scanner_thread = DirectoryScannerThread(directory, ['.md'])
+            self.directory_scanner_thread.progress_signal.connect(self.update_scan_progress)
+            self.directory_scanner_thread.finished_signal.connect(self.on_directory_scan_finished)
+            self.directory_scanner_thread.error_signal.connect(self.on_directory_scan_error)
+            
+            # Start scanning
+            self.directory_scanner_thread.start()
+            self.scan_progress_dialog.show()
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Directory Scan Error",
+                f"Failed to start directory scan: {str(e)}"
+            )
+    
+    def update_scan_progress(self, progress, message):
+        """Update the progress dialog during directory scanning."""
+        dialog = self.scan_progress_dialog
+        if dialog is not None and not dialog.wasCanceled():
+            dialog.setValue(progress)
+            dialog.setLabelText(message)
+    
+    def cancel_directory_scan(self):
+        """Cancel the directory scanning operation."""
+        if self.directory_scanner_thread:
+            self.directory_scanner_thread.stop()
+            self.show_status("Directory scan canceled by user")
+    
+    def on_directory_scan_finished(self, success, message, files):
+        """Handle completion of directory scanning."""
+        try:
+            # Close progress dialog
+            if self.scan_progress_dialog:
+                self.scan_progress_dialog.close()
+                self.scan_progress_dialog = None
+            
+            if success:
+                # Cache the results
+                self.cached_markdown_files[self.markdown_directory] = files
+                
+                # Show warning if too many files
+                if message:  # Warning message about too many files
+                    QMessageBox.warning(self, "Large Directory", message)
+                
+                # Update status
+                self.show_status(f"Found {len(files)} markdown files in {os.path.basename(self.markdown_directory)}")
+                self.status_panel.append_details(f"Scanned directory: {len(files)} markdown files found")
+                
+                # Update workflow state now that we have the file list
+                self.check_workflow_state()
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Directory Scan Failed",
+                    f"Failed to scan directory: {message}"
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Error handling directory scan results: {str(e)}"
+            )
+        finally:
+            # Clean up thread
+            if self.directory_scanner_thread:
+                self.directory_scanner_thread.deleteLater()
+                self.directory_scanner_thread = None
+    
+    def on_directory_scan_error(self, error_message):
+        """Handle directory scanning errors."""
+        try:
+            # Close progress dialog
+            if self.scan_progress_dialog:
+                self.scan_progress_dialog.close()
+                self.scan_progress_dialog = None
+            
+            QMessageBox.critical(
+                self,
+                "Directory Scan Error",
+                f"Error scanning directory: {error_message}"
+            )
+            self.show_status(f"Directory scan failed: {error_message}")
+        finally:
+            # Clean up thread
+            if self.directory_scanner_thread:
+                self.directory_scanner_thread.deleteLater()
+                self.directory_scanner_thread = None
 
     def on_results_output_selected(self, directory):
         """Handle selection of results output directory."""
@@ -311,14 +461,24 @@ class AnalysisTab(BaseTab):
             and self.markdown_directory
             and os.path.exists(self.markdown_directory)
         ):
-            try:
-                markdown_files = [
-                    f for f in os.listdir(self.markdown_directory) if f.endswith(".md")
-                ]
+            # Use cached results if available, otherwise fall back to quick check
+            if self.markdown_directory in self.cached_markdown_files:
+                markdown_files = self.cached_markdown_files[self.markdown_directory]
                 has_markdown = bool(markdown_files)
-            except Exception as e:
-                print(f"Error checking markdown files: {e}")
-                has_markdown = False
+            else:
+                # Quick check - don't block UI for large directories
+                try:
+                    # Only check first few files to avoid blocking
+                    files_sample = os.listdir(self.markdown_directory)[:100]  # Limit to first 100 items
+                    markdown_files = [f for f in files_sample if f.endswith(".md")]
+                    has_markdown = bool(markdown_files)
+                    
+                    # If we found files, note that full scan may be needed
+                    if has_markdown and len(files_sample) == 100:
+                        self.status_panel.append_details("Quick scan found markdown files. Full scan may be in progress.")
+                except Exception as e:
+                    print(f"Error checking markdown files: {e}")
+                    has_markdown = False
 
         # Check if there are summary files
         has_summaries = False
@@ -328,13 +488,19 @@ class AnalysisTab(BaseTab):
             and os.path.exists(self.results_output_directory)
         ):
             try:
-                # Look for summary files in the root directory
-                summary_files = [
-                    f
-                    for f in os.listdir(self.results_output_directory)
-                    if f.endswith("_summary.md")
-                ]
-                has_summaries = bool(summary_files)
+                # Look for summary files in the 'summaries' subdirectory
+                summaries_path = os.path.join(
+                    self.results_output_directory, SUMMARIES_SUBDIR
+                )
+                if os.path.exists(summaries_path):
+                    summary_files = [
+                        f
+                        for f in os.listdir(summaries_path)
+                        if f.endswith("_summary.md")
+                    ]
+                    has_summaries = bool(summary_files)
+                else:
+                    has_summaries = False # Subdirectory doesn't exist
             except Exception as e:
                 print(f"Error checking summary files: {e}")
                 has_summaries = False
@@ -348,7 +514,7 @@ class AnalysisTab(BaseTab):
         ):
             try:
                 combined_file = os.path.join(
-                    self.results_output_directory, "combined_summary.md"
+                    self.results_output_directory, COMBINED_SUMMARY_FILENAME
                 )
                 has_combined = os.path.exists(combined_file)
             except Exception as e:
@@ -382,8 +548,14 @@ class AnalysisTab(BaseTab):
             ):
                 valid_subject = bool(self.subject_input.text().strip())
                 valid_dob = bool(self.dob_input.text().strip())
+                valid_llm = bool(
+                    hasattr(self, "selected_llm_provider_id")
+                    and self.selected_llm_provider_id
+                    and hasattr(self, "selected_llm_model_name")
+                    and self.selected_llm_model_name
+                )
                 self.llm_process_button.setEnabled(
-                    has_markdown and valid_subject and valid_dob
+                    has_markdown and valid_subject and valid_dob and valid_llm
                 )
         except Exception as e:
             print(f"Error setting LLM process button state: {e}")
@@ -413,38 +585,58 @@ class AnalysisTab(BaseTab):
             self._refreshing = False
 
     def refresh_file_list(self):
-        """Refresh the list of available files in the combobox."""
-        # Clear the current list
-        self.file_selector.clear()
-
-        # Add a placeholder item
-        self.file_selector.addItem("Select a file to preview", None)
-
-        # If no results output directory is set, return
-        if (
-            not hasattr(self, "results_output_directory")
-            or not self.results_output_directory
-        ):
+        """Refresh the list of files in the preview selector."""
+        if not hasattr(self, "file_selector"):
+            # If the UI is not fully initialized yet, just return.
             return
 
-        if not os.path.exists(self.results_output_directory):
+        if self._refreshing:  # Prevent recursion
             return
+        self._refreshing = True
 
-        # Get all files from the output directory
-        files = []
+        try:
+            # Clear the current list
+            self.file_selector.clear()
 
-        # Look for all markdown files in the output directory
-        for file in os.listdir(self.results_output_directory):
-            if file.endswith(".md"):
-                files.append(os.path.join(self.results_output_directory, file))
+            # Add a placeholder item
+            self.file_selector.addItem("Select a file to preview", None)
 
-        # Sort files by modification time (newest first)
-        files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            # If no results output directory is set, return
+            if (
+                not hasattr(self, "results_output_directory")
+                or not self.results_output_directory
+            ):
+                return
 
-        # Add files to the selector
-        for file in files:
-            display_name = os.path.basename(file)
-            self.file_selector.addItem(display_name, file)
+            if not os.path.exists(self.results_output_directory):
+                return
+
+            # Get all files from the output directory and its 'summaries' subdirectory
+            files = []
+            
+            def add_files_from_dir(directory_path, display_prefix=""):
+                if os.path.exists(directory_path):
+                    for file_name in os.listdir(directory_path):
+                        if file_name.endswith(".md"):
+                            full_path = os.path.join(directory_path, file_name)
+                            display_name_with_prefix = os.path.join(display_prefix, file_name) if display_prefix else file_name
+                            files.append({"path": full_path, "display": display_name_with_prefix})
+
+            # Add files from the root of results_output_directory
+            add_files_from_dir(self.results_output_directory)
+
+            # Add files from the 'summaries' subdirectory
+            summaries_dir_path = os.path.join(self.results_output_directory, SUMMARIES_SUBDIR)
+            add_files_from_dir(summaries_dir_path, display_prefix=SUMMARIES_SUBDIR)
+            
+            # Sort files by modification time (newest first)
+            files.sort(key=lambda x: os.path.getmtime(x["path"]), reverse=True)
+
+            # Add files to the selector
+            for file_info in files:
+                self.file_selector.addItem(file_info["display"], file_info["path"])
+        finally:
+            self._refreshing = False
 
     def update_preview(self, index):
         """Update the preview area with the selected file content."""
@@ -579,7 +771,7 @@ class AnalysisTab(BaseTab):
             )
             return
 
-        output_dir = os.path.join(self.results_output_directory, "summaries")
+        output_dir = os.path.join(self.results_output_directory, SUMMARIES_SUBDIR)
         os.makedirs(output_dir, exist_ok=True)
 
         subject_name = self.subject_input.text().strip()
@@ -708,6 +900,22 @@ class AnalysisTab(BaseTab):
 
         # Process current file
         try:
+            # Clean up previous thread if it exists
+            if hasattr(self, 'single_file_thread') and self.single_file_thread is not None:
+                try:
+                    # Disconnect signals to prevent issues
+                    self.single_file_thread.progress_signal.disconnect()
+                    self.single_file_thread.finished_signal.disconnect()
+                    self.single_file_thread.error_signal.disconnect()
+                    
+                    # Clean up the thread
+                    if self.single_file_thread.isRunning():
+                        self.single_file_thread.cleanup()
+                    else:
+                        self.single_file_thread = None
+                except Exception as cleanup_error:
+                    self.status_panel.append_details(f"Warning: Thread cleanup error: {cleanup_error}")
+            
             # Create LLM thread for just this file
             self.single_file_thread = LLMSummaryThread(
                 self,
@@ -721,10 +929,16 @@ class AnalysisTab(BaseTab):
                 llm_model_name=self.llm_model_name_for_summary  # Pass stored LLM info
             )
 
-            # Connect signals
-            self.single_file_thread.progress_signal.connect(self.update_file_progress)
-            self.single_file_thread.finished_signal.connect(self.on_file_finished)
-            self.single_file_thread.error_signal.connect(self.on_file_error)
+            # Connect signals with queued connections for thread safety
+            self.single_file_thread.progress_signal.connect(
+                self.update_file_progress, Qt.ConnectionType.QueuedConnection
+            )
+            self.single_file_thread.finished_signal.connect(
+                self.on_file_finished, Qt.ConnectionType.QueuedConnection
+            )
+            self.single_file_thread.error_signal.connect(
+                self.on_file_error, Qt.ConnectionType.QueuedConnection
+            )
 
             # Start processing
             self.status_panel.append_details(f"Starting to process: {basename}")
@@ -776,6 +990,9 @@ class AnalysisTab(BaseTab):
 
             self.summary_results["files"].append(file_result)
 
+        # Clean up the completed thread
+        self._cleanup_current_thread()
+
         # Move to next file
         self.current_file_index += 1
         QTimer.singleShot(100, self.process_next_file)
@@ -785,7 +1002,7 @@ class AnalysisTab(BaseTab):
         # Log the error
         current_file = self.markdown_files[self.current_file_index]
         basename = os.path.basename(current_file)
-        self.status_panel.append_details(f"Error processing {basename}: {error}")
+        self.status_panel.append_error(f"❌ ERROR: {basename} - {error}")
 
         # Update results
         self.summary_results["failed"] += 1
@@ -795,12 +1012,32 @@ class AnalysisTab(BaseTab):
                 "markdown": current_file,
                 "status": "failed",
                 "error": error,
+                "message": error
             }
         )
+
+        # Clean up the failed thread
+        self._cleanup_current_thread()
 
         # Move to next file
         self.current_file_index += 1
         QTimer.singleShot(100, self.process_next_file)
+
+    def _cleanup_current_thread(self):
+        """Clean up the current thread safely."""
+        if hasattr(self, 'single_file_thread') and self.single_file_thread is not None:
+            try:
+                # Disconnect signals
+                self.single_file_thread.progress_signal.disconnect()
+                self.single_file_thread.finished_signal.disconnect()
+                self.single_file_thread.error_signal.disconnect()
+                
+                # Clean up the thread
+                self.single_file_thread.cleanup()
+                self.single_file_thread = None
+                
+            except Exception as e:
+                self.status_panel.append_details(f"Warning: Thread cleanup error: {e}")
 
     def finish_processing(self):
         """Finalize the processing after all files are done."""
@@ -814,7 +1051,7 @@ class AnalysisTab(BaseTab):
         failed = self.summary_results["failed"]
 
         # Update workflow status
-        if processed + skipped == total:
+        if processed + skipped == total and failed == 0:
             self.workflow_indicator.update_status(
                 WorkflowStep.SUMMARIZE_LLM, "complete"
             )
@@ -823,40 +1060,78 @@ class AnalysisTab(BaseTab):
         else:
             self.workflow_indicator.update_status(WorkflowStep.SUMMARIZE_LLM, "error")
 
+        # Create detailed results summary
+        self.status_panel.append_details("=" * 60)
+        self.status_panel.append_details("LLM SUMMARIZATION RESULTS")
+        self.status_panel.append_details("=" * 60)
+        self.status_panel.append_details(f"Total files: {total}")
+        self.status_panel.append_details(f"✅ Successfully processed: {processed}")
+        self.status_panel.append_details(f"⚠️  Skipped (already exist): {skipped}")
+        self.status_panel.append_details(f"❌ Failed: {failed}")
+
+        # Show individual file results
+        if self.summary_results["files"]:
+            self.status_panel.append_details("\nDetailed Results:")
+            for file_info in self.summary_results["files"]:
+                file_name = os.path.basename(file_info.get("file", file_info.get("path", "Unknown")))
+                status = file_info.get("status", "unknown")
+                message = file_info.get("message", "")
+                
+                if status == "success":
+                    self.status_panel.append_details(f"  ✅ {file_name}: {message}")
+                elif status == "skipped":
+                    self.status_panel.append_details(f"  ⚠️  {file_name}: {message}")
+                else:
+                    error = file_info.get("error", "Unknown error")
+                    self.status_panel.append_details(f"  ❌ {file_name}: {error}")
+
+        self.status_panel.append_details("=" * 60)
+
         # Show message with results
         if failed > 0:
             QMessageBox.warning(
                 self,
                 "Summarization Results",
-                f"Summarization completed with some errors.\n\n"
+                f"Summarization completed with some issues.\n\n"
+                f"📊 Results Summary:\n"
                 f"Total files: {total}\n"
-                f"Successfully processed: {processed}\n"
-                f"Skipped (already processed): {skipped}\n"
-                f"Failed: {failed}\n\n"
-                f"See the status panel for details on failures.",
+                f"✅ Successfully processed: {processed}\n"
+                f"⚠️ Skipped (already processed): {skipped}\n"
+                f"❌ Failed: {failed}\n\n"
+                f"See the status panel for detailed results.",
             )
         else:
             QMessageBox.information(
                 self,
                 "Summarization Complete",
-                f"All files have been processed successfully.\n\n"
+                f"All files have been processed successfully! 🎉\n\n"
+                f"📊 Results Summary:\n"
                 f"Total files: {total}\n"
-                f"Successfully processed: {processed}\n"
-                f"Skipped (already processed): {skipped}",
+                f"✅ Successfully processed: {processed}\n"
+                f"⚠️ Skipped (already processed): {skipped}",
             )
 
         # Update status bar
-        self.show_status(
-            f"LLM summarization complete: {processed + skipped}/{total} files processed"
-        )
+        if failed == 0:
+            self.show_status(
+                f"✅ LLM summarization complete: {processed + skipped}/{total} files processed successfully"
+            )
+        else:
+            self.show_status(
+                f"⚠️ LLM summarization complete: {processed + skipped}/{total} files processed, {failed} failed"
+            )
 
-        # Refresh file list
+        # Re-enable the button
+        self.llm_process_button.setEnabled(True)
+
+        # Refresh file list to show new summaries
         self.refresh_file_list()
+
+        # Update workflow state
+        self.check_workflow_state()
 
     def get_markdown_files(self):
         """Get a list of all markdown files in the markdown directory."""
-        markdown_files = []
-
         # Check if markdown_directory is set
         if not hasattr(self, "markdown_directory") or not self.markdown_directory:
             self.show_status("No markdown directory selected")
@@ -869,11 +1144,18 @@ class AnalysisTab(BaseTab):
             )
             return []
 
-        # Get all markdown files in the directory
-        if os.path.isdir(self.markdown_directory):
-            for file in os.listdir(self.markdown_directory):
-                if file.endswith(".md"):
-                    markdown_files.append(os.path.join(self.markdown_directory, file))
+        # Use cached results if available
+        if self.markdown_directory in self.cached_markdown_files:
+            markdown_files = self.cached_markdown_files[self.markdown_directory]
+        else:
+            # If not cached, we need to trigger a scan first
+            QMessageBox.information(
+                self,
+                "Directory Scan Required",
+                "The directory needs to be scanned first. Please wait for the scan to complete."
+            )
+            self.start_directory_scan(self.markdown_directory)
+            return []
 
         # If no files found, show a message
         if not markdown_files:
@@ -930,12 +1212,22 @@ class AnalysisTab(BaseTab):
             )
             return
 
-        # Get all summary files from the output directory
+        # Get all summary files from the 'summaries' subdirectory
         summary_files = []
-        for file in os.listdir(self.results_output_directory):
-            if file.endswith("_summary.md"):
-                summary_files.append(os.path.join(self.results_output_directory, file))
+        summaries_path = os.path.join(self.results_output_directory, SUMMARIES_SUBDIR)
 
+        if not os.path.exists(summaries_path):
+            QMessageBox.warning(
+                self,
+                "No Summaries Found",
+                f"Summaries subdirectory ('{SUMMARIES_SUBDIR}') not found in the output directory.",
+            )
+            return
+
+        for file in os.listdir(summaries_path):
+            if file.endswith("_summary.md"):
+                summary_files.append(os.path.join(summaries_path, file))
+        
         if not summary_files:
             QMessageBox.warning(
                 self,
@@ -1012,11 +1304,11 @@ class AnalysisTab(BaseTab):
 
         # Save the combined text to a file
         self.update_progress(progress_dialog, 90, "Saving combined file...")
-        combined_file = os.path.join(
-            self.results_output_directory, "combined_summary.md"
+        combined_file_path = os.path.join(
+            self.results_output_directory, COMBINED_SUMMARY_FILENAME
         )
 
-        with open(combined_file, "w", encoding="utf-8") as f:
+        with open(combined_file_path, "w", encoding="utf-8") as f:
             f.write(combined_text)
 
         # Complete the progress dialog
@@ -1026,7 +1318,7 @@ class AnalysisTab(BaseTab):
         QMessageBox.information(
             self,
             "Combine Complete",
-            f"Successfully combined {len(summary_files)} summary files.\n\nOutput file: {combined_file}",
+            f"Successfully combined {len(summary_files)} summary files.\n\nOutput file: {combined_file_path}",
         )
 
         # Update status and workflow
@@ -1034,9 +1326,9 @@ class AnalysisTab(BaseTab):
             WorkflowStep.COMBINE_SUMMARIES, "complete"
         )
         self.show_status(
-            f"Combined {len(summary_files)} summary files into {os.path.basename(combined_file)}"
+            f"Combined {len(summary_files)} summary files into {os.path.basename(combined_file_path)}"
         )
-        self.status_panel.append_details(f"Created combined summary: {combined_file}")
+        self.status_panel.append_details(f"Created combined summary: {combined_file_path}")
 
         # Update file list
         self.refresh_file_list()

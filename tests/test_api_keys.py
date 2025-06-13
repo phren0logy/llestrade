@@ -29,7 +29,7 @@ def test_api_keys():
     else:
         logging.error("No Anthropic API key found")
     
-    return gemini_key is not None and anthropic_key is not None
+    assert gemini_key is not None and anthropic_key is not None, "Both Gemini and Anthropic API keys must be available"
 
 def test_direct_gemini_client():
     """Test direct creation of Gemini client."""
@@ -39,57 +39,36 @@ def test_direct_gemini_client():
         # Directly create Gemini client
         client = LLMClientFactory.create_client(provider="gemini")
         
-        if isinstance(client, GeminiClient):
-            logging.info("Created GeminiClient instance")
-            
-            if client.is_initialized:
-                logging.info("Gemini client initialized successfully")
-                
-                # Test simple request
-                try:
-                    response = client.generate_response(
-                        prompt_text="What is the capital of France?",
-                        model="gemini-2.5-pro-preview-05-06",
-                        temperature=0.1
-                    )
-                    
-                    if response["success"]:
-                        logging.info(f"Gemini response: {response['content'][:50]}...")
-                        return True
-                    else:
-                        logging.error(f"Gemini response failed: {response.get('error', 'Unknown error')}")
-                        return False
-                except Exception as e:
-                    logging.error(f"Error generating response: {str(e)}")
-                    return False
-            else:
-                logging.error("Gemini client not initialized")
-                return False
-        else:
-            logging.error(f"Expected GeminiClient, got {client.__class__.__name__}")
-            return False
+        assert isinstance(client, GeminiClient), f"Expected GeminiClient, got {client.__class__.__name__}"
+        logging.info("Created GeminiClient instance")
+        
+        assert client.is_initialized, "Gemini client should be initialized"
+        logging.info("Gemini client initialized successfully")
+        
+        # Test simple request
+        response = client.generate_response(
+            prompt_text="What is the capital of France?",
+            model="gemini-2.5-pro-preview-05-06",
+            temperature=0.1
+        )
+        
+        assert response["success"], f"Gemini response failed: {response.get('error', 'Unknown error')}"
+        logging.info(f"Gemini response: {response['content'][:50]}...")
+        
     except Exception as e:
         logging.error(f"Error creating Gemini client: {str(e)}")
-        return False
+        raise
 
 def main():
     """Run all tests."""
     logging.info("Testing API key availability...")
-    keys_available = test_api_keys()
-    
-    if not keys_available:
-        logging.error("API keys missing or invalid")
-        return 1
+    test_api_keys()
     
     logging.info("Testing direct Gemini client creation...")
-    gemini_success = test_direct_gemini_client()
+    test_direct_gemini_client()
     
-    if gemini_success:
-        logging.info("🎉 All tests passed!")
-        return 0
-    else:
-        logging.error("❌ Tests failed")
-        return 1
+    logging.info("🎉 All tests passed!")
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main()) 
