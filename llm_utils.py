@@ -540,7 +540,7 @@ class AnthropicClient(BaseLLMClient):
         prompt_text: str,
         model: str = "claude-3-7-sonnet-latest",
         max_tokens: int = 32000,
-        temperature: float = 0.1,  # Apparently 1.0 is no longer required by Anthropic for thinking
+        temperature: float = 1.0,  # required by Anthropic for thinking
         system_prompt: Optional[str] = None,
         thinking_budget_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
@@ -579,7 +579,7 @@ class AnthropicClient(BaseLLMClient):
             message_params = {
                 "model": model,
                 "max_tokens": max_tokens,
-                "temperature": 0.1,  # No logner required to be 1.0 for thinking
+                "temperature": 1.0,  # Required to be 1.0 for thinking
                 "thinking": {
                     "type": "enabled",
                     "budget_tokens": thinking_budget_tokens,
@@ -658,7 +658,7 @@ class AnthropicClient(BaseLLMClient):
         pdf_file_path: str,
         model: str = "claude-3-7-sonnet-latest",
         max_tokens: int = 32000,
-        temperature: float = 0.1,
+        temperature: float = 1.0,
         system_prompt: Optional[str] = None,
         thinking_budget_tokens: Optional[int] = None,
     ) -> Dict[str, Any]:
