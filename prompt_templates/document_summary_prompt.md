@@ -16,9 +16,9 @@
 
 {case_info}
 
-## Instructions
+## Summary Instructions
 
-Please analyze the document content above, wrapped in "document-content" tags, and provide a comprehensive summary that includes:
+Please analyze the document content, wrapped in "document-content" tags, and provide a comprehensive summary that includes:
 
 - Key facts and information about the subject
 - Significant events and dates mentioned

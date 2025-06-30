@@ -3,6 +3,11 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
 # Assuming llm_utils.py is in the same directory or accessible in PYTHONPATH
 from llm_utils import BaseLLMClient, LLMClientFactory
 
@@ -23,7 +28,7 @@ DEFAULT_SETTINGS = {
         "azure_openai": {
             "enabled": True,
             "label": "Azure OpenAI",
-            "default_deployment_name": "gpt-41",  # IMPORTANT: User must fill this
+            "default_deployment_name": os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME"),  # Read from environment
             "azure_endpoint": None,
             "api_version": None
         }
@@ -79,7 +84,15 @@ def load_app_settings() -> dict:
         return DEFAULT_SETTINGS.copy()
     try:
         with open(SETTINGS_FILE, 'r') as f:
-            return json.load(f)
+            settings = json.load(f)
+            
+        # Override Azure deployment name from environment if available
+        azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
+        if azure_deployment and "llm_provider_configs" in settings and "azure_openai" in settings["llm_provider_configs"]:
+            settings["llm_provider_configs"]["azure_openai"]["default_deployment_name"] = azure_deployment
+            logging.info(f"Using Azure OpenAI deployment name from environment: {azure_deployment}")
+            
+        return settings
     except (IOError, json.JSONDecodeError) as e:
         logging.error(f"Error loading '{SETTINGS_FILE}': {e}. Returning default settings.")
         return DEFAULT_SETTINGS.copy()

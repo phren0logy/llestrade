@@ -14,7 +14,7 @@
     "azure_openai": {
       "enabled": true,
       "label": "Azure OpenAI",
-      "default_deployment_name": "gpt-41",
+      "default_deployment_name": "gpt-4.1",
       "azure_endpoint": null,
       "api_version": null
     }

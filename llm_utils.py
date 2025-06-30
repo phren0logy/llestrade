@@ -1713,13 +1713,10 @@ class AzureOpenAIClient(BaseLLMClient):
             not self.is_initialized and not text and not messages
         ):  # Allow counting even if client fails but tiktoken is there
             # Check if tiktoken is available for counting even if client init failed
-            try:
-                import tiktoken
-            except ImportError:
-                return {
-                    "success": False,
-                    "error": "Azure OpenAI client not initialized and tiktoken not available.",
-                }
+            return {
+                "success": False,
+                "error": "Azure OpenAI client not initialized.",
+            }
 
         if text is None and messages is None:
             return {
@@ -1728,7 +1725,16 @@ class AzureOpenAIClient(BaseLLMClient):
             }
 
         try:
-            encoding = tiktoken.get_encoding("cl100k_base")
+            # Import tiktoken if not already available
+            try:
+                import tiktoken as tk
+            except ImportError:
+                tk = None
+                
+            if tk is None:
+                raise ImportError("tiktoken not available")
+                
+            encoding = tk.get_encoding("cl100k_base")
             num_tokens = 0
 
             if text is not None:
