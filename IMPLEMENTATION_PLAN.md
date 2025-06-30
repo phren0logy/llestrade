@@ -292,10 +292,10 @@ del chunk_prompt
 - [x] Created Azure OpenAI provider
 - [x] Created factory module
 - [x] Created compatibility shim for migration
+- [x] Updated critical imports to use compatibility module (app_config.py, llm_summary_thread.py, integrated_analysis_thread.py, prompt_runner_thread.py, pdf_prompt_thread.py, refinement_tab.py, analysis_tab.py, prompts_tab.py)
 
 ### In Progress
 
-- [x] Updating critical imports to use compatibility module (partial)
 - [ ] Updating remaining imports (tests, debug scripts)
 - [ ] Investigating remaining unused code
 
@@ -310,4 +310,4 @@ del chunk_prompt
 ---
 
 _Last Updated: 2025-06-30_
-_Next Review: After memory corruption fix_
+_Next Review: After completing import updates_
