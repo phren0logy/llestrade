@@ -37,45 +37,39 @@ def setup_qt_environment():
     Set up the Qt environment variables for proper PyQt6 operation.
     Handles platform-specific configurations and debugging settings.
     """
-    # Set debugging
-    os.environ["QT_DEBUG_PLUGINS"] = "1"
+    # Only enable Qt debugging if explicitly requested
+    if os.environ.get('DEBUG_QT', '').lower() == 'true':
+        os.environ["QT_DEBUG_PLUGINS"] = "1"
     
     # Find PyQt6 paths
     qt_dir = find_pyqt_paths()
     if qt_dir:
-        print(f"Found Qt directory: {qt_dir}")
-
         # Set explicit paths before importing
         if platform.system() == "Darwin":
             os.environ["DYLD_LIBRARY_PATH"] = (
                 f"{qt_dir}:{os.environ.get('DYLD_LIBRARY_PATH', '')}"
             )
-            print(f"Set DYLD_LIBRARY_PATH: {os.environ['DYLD_LIBRARY_PATH']}")
 
         # Set plugin paths
         os.environ["QT_PLUGIN_PATH"] = os.path.join(qt_dir, "plugins")
-        print(f"Set QT_PLUGIN_PATH: {os.environ['QT_PLUGIN_PATH']}")
 
         # Set platform plugin path
         platform_dir = os.path.join(qt_dir, "plugins", "platforms")
         os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = platform_dir
-        print(
-            f"Set QT_QPA_PLATFORM_PLUGIN_PATH: {os.environ['QT_QPA_PLATFORM_PLUGIN_PATH']}"
-        )
 
-        # Check for cocoa plugin on macOS
+        # Check for cocoa plugin on macOS (silent check)
         if platform.system() == "Darwin":
             cocoa_path = os.path.join(platform_dir, "libqcocoa.dylib")
-            if os.path.exists(cocoa_path):
-                print(f"Found cocoa plugin: {cocoa_path}")
-            else:
+            # Only print warnings if debug mode is enabled
+            if not os.path.exists(cocoa_path) and os.environ.get('DEBUG_QT', '').lower() == 'true':
                 print(f"WARNING: Cocoa plugin not found at {cocoa_path}")
                 if os.path.exists(platform_dir):
                     print("Files in platforms directory:")
                     for f in os.listdir(platform_dir):
                         print(f"  - {f}")
     else:
-        print("Could not find PyQt6 Qt6 directory")
+        # This is not critical - PyQt6 can still work without explicit paths
+        pass
 
     # Enable high DPI scaling
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
@@ -89,13 +83,15 @@ def setup_environment_variables():
     # Load environment variables from .env file
     load_env_file()
     
-    # Check for API keys
-    if not os.environ.get("ANTHROPIC_API_KEY"):
+    # Check for API keys (silent unless in debug mode)
+    debug_mode = os.environ.get('DEBUG', '').lower() == 'true'
+    
+    if not os.environ.get("ANTHROPIC_API_KEY") and debug_mode:
         print("WARNING: ANTHROPIC_API_KEY environment variable not set")
         print("You will need to set this environment variable to use the LLM functionality")
     
     # Check for Azure Document Intelligence credentials
-    if not os.environ.get("AZURE_ENDPOINT") or not os.environ.get("AZURE_KEY"):
+    if (not os.environ.get("AZURE_ENDPOINT") or not os.environ.get("AZURE_KEY")) and debug_mode:
         print("NOTE: Azure Document Intelligence credentials not found in environment variables")
         print("You can still use the Record Review tab but Azure processing will require credentials")
     

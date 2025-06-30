@@ -293,19 +293,21 @@ del chunk_prompt
 - [x] Created factory module
 - [x] Created compatibility shim for migration
 - [x] Updated critical imports to use compatibility module (app_config.py, llm_summary_thread.py, integrated_analysis_thread.py, prompt_runner_thread.py, pdf_prompt_thread.py, refinement_tab.py, analysis_tab.py, prompts_tab.py)
+- [x] Updated all test file imports (test_llm_utils.py, test_gemini.py, test_both_clients.py, test_integrated_analysis_thread.py, test_extended_thinking.py, test_api_keys.py, test_integrated_analysis.py)
+- [x] Updated main.py and setup_env.py imports
+- [x] Updated CLAUDE.md documentation with new LLM structure
+- [x] Created MIGRATION_PLAN.md for removing compatibility module
 
 ### In Progress
 
-- [ ] Updating remaining imports (tests, debug scripts)
-- [ ] Investigating remaining unused code
+- [ ] Migrate from compatibility module to direct llm/ usage (see MIGRATION_PLAN.md)
 
 ### Not Started
 
-- [ ] Update all imports throughout codebase
-- [ ] Remove legacy LLMClient wrapper
-- [ ] Update worker threads to use new API
-- [ ] Testing updates
-- [ ] Documentation updates
+- [ ] Remove old llm_utils.py file (after migration complete)
+- [ ] Remove llm_utils_compat.py (after migration complete)
+- [ ] Testing updates for new API
+- [ ] Final documentation cleanup
 
 ---
 

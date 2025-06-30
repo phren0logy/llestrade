@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_utils import GeminiClient, LLMClientFactory
+from llm_utils_compat import GeminiClient, LLMClientFactory
 from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
 
 # Configure logging
@@ -85,7 +85,7 @@ class TestIntegratedAnalysisThread:
             "thinking_file": os.path.join(output_dir, "integrated_analysis_thinking_tokens.md")
         }
     
-    @patch("llm_utils.LLMClientFactory.create_client")
+    @patch("llm_utils_compat.LLMClientFactory.create_client")
     @patch("ui.workers.integrated_analysis_thread.cached_count_tokens")
     def test_uses_gemini_extended_thinking_only(self, mock_cached_count_tokens, mock_create_client, 
                                                mock_gemini_client, test_files):

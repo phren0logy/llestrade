@@ -6,6 +6,10 @@ Brings together all UI components and implements the main window functionality.
 import os
 import sys
 
+# Configure clean startup before other imports
+from startup_config import clean_startup
+clean_startup()
+
 # Load environment variables from .env file
 from dotenv import load_dotenv
 
@@ -84,7 +88,7 @@ if (
 from config import APP_TITLE, APP_VERSION, setup_environment_variables
 
 # Import utility modules
-from llm_utils import LLMClientFactory, cached_count_tokens
+from llm_utils_compat import LLMClientFactory, cached_count_tokens
 from ui.analysis_tab import AnalysisTab
 from ui.pdf_processing_tab import PDFProcessingTab
 
@@ -152,10 +156,14 @@ class ForensicReportDrafterApp(QMainWindow):
         """Check if the API key is valid by making a test request."""
         try:
             # Create client with auto provider selection first
-            client = LLMClientFactory.create_client(provider=provider)
+            # Suppress deprecation warnings since we're intentionally using compatibility layer
+            import warnings
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=DeprecationWarning)
+                client = LLMClientFactory.create_client(provider=provider)
 
-            # Simple test with token counting (minimal API impact)
-            response = cached_count_tokens(client, text="Test connection")
+                # Simple test with token counting (minimal API impact)
+                response = cached_count_tokens(client, text="Test connection")
 
             # Check response
             if response.get("success", False):

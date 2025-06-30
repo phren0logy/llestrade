@@ -90,7 +90,7 @@ def load_app_settings() -> dict:
         azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME")
         if azure_deployment and "llm_provider_configs" in settings and "azure_openai" in settings["llm_provider_configs"]:
             settings["llm_provider_configs"]["azure_openai"]["default_deployment_name"] = azure_deployment
-            logging.info(f"Using Azure OpenAI deployment name from environment: {azure_deployment}")
+            logging.debug(f"Using Azure OpenAI deployment name from environment: {azure_deployment}")
             
         return settings
     except (IOError, json.JSONDecodeError) as e:

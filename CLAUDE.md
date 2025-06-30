@@ -29,6 +29,9 @@ uv run test_diagnosis.py path/to/file.md
 # Run individual test files
 uv run tests/test_llm_utils.py
 uv run tests/test_analysis_integration.py
+uv run tests/test_gemini.py
+uv run tests/test_extended_thinking.py
+uv run tests/test_api_keys.py
 ```
 
 ### Environment Setup
@@ -59,20 +62,35 @@ uv run setup_env.py
    - Entry point, handles Qt plugin paths for macOS
    - Creates the main window with tabbed interface
 
-2. **LLM Integration** (`llm_utils.py`)
+2. **LLM Integration** (`llm/` directory and `llm_utils_compat.py`)
 
-   - `BaseLLMClient`: Abstract base class for all LLM providers
-   - Provider-specific clients: `AnthropicClient`, `GeminiClient`, `AzureOpenAIClient`
-   - `LLMClientFactory`: Creates appropriate client based on provider
+   **New Modular Structure** (`llm/` directory):
+   - `llm/base.py`: Abstract base provider class with Qt patterns (signals, properties)
+   - `llm/providers/`:
+     - `anthropic.py`: AnthropicProvider with native PDF and extended thinking support
+     - `gemini.py`: GeminiProvider with extended thinking capabilities
+     - `azure_openai.py`: AzureOpenAIProvider with deployment configuration
+   - `llm/chunking.py`: Markdown-aware chunking using langchain-text-splitters
+   - `llm/tokens.py`: Centralized token counting with LRU caching
+   - `llm/factory.py`: Provider factory with Qt-style patterns
+   
+   **Compatibility Layer** (`llm_utils_compat.py`):
+   - Temporary shim for backward compatibility during migration
+   - Maps old API (`LLMClient`, `LLMClientFactory`) to new structure
+   - Provides deprecation warnings for smooth transition
+   - Will be removed once full migration is complete
+   
+   **Key Features**:
    - Token counting with caching via `cached_count_tokens()`
-   - Model-aware chunking via `chunk_document_with_overlap()` and `get_model_context_window()`
+   - Model-aware chunking via `chunk_document()` with markdown header preservation
    - `MODEL_CONTEXT_WINDOWS`: Dictionary of model token limits (using 65% for safety)
+   - Extended thinking support for Anthropic and Gemini providers
 
 3. **Configuration System** (`app_config.py`)
 
    - Manages LLM provider settings via `app_settings.json`
    - Azure deployment names read from `AZURE_OPENAI_DEPLOYMENT_NAME` env var
-   - `get_configured_llm_client()`: Main factory method for LLM clients
+   - `get_configured_llm_client()`: Main factory method for LLM providers (currently using compatibility layer)
 
 4. **UI Structure** (in `ui/` directory)
 
@@ -151,3 +169,51 @@ OPENAI_API_VERSION=2025-01-01-preview
 - Temporary files use `_temp` suffix during write operations
 - All file paths should be absolute, not relative
 - Signal/slot connections must be properly disconnected to avoid memory leaks
+
+### Startup Configuration
+
+The application uses `startup_config.py` to provide a clean startup experience:
+- Suppresses deprecation warnings from the compatibility layer
+- Reduces logging verbosity for LLM provider initialization
+- Hides Qt plugin warnings unless debugging is enabled
+
+To enable debug output, set these environment variables:
+- `DEBUG=true` - General debug output
+- `DEBUG_LLM=true` - LLM provider debug logging
+- `DEBUG_QT=true` - Qt plugin debug output
+
+## LLM Module Migration Status
+
+### Current State (2025-06-30)
+- All code currently uses `llm_utils_compat.py` as a compatibility layer
+- The old monolithic `llm_utils.py` (2,467 lines) is still present but not imported
+- New modular `llm/` package is fully implemented and functional
+
+### Migration Path
+1. **Phase 1 (COMPLETED)**: Create new modular structure and compatibility layer
+2. **Phase 2 (CURRENT)**: Update all imports to use compatibility layer
+3. **Phase 3 (TODO)**: Gradually migrate from compatibility layer to direct `llm/` imports
+4. **Phase 4 (TODO)**: Remove `llm_utils.py` and `llm_utils_compat.py`
+
+### New LLM API Examples
+
+```python
+# Current (using compatibility layer)
+from llm_utils_compat import LLMClientFactory
+client = LLMClientFactory.create_client(provider="auto")
+
+# Future (direct usage)
+from llm import create_provider
+provider = create_provider("anthropic", api_key="...")
+response = await provider.generate_async(prompt, model="claude-3")
+
+# Markdown-aware chunking
+from llm.chunking import chunk_document
+chunks = chunk_document(text, max_tokens=100000, overlap_tokens=2000)
+```
+
+### Qt Integration Patterns
+- All providers inherit from `BaseProvider(QObject)`
+- Providers emit Qt signals for async operations
+- Factory uses Qt-style naming conventions
+- Thread-safe operations with proper signal/slot connections

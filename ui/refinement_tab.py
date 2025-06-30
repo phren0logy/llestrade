@@ -396,11 +396,6 @@ class RefinementTab(BaseTab):
         # Update button state
         self.refine_button.setEnabled(ready)
 
-        # Debug message to verify state
-        print(
-            f"Check ready state: has_report={has_report}, has_instructions={has_instructions}, ready={ready}"
-        )
-
         # Update workflow indicator
         if has_report:
             self.workflow_indicator.update_status(1, "complete")

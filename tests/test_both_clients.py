@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 
-from llm_utils import AnthropicClient, GeminiClient, LLMClientFactory
+from llm_utils_compat import AnthropicClient, GeminiClient, LLMClientFactory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
