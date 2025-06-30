@@ -699,12 +699,10 @@ Please include:
                             chunk_summary = f"## Chunk {i+1}/{len(chunks)} Summary\n\n{chunk_content}"
                             chunk_summaries.append(chunk_summary)
                             
-                            # Clean up intermediate variables to free memory
-                            # Note: Don't delete chunk_summary as it's now referenced in the list
-                            del chunk_content
-                            del chunk_prompt
-                            # Note: Don't delete 'chunk' as it's from the for loop
-                            gc.collect()  # Force garbage collection after each chunk
+                            # Force garbage collection after each chunk to manage memory
+                            # Note: We don't use explicit del statements as they can cause
+                            # memory corruption with Python's reference counting
+                            gc.collect()  # Encourage garbage collection after each chunk
                             
                             # Update progress after chunk completion with time estimate
                             chunk_done_progress = int(((i + 1) / len(chunks)) * 50) + 30
