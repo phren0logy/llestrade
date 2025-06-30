@@ -18,6 +18,7 @@ from llm_utils import (
     LLMClient,
     LLMClientFactory,
     cached_count_tokens,
+    chunk_document_with_overlap,
 )
 from prompt_manager import PromptManager
 
@@ -233,17 +234,43 @@ class IntegratedAnalysisThread(QThread):
                     self.status_panel.append_warning(f"Could not read original document {os.path.basename(md_file)}: {e}")    
             self.status_panel.append_details(f"Total original documents content length: {len(original_docs_content)} characters.")
 
-            self.progress_signal.emit(25, "Creating integrated analysis prompt...")
-            prompt_text, system_prompt = self.create_integrated_prompt(combined_content, original_docs_content)
-            self.status_panel.append_details("Integrated analysis prompt created.")
-            # self.status_panel.append_details(f"System Prompt: {system_prompt[:200]}...")
-            # self.status_panel.append_details(f"User Prompt: {prompt_text[:200]}...")
-
-            self.progress_signal.emit(30, "Requesting integrated analysis from LLM...")
-            response = self.process_api_response(prompt=prompt_text, system_prompt=system_prompt)
-
-            if response and response.get("success"):
-                integrated_analysis_content = response.get("content", "")
+            self.progress_signal.emit(25, "Checking content size for chunking...")
+            
+            # Check if we need to chunk the content
+            total_content = f"{combined_content}\n\n{original_docs_content}"
+            
+            # Estimate token count
+            estimated_tokens = len(total_content) // 4
+            self.status_panel.append_details(f"Estimated total tokens: {estimated_tokens}")
+            
+            # Determine if chunking is needed based on model
+            model_context_window = chunk_document_with_overlap(
+                "",  # Empty text just to get the model window
+                model_name=self.llm_client_effective_model,
+                max_chunk_size=0  # Will be calculated based on model
+            )
+            
+            # Check if content fits in a single request (leaving room for prompts)
+            if estimated_tokens < 50000:  # Conservative threshold
+                # Process as single request
+                self.progress_signal.emit(30, "Creating integrated analysis prompt...")
+                prompt_text, system_prompt = self.create_integrated_prompt(combined_content, original_docs_content)
+                self.status_panel.append_details("Integrated analysis prompt created.")
+                
+                self.progress_signal.emit(35, "Requesting integrated analysis from LLM...")
+                response = self.process_api_response(prompt=prompt_text, system_prompt=system_prompt)
+                
+                if response and response.get("success"):
+                    integrated_analysis_content = response.get("content", "")
+                else:
+                    integrated_analysis_content = None
+            else:
+                # Process with chunking
+                self.progress_signal.emit(30, "Content too large, using chunked processing...")
+                self.status_panel.append_details("Content exceeds single request limit, using chunked processing...")
+                integrated_analysis_content = self.process_with_chunks(combined_content, original_docs_content)
+            
+            if integrated_analysis_content:
                 if not integrated_analysis_content.strip():
                     self.status_panel.append_error("LLM returned an empty integrated analysis.")
                     self.finished_signal.emit(False, "LLM returned an empty analysis.", "")
@@ -296,3 +323,111 @@ class IntegratedAnalysisThread(QThread):
         user_prompt = user_prompt_template.format(**placeholders)
 
         return user_prompt, system_prompt
+    
+    def process_with_chunks(self, combined_content: str, original_docs_content: str) -> Optional[str]:
+        """Process the integrated analysis using chunking for large content.
+        
+        Args:
+            combined_content: Combined summaries content
+            original_docs_content: Original documents content
+            
+        Returns:
+            The integrated analysis content or None if failed
+        """
+        try:
+            # First, process summaries only
+            self.status_panel.append_details("Processing document summaries...")
+            self.progress_signal.emit(40, "Analyzing summaries...")
+            
+            # Create chunks of the combined summaries
+            summary_chunks = chunk_document_with_overlap(
+                combined_content,
+                client=self.llm_client,
+                model_name=self.llm_client_effective_model,
+                overlap=2000
+            )
+            
+            self.status_panel.append_details(f"Summaries split into {len(summary_chunks)} chunks")
+            
+            # Process each summary chunk
+            chunk_analyses = []
+            for i, chunk in enumerate(summary_chunks):
+                self.progress_signal.emit(
+                    40 + int((i / len(summary_chunks)) * 30),  # 40-70% for summary processing
+                    f"Processing summary chunk {i+1}/{len(summary_chunks)}..."
+                )
+                
+                # Create prompt for this chunk
+                chunk_prompt = f"""## Document Summaries (Part {i+1} of {len(summary_chunks)})
+
+{chunk}
+
+Please analyze these document summaries and extract:
+1. Key clinical findings and diagnoses
+2. Important dates and timeline events
+3. Patterns of behavior or symptoms
+4. Legal and forensic information
+5. Treatment history and responses
+6. Any contradictions or discrepancies
+
+Focus on extracting factual information that will be important for the final integrated analysis."""
+
+                system_prompt = f"""You are analyzing part {i+1} of {len(summary_chunks)} document summaries for {self.subject_name} (DOB: {self.subject_dob}). 
+Extract and organize the most clinically relevant information. This is an intermediate analysis that will be combined with other chunks."""
+
+                response = self.process_api_response(prompt=chunk_prompt, system_prompt=system_prompt)
+                if response and response.get("success"):
+                    chunk_analyses.append(response.get("content", ""))
+                else:
+                    self.status_panel.append_error(f"Failed to process chunk {i+1}")
+                    return None
+            
+            # Combine chunk analyses
+            combined_analysis = "\n\n---\n\n".join(chunk_analyses)
+            
+            # Create final integrated analysis prompt
+            self.progress_signal.emit(75, "Creating final integrated analysis...")
+            
+            final_prompt = f"""Based on the following analyzed summaries, create a comprehensive integrated analysis.
+
+## Analyzed Document Summaries
+{combined_analysis}
+
+## Subject Information
+- Name: {self.subject_name}
+- Date of Birth: {self.subject_dob}
+
+## Case Background
+{self.case_info}
+
+Please create the final integrated analysis following the structure outlined in your instructions, including:
+1. Executive Summary
+2. Comprehensive Timeline
+3. Clinical History Integration
+4. Behavioral Patterns and Themes
+5. Legal and Forensic Summary
+6. Substance Use History
+7. Social and Family History
+8. Discrepancies and Data Quality
+9. Clinical Impressions
+
+Ensure all sections are complete and professionally formatted."""
+
+            final_system_prompt = """You are creating the final integrated analysis for a forensic psychiatrist. 
+Synthesize all the information from the chunk analyses into a cohesive, comprehensive report. 
+Maintain professional standards and ensure all sections are thoroughly addressed."""
+
+            # Get final response
+            self.progress_signal.emit(80, "Generating final integrated analysis...")
+            final_response = self.process_api_response(prompt=final_prompt, system_prompt=final_system_prompt)
+            
+            if final_response and final_response.get("success"):
+                return final_response.get("content", "")
+            else:
+                self.status_panel.append_error("Failed to generate final integrated analysis")
+                return None
+                
+        except Exception as e:
+            self.status_panel.append_error(f"Error in chunked processing: {str(e)}")
+            logging.exception("Error in process_with_chunks")
+            return None

@@ -28,6 +28,148 @@ _MAX_CACHE_SIZE = 1000
 # LRU cache for token counting - use a dictionary to track cache hits and misses
 _LRU_CACHE_STATS = {"hits": 0, "misses": 0}
 
+# Model context window sizes (in tokens)
+# Using 65% of actual limits for safety margin
+MODEL_CONTEXT_WINDOWS = {
+    # Azure OpenAI
+    "gpt-4.1": int(1_000_000 * 0.65),  # 650,000 tokens
+    "gpt-4-turbo": int(128_000 * 0.65),  # 83,200 tokens
+    "gpt-35-turbo": int(16_000 * 0.65),  # 10,400 tokens
+    
+    # Anthropic Claude
+    "claude-sonnet-4-20250514": int(200_000 * 0.65),  # 130,000 tokens
+    "claude-3-7-sonnet-latest": int(200_000 * 0.65),  # 130,000 tokens
+    "claude-3-opus-20240229": int(200_000 * 0.65),  # 130,000 tokens
+    "claude-3-haiku-20240307": int(200_000 * 0.65),  # 130,000 tokens
+    
+    # Google Gemini
+    "gemini-2.5-pro-preview-05-06": int(2_000_000 * 0.65),  # 1,300,000 tokens
+    "gemini-1.5-pro": int(2_000_000 * 0.65),  # 1,300,000 tokens
+    "gemini-1.5-flash": int(1_000_000 * 0.65),  # 650,000 tokens
+}
+
+def get_model_context_window(model_name: str) -> int:
+    """Get the safe context window size for a model.
+    
+    Args:
+        model_name: The model identifier
+        
+    Returns:
+        The safe context window size in tokens (65% of actual limit)
+        Defaults to 30,000 tokens if model not found
+    """
+    # Check exact match first
+    if model_name in MODEL_CONTEXT_WINDOWS:
+        return MODEL_CONTEXT_WINDOWS[model_name]
+    
+    # Check for partial matches (e.g., if model name contains version info)
+    for known_model, window_size in MODEL_CONTEXT_WINDOWS.items():
+        if known_model in model_name or model_name in known_model:
+            return window_size
+    
+    # Default conservative limit for unknown models
+    logging.warning(f"Unknown model '{model_name}', using default context window of 30,000 tokens")
+    return 30_000
+
+
+def chunk_document_with_overlap(text, client=None, model_name=None, max_chunk_size=None, overlap=2000):
+    """
+    Chunk a document into overlapping pieces for processing by LLM.
+    
+    Args:
+        text: The text to chunk
+        client: LLM client for token counting (optional)
+        model_name: Model name to determine chunk size (optional)
+        max_chunk_size: Maximum tokens per chunk (overrides model-based sizing)
+        overlap: Number of tokens to overlap between chunks
+        
+    Returns:
+        List of text chunks
+    """
+    try:
+        # Determine chunk size based on model if not explicitly provided
+        if max_chunk_size is None:
+            if model_name:
+                max_chunk_size = get_model_context_window(model_name)
+                # Reserve some space for prompts (use 90% of model window for content)
+                max_chunk_size = int(max_chunk_size * 0.9)
+            else:
+                # Default to conservative size
+                max_chunk_size = 60000
+        
+        # Try to count tokens accurately if client is provided
+        if client:
+            token_result = cached_count_tokens(client, text=text)
+            if token_result["success"]:
+                total_tokens = token_result["token_count"]
+            else:
+                # Fallback to character-based estimation
+                total_tokens = len(text) // 4
+        else:
+            # No client provided, use character estimation
+            total_tokens = len(text) // 4
+            
+        # If the document is small enough, return as single chunk
+        if total_tokens <= max_chunk_size:
+            return [text]
+            
+        # Calculate approximate characters per token
+        chars_per_token = len(text) / total_tokens if total_tokens > 0 else 4
+        
+        # Convert token limits to character limits
+        max_chars = int(max_chunk_size * chars_per_token)
+        overlap_chars = int(overlap * chars_per_token)
+        
+        chunks = []
+        start = 0
+        
+        while start < len(text):
+            # Calculate end position
+            end = min(start + max_chars, len(text))
+            
+            # Try to break at a sentence or paragraph boundary
+            if end < len(text):
+                # Look for sentence endings within the last 200 characters
+                search_start = max(end - 200, start)
+                sentence_breaks = []
+                
+                # Find sentence endings
+                for i in range(search_start, end):
+                    if text[i] in '.!?':
+                        # Check if it's followed by whitespace and capital letter
+                        if (i + 1 < len(text) and 
+                            text[i + 1].isspace() and 
+                            i + 2 < len(text) and 
+                            text[i + 2].isupper()):
+                            sentence_breaks.append(i + 1)
+                
+                # Use the last sentence break if available
+                if sentence_breaks:
+                    end = sentence_breaks[-1]
+                
+                # If no sentence breaks, try paragraph breaks
+                elif '\n\n' in text[search_start:end]:
+                    para_pos = text.rfind('\n\n', search_start, end)
+                    if para_pos > start:
+                        end = para_pos + 2
+            
+            # Extract the chunk
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            
+            # Move start position with overlap
+            if end >= len(text):
+                break
+            start = max(end - overlap_chars, start + 1)
+            
+        return chunks if chunks else [text]
+        
+    except Exception as e:
+        logging.error(f"Error chunking document: {e}")
+        # Return the original text as a single chunk
+        return [text]
+
 
 def cached_count_tokens(client, text=None, messages=None):
     """

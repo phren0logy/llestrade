@@ -4,7 +4,7 @@
     "anthropic": {
       "enabled": true,
       "label": "Anthropic Claude",
-      "default_model": "claude-3-7-sonnet-latest"
+      "default_model": "claude-sonnet-4-20250514"
     },
     "gemini": {
       "enabled": true,
