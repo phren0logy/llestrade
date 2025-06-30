@@ -8,8 +8,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Assuming llm_utils.py is in the same directory or accessible in PYTHONPATH
-from llm_utils import BaseLLMClient, LLMClientFactory
+# Use compatibility module during transition
+from llm_utils_compat import BaseLLMClient, LLMClientFactory
 
 SETTINGS_FILE = "app_settings.json"
 DEFAULT_SETTINGS = {

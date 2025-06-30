@@ -10,7 +10,7 @@ from typing import Dict, Any
 from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
-from llm_utils import LLMClientFactory
+from llm_utils_compat import LLMClientFactory
 from prompt_manager import PromptManager
 
 class PDFPromptThread(QThread):

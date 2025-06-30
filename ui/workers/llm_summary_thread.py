@@ -21,7 +21,7 @@ from tenacity import (
 )
 
 from app_config import get_configured_llm_client
-from llm_utils import LLMClientFactory, cached_count_tokens, chunk_document_with_overlap
+from llm_utils_compat import LLMClientFactory, cached_count_tokens, chunk_document_with_overlap
 from prompt_manager import PromptManager
 
 # Set up logger for this module

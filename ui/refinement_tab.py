@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
 from file_utils import read_file_content, read_file_preview, write_file_content
-from llm_utils import LLMClientFactory
+from llm_utils_compat import LLMClientFactory
 from prompt_manager import PromptManager
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector

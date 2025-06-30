@@ -12,7 +12,7 @@ from typing import Any, Dict, Optional, Tuple
 from PySide6.QtCore import QObject, QThread, Signal
 
 from app_config import get_configured_llm_client
-from llm_utils import (
+from llm_utils_compat import (
     AnthropicClient,
     GeminiClient,
     LLMClient,
