@@ -11,12 +11,15 @@ from typing import Any, Dict, Optional, Tuple
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from app_config import get_configured_llm_provider
-from llm.providers import AnthropicProvider, GeminiProvider
-from llm.base import BaseLLMProvider
-from llm.factory import create_provider
-from llm.tokens import count_tokens_cached, TokenCounter
-from llm.chunking import ChunkingStrategy
+from app_config import get_configured_llm_client
+from llm_utils_compat import (
+    AnthropicClient,
+    GeminiClient,
+    LLMClient,
+    LLMClientFactory,
+    cached_count_tokens,
+    chunk_document_with_overlap,
+)
 from prompt_manager import PromptManager
 
 
@@ -52,67 +55,67 @@ class IntegratedAnalysisThread(QThread):
         self.llm_provider_id = llm_provider_id
         self.llm_model_name = llm_model_name
         
-        self.llm_provider: Optional[BaseLLMProvider] = None
-        self.llm_provider_label: Optional[str] = None
-        self.llm_effective_model: Optional[str] = None
+        self.llm_client: Optional[LLMClient] = None
+        self.llm_client_provider_label: Optional[str] = None
+        self.llm_client_effective_model: Optional[str] = None
 
-    def _initialize_llm_provider(self) -> bool:
-        """Initialize LLM provider using specified provider and model."""
+    def _initialize_llm_client(self) -> bool:
+        """Initialize LLM client using specified provider and model."""
         try:
             self.progress_signal.emit(5, f"Initializing LLM: {self.llm_provider_id} ({self.llm_model_name})...")
             self.status_panel.append_details(
-                f"Attempting to initialize LLM provider for integrated analysis: Provider ID: {self.llm_provider_id}, Model: {self.llm_model_name}"
+                f"Attempting to initialize LLM client for integrated analysis: Provider ID: {self.llm_provider_id}, Model: {self.llm_model_name}"
             )
             
-            provider_info = get_configured_llm_provider(
+            client_info = get_configured_llm_client(
                 provider_id_override=self.llm_provider_id,
                 model_override=self.llm_model_name
             )
 
-            if provider_info and provider_info.get("provider"):
-                self.llm_provider = provider_info["provider"]
-                if self.llm_provider.initialized:
-                    self.llm_provider_label = provider_info.get("provider_label", self.llm_provider_id)
-                    self.llm_effective_model = provider_info.get("effective_model_name", self.llm_model_name)
+            if client_info and client_info.get("client"):
+                self.llm_client = client_info["client"]
+                if self.llm_client.is_initialized:
+                    self.llm_client_provider_label = client_info.get("provider_label", self.llm_provider_id)
+                    self.llm_client_effective_model = client_info.get("effective_model_name", self.llm_model_name)
                     self.status_panel.append_details(
-                        f"Successfully initialized LLM provider: {self.llm_provider_label} ({self.llm_effective_model}) for integrated analysis."
+                        f"Successfully initialized LLM client: {self.llm_client_provider_label} ({self.llm_client_effective_model}) for integrated analysis."
                     )
-                    self.progress_signal.emit(10, f"LLM provider {self.llm_provider_label} initialized.")
+                    self.progress_signal.emit(10, f"LLM client {self.llm_client_provider_label} initialized.")
                     return True
                 else:
-                    error_msg = f"LLM provider for {provider_info.get('provider_label', self.llm_provider_id)} could not be initialized (initialized flag is false)."
+                    error_msg = f"LLM client for {client_info.get('provider_label', self.llm_provider_id)} could not be initialized (is_initialized flag is false)."
                     self.status_panel.append_error(error_msg)
                     logging.error(error_msg)
                     self.error_signal.emit(error_msg)
                     return False
             else:
-                error_msg = f"Failed to get configured LLM provider for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
+                error_msg = f"Failed to get configured LLM client for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
                 self.status_panel.append_error(error_msg)
                 logging.error(error_msg)
                 self.error_signal.emit(error_msg)
                 return False
         except Exception as e:
-            error_msg = f"Exception initializing LLM provider ({self.llm_provider_id}/{self.llm_model_name}) for integrated analysis: {str(e)}"
+            error_msg = f"Exception initializing LLM client ({self.llm_provider_id}/{self.llm_model_name}) for integrated analysis: {str(e)}"
             self.status_panel.append_error(error_msg)
             logging.exception(error_msg)
             self.error_signal.emit(error_msg)
             return False
 
     def process_api_response(self, prompt: str, system_prompt: str) -> Optional[Dict[str, Any]]:
-        """Process API response with detailed error handling and retries using the configured LLM provider."""
+        """Process API response with detailed error handling and retries using the configured LLM client."""
         max_retries = 3
         retry_count = 0
         retry_delay = 5  # seconds, increased from 2
         timeout_seconds = 900  # 15 minutes timeout for potentially very long analysis
 
-        if not self.llm_provider or not self.llm_provider.initialized:
-            err_msg = "LLM provider not initialized. Cannot process API response."
+        if not self.llm_client or not self.llm_client.is_initialized:
+            err_msg = "LLM client not initialized. Cannot process API response."
             self.status_panel.append_error(err_msg)
             raise Exception(err_msg)
 
         while retry_count < max_retries:
             try:
-                provider_name = self.llm_provider_label or self.llm_provider.__class__.__name__
+                provider_name = self.llm_client_provider_label or self.llm_client.provider
                 self.progress_signal.emit(
                     50,
                     f"Sending request to {provider_name} (Attempt {retry_count + 1}/{max_retries})...",
@@ -131,17 +134,17 @@ class IntegratedAnalysisThread(QThread):
                     nonlocal response_data, api_error, api_complete
                     try:
                         request_params = {
-                            "prompt": prompt,
+                            "prompt_text": prompt,
                             "system_prompt": system_prompt,
                             "temperature": 0.1, # Default, can be adjusted if needed
-                            "model": self.llm_effective_model # Use the specific model for the provider
+                            "model": self.llm_client_effective_model # Use the specific model for the client
                         }
-                        # Some providers might not expect a model param if it's part of their endpoint (e.g. Azure)
-                        # The create_provider in llm should handle this, but good to be mindful.
-                        # For now, we assume model is generally required or ignored if not applicable by the provider.
+                        # Some clients might not expect a model param if it's part of their endpoint (e.g. Azure)
+                        # The create_client in llm_utils should handle this, but good to be mindful.
+                        # For now, we assume model is generally required or ignored if not applicable by the client.
 
-                        self.status_panel.append_details(f"Using model: {self.llm_effective_model} with {provider_name}") 
-                        response_data = self.llm_provider.generate(**request_params)
+                        self.status_panel.append_details(f"Using model: {self.llm_client_effective_model} with {provider_name}") 
+                        response_data = self.llm_client.generate_response(**request_params)
                         api_complete = True
                     except Exception as e:
                         api_error = e
@@ -205,10 +208,10 @@ class IntegratedAnalysisThread(QThread):
     def run(self):
         """Run the integrated analysis operations."""
         try:
-            if not self._initialize_llm_provider():
+            if not self._initialize_llm_client():
                 # Initialization already emits its own error signals.
                 # It returns false if it fails. We also emit a finished signal.
-                self.finished_signal.emit(False, "LLM provider initialization failed.", "")
+                self.finished_signal.emit(False, "LLM client initialization failed.", "")
                 return
 
             self.progress_signal.emit(15, "Reading combined summary file...")
@@ -239,6 +242,13 @@ class IntegratedAnalysisThread(QThread):
             # Estimate token count
             estimated_tokens = len(total_content) // 4
             self.status_panel.append_details(f"Estimated total tokens: {estimated_tokens}")
+            
+            # Determine if chunking is needed based on model
+            model_context_window = chunk_document_with_overlap(
+                "",  # Empty text just to get the model window
+                model_name=self.llm_client_effective_model,
+                max_chunk_size=0  # Will be calculated based on model
+            )
             
             # Check if content fits in a single request (leaving room for prompts)
             if estimated_tokens < 50000:  # Conservative threshold
@@ -330,15 +340,11 @@ class IntegratedAnalysisThread(QThread):
             self.progress_signal.emit(40, "Analyzing summaries...")
             
             # Create chunks of the combined summaries
-            # Get model context window to determine chunk size
-            context_window = TokenCounter.get_model_context_window(self.llm_effective_model)
-            # Use a conservative chunk size (leave room for prompts)
-            max_tokens_per_chunk = int(context_window * 0.5)
-            
-            summary_chunks = ChunkingStrategy.markdown_headers(
-                text=combined_content,
-                max_tokens=max_tokens_per_chunk,
-                overlap=2000 * 4  # Convert overlap tokens to characters (approx)
+            summary_chunks = chunk_document_with_overlap(
+                combined_content,
+                client=self.llm_client,
+                model_name=self.llm_client_effective_model,
+                overlap=2000
             )
             
             self.status_panel.append_details(f"Summaries split into {len(summary_chunks)} chunks")

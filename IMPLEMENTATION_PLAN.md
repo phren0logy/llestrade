@@ -297,10 +297,16 @@ del chunk_prompt
 - [x] Updated main.py and setup_env.py imports
 - [x] Updated CLAUDE.md documentation with new LLM structure
 - [x] Created MIGRATION_PLAN.md for removing compatibility module
+- [x] Consolidated migration documentation (merged MIGRATION_GUIDE.md into MIGRATION_PLAN.md)
+- [x] Phase 1.1: Migrated app_config.py to use llm package directly
+- [x] Phase 1.2: Migrated llm_summary_thread.py
+- [x] Phase 1.3: Migrated integrated_analysis_thread.py
+- [x] Phase 1.4: Migrated prompt_runner_thread.py
+- [x] Phase 1.5: Migrated pdf_prompt_thread.py
 
 ### In Progress
 
-- [ ] Migrate from compatibility module to direct llm/ usage (see MIGRATION_PLAN.md)
+- [ ] Phase 2: Migrate UI components (analysis_tab.py, refinement_tab.py, prompts_tab.py)
 
 ### Not Started
 
@@ -308,6 +314,163 @@ del chunk_prompt
 - [ ] Remove llm_utils_compat.py (after migration complete)
 - [ ] Testing updates for new API
 - [ ] Final documentation cleanup
+
+## 11. Migration Quick Reference
+
+### Most Common Changes - At a Glance
+
+#### Imports
+```python
+# OLD → NEW
+from llm_utils_compat import LLMClientFactory → from llm.factory import create_provider
+from llm_utils_compat import cached_count_tokens → from llm.tokens import count_tokens_cached
+from llm_utils_compat import chunk_document_with_overlap → from llm.chunking import chunk_document
+```
+
+#### Creating Provider/Client
+```python
+# OLD
+client = LLMClientFactory.create_client(provider="auto")
+
+# NEW
+provider = create_provider(provider="auto")
+```
+
+#### Checking Initialization
+```python
+# OLD
+if client.is_initialized:
+
+# NEW
+if provider.initialized:
+```
+
+#### Basic Generation
+```python
+# OLD
+response = client.generate_response(
+    prompt_text="Hello",
+    temperature=0.7
+)
+
+# NEW  
+response = provider.generate(
+    prompt="Hello",      # Note: prompt_text → prompt
+    temperature=0.7
+)
+```
+
+#### Extended Thinking
+```python
+# OLD
+response = client.generate_response_with_extended_thinking(
+    prompt_text="Complex question",
+    thinking_budget_tokens=32000
+)
+
+# NEW
+response = provider.generate_with_extended_thinking(
+    prompt="Complex question",    # Note: prompt_text → prompt
+    thinking_budget_tokens=32000
+)
+```
+
+#### Token Counting
+```python
+# OLD
+result = cached_count_tokens(client, text="Count my tokens")
+
+# NEW
+result = count_tokens_cached(provider, text="Count my tokens")
+```
+
+#### Document Chunking
+```python
+# OLD
+chunks = chunk_document_with_overlap(
+    document=long_text,
+    max_tokens_per_chunk=100000,
+    overlap_tokens=2000
+)
+
+# NEW
+chunks = chunk_document(
+    text=long_text,          # Note: document → text
+    max_tokens=100000,       # Note: max_tokens_per_chunk → max_tokens
+    overlap_tokens=2000
+)
+```
+
+### Variable Naming Conventions
+
+| Old | New | Context |
+|-----|-----|---------|
+| `client` | `provider` | Variable names |
+| `llm_client` | `llm_provider` | Variable names |
+| `self.llm_client` | `self.llm_provider` | Class attributes |
+| `is_initialized` | `initialized` | Property name |
+| `prompt_text` | `prompt` | Parameter name |
+| `document` | `text` | Parameter name |
+| `max_tokens_per_chunk` | `max_tokens` | Parameter name |
+
+### Return Value Changes
+
+```python
+# OLD (from get_configured_llm_client)
+{
+    "client": client_instance,
+    "provider_id": "anthropic",
+    "provider_label": "Anthropic Claude",
+    "effective_model_name": "claude-3"
+}
+
+# NEW (from get_configured_llm_provider)
+{
+    "provider": provider_instance,    # Note: client → provider
+    "provider_id": "anthropic",
+    "provider_label": "Anthropic Claude", 
+    "effective_model_name": "claude-3"
+}
+```
+
+### Quick Sed Commands for Common Replacements
+
+```bash
+# Update imports
+sed -i 's/from llm_utils_compat import LLMClientFactory/from llm.factory import create_provider/g' file.py
+sed -i 's/from llm_utils_compat import cached_count_tokens/from llm.tokens import count_tokens_cached/g' file.py
+
+# Update factory calls
+sed -i 's/LLMClientFactory\.create_client/create_provider/g' file.py
+
+# Update variable names (be careful with these!)
+sed -i 's/llm_client/llm_provider/g' file.py
+sed -i 's/\.is_initialized/\.initialized/g' file.py
+
+# Update method calls
+sed -i 's/generate_response(/generate(/g' file.py
+sed -i 's/prompt_text=/prompt=/g' file.py
+```
+
+### Testing One-Liner
+
+Test if your migration worked:
+```bash
+# Before migration
+python -c "from llm_utils_compat import LLMClientFactory; print('Old import works')"
+
+# After migration  
+python -c "from llm.factory import create_provider; print('New import works')"
+```
+
+### Debug Helper
+
+Add this to quickly check what methods a provider has:
+```python
+# Debug helper to see available methods
+provider = create_provider(provider="auto")
+print("Provider methods:", [m for m in dir(provider) if not m.startswith('_')])
+```
 
 ---
 

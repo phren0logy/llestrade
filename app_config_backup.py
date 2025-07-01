@@ -8,9 +8,8 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Direct imports from new llm package
-from llm.factory import create_provider
-from llm.base import BaseLLMProvider
+# Use compatibility module during transition
+from llm_utils_compat import BaseLLMClient, LLMClientFactory
 
 SETTINGS_FILE = "app_settings.json"
 DEFAULT_SETTINGS = {
@@ -107,12 +106,12 @@ def save_app_settings(settings: dict):
     except IOError as e:
         logging.error(f"Error saving settings to '{SETTINGS_FILE}': {e}")
 
-def get_configured_llm_provider(
+def get_configured_llm_client(
     provider_id_override: Optional[str] = None,
     model_override: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
-    Attempts to initialize an LLM provider using the new direct API.
+    Attempts to initialize an LLM client.
     Uses the selected provider from app_settings.json by default.
     Can be overridden with specific provider_id and model.
 
@@ -121,11 +120,8 @@ def get_configured_llm_provider(
         model_override: If provided, use this model/deployment name.
 
     Returns:
-        A dictionary with the provider instance and its configuration if successful,
+        A dictionary with the client instance and its configuration if successful,
         None otherwise. Errors are logged.
-        
-    Note: This function replaces get_configured_llm_client() and returns
-    a provider instead of a client wrapper.
     """
     settings = load_app_settings()
 
@@ -160,7 +156,7 @@ def get_configured_llm_provider(
 
     factory_args = {
         "provider": selected_provider_id,
-        "api_key": None,  # Providers will pick up from environment variables
+        "api_key": None,  # Clients in llm_utils.py will pick up from environment variables
         "default_system_prompt": general_cfg.get("default_system_prompt"),
         "debug": general_cfg.get("debug_mode", False),
         # Consider adding timeout, max_retries to general_settings or provider_configs if needed
@@ -186,15 +182,15 @@ def get_configured_llm_provider(
             )
             return None
 
-    logging.info(f"Attempting to initialize LLM provider: {provider_label} "
+    logging.info(f"Attempting to initialize LLM client: {provider_label} "
                  f"(ID: {selected_provider_id}) with model/deployment: '{effective_model_name}'")
 
-    provider: Optional[BaseLLMProvider] = create_provider(**factory_args)
+    client: Optional[BaseLLMClient] = LLMClientFactory.create_client(**factory_args)
 
-    if provider and provider.initialized:
-        logging.info(f"Successfully initialized LLM provider: {provider_label}")
+    if client and getattr(client, 'is_initialized', getattr(client, 'initialized', False)):
+        logging.info(f"Successfully initialized LLM client: {provider_label}")
         return {
-            "provider": provider,  # Changed from "client" to "provider"
+            "client": client,
             "provider_id": selected_provider_id,
             "provider_label": provider_label,
             "effective_model_name": effective_model_name,
@@ -204,38 +200,63 @@ def get_configured_llm_provider(
             f"Failed to initialize the selected LLM provider: {provider_label} (ID: {selected_provider_id}). "
             "Please check its API key in environment variables, any specific configurations "
             f"(like Azure deployment name: '{effective_model_name if selected_provider_id == 'azure_openai' else 'N/A'}') "
-            "in settings, and network connectivity. The provider's own logs may have more details."
+            "in settings, and network connectivity. The client's own logs may have more details."
         )
         return None
-
-# Backward compatibility alias
-get_configured_llm_client = get_configured_llm_provider
 
 if __name__ == '__main__':
     # Basic example of how to use these functions
     # Setup basic logging for the example
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-    active_provider_info = get_configured_llm_provider()
+    # --- Simulate UI interaction: User selects Azure OpenAI and configures it ---
+    # current_settings = load_app_settings()
+    # current_settings["selected_llm_provider_id"] = "azure_openai"
+    # current_settings["llm_provider_configs"]["azure_openai"]["enabled"] = True
+    # # IMPORTANT: The user would need to set their actual deployment name here or via a UI.
+    # # For this example, if AZURE_OPENAI_DEPLOYMENT_NAME is in env, use it, else a placeholder.
+    # azure_deployment_name_from_env = os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_EXAMPLE_FOR_TESTING")
+    # if azure_deployment_name_from_env:
+    #     current_settings["llm_provider_configs"]["azure_openai"]["default_deployment_name"] = azure_deployment_name_from_env
+    #     print(f"Using Azure deployment name from env for example: {azure_deployment_name_from_env}")
+    # else:
+    #     # This will cause get_configured_llm_client to fail if Azure is selected and this placeholder isn't replaced
+    #     current_settings["llm_provider_configs"]["azure_openai"]["default_deployment_name"] = "YOUR_AZURE_DEPLOYMENT_NAME_HERE"
+    #     print("Azure deployment name not in env for example, using placeholder. Client init will likely fail if Azure is selected.")
+    # save_app_settings(current_settings)
+    # print(f"Simulated selection: Azure OpenAI. Ensure '{SETTINGS_FILE}' reflects this and Azure env vars are set.")
+    # print("Ensure AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT, OPENAI_API_VERSION are set in your .env file.")
+    # print("----------------------------------------------------")
+
+    active_client_info = get_configured_llm_client()
     
     document_id_example = "DOC-EXAMPLE-001"
 
-    if active_provider_info:
-        provider_instance = active_provider_info["provider"]
-        model_name_to_use = active_provider_info["effective_model_name"]
-        active_provider_label = active_provider_info["provider_label"]
+    if active_client_info:
+        client_instance = active_client_info["client"]
+        model_name_to_use = active_client_info["effective_model_name"]
+        active_provider_label = active_client_info["provider_label"]
 
-        print(f"Successfully obtained LLM provider: {active_provider_label} "
+        print(f"Successfully obtained LLM client: {active_provider_label} "
               f"for document '{document_id_example}' using model/deployment: '{model_name_to_use}'")
         
-        # Example: Using the provider with new API
+        # Example: Using the client
+        # Ensure your .env file is loaded if clients depend on it for API keys not passed directly.
+        # (llm_utils.py BaseLLMClient and individual clients handle .env loading)
         # test_prompt = "What is the capital of France?"
-        # response = provider_instance.generate(prompt=test_prompt, model=model_name_to_use)
-        
+        # response = client_instance.generate_response(prompt_text=test_prompt, model=model_name_to_use)
+
         # if response["success"]:
         #     print(f"Response from {active_provider_label}: {response['content']}")
         # else:
         #     print(f"API call failed for {active_provider_label}. Error: {response['error']}")
+        #     logging.error(f"LLM API call failed for document {document_id_example} "
+        #                   f"using provider {active_provider_label}. Error: {response['error']}. "
+        #                   "Document needs to be re-run.")
     else:
-        print(f"Failed to obtain an active LLM provider for document '{document_id_example}'. "
+        print(f"Failed to obtain an active LLM client for document '{document_id_example}'. "
               "Check logs for details. Document processing cannot proceed and will need to be re-run.")
+        logging.error(
+            f"Document processing failed for {document_id_example} because the configured LLM provider "
+            "could not be initialized. Document needs to be re-run."
+        ) 

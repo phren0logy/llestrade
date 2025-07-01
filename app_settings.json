@@ -1,5 +1,5 @@
 {
-  "selected_llm_provider_id": "anthropic",
+  "selected_llm_provider_id": "gemini",
   "llm_provider_configs": {
     "anthropic": {
       "enabled": true,

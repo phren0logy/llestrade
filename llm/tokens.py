@@ -240,3 +240,41 @@ class TokenCounter:
         _CACHE_STATS["hits"] = 0
         _CACHE_STATS["misses"] = 0
         logger.info("Token counting cache cleared")
+
+
+# Convenience function for backward compatibility
+def count_tokens_cached(provider: Any, text: str) -> Dict[str, Any]:
+    """
+    Count tokens for text using the provider's model.
+    
+    This is a convenience wrapper for backward compatibility with the old API.
+    
+    Args:
+        provider: The LLM provider instance
+        text: The text to count tokens for
+        
+    Returns:
+        Dict with 'success', 'token_count', and optional 'estimated' flag
+    """
+    # Extract provider type from the class name
+    provider_type = "anthropic"  # Default
+    if hasattr(provider, '__class__'):
+        class_name = provider.__class__.__name__.lower()
+        if 'gemini' in class_name:
+            provider_type = "gemini"
+        elif 'azure' in class_name or 'openai' in class_name:
+            provider_type = "azure_openai"
+    
+    # Get model name if available
+    model = None
+    if hasattr(provider, 'model'):
+        model = provider.model
+    elif hasattr(provider, 'default_model'):
+        model = provider.default_model
+    
+    return TokenCounter.count(
+        text=text,
+        provider=provider_type,
+        model=model,
+        use_cache=True
+    )

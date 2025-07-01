@@ -20,10 +20,8 @@ from tenacity import (
     wait_exponential,
 )
 
-from app_config import get_configured_llm_provider
-from llm.factory import create_provider
-from llm.tokens import count_tokens_cached, TokenCounter
-from llm.chunking import ChunkingStrategy
+from app_config import get_configured_llm_client
+from llm_utils_compat import LLMClientFactory, cached_count_tokens, chunk_document_with_overlap
 from prompt_manager import PromptManager
 
 # Set up logger for this module
@@ -68,7 +66,7 @@ class LLMSummaryThread(QThread):
         self.status_panel = status_panel
         self.llm_provider_id = llm_provider_id
         self.llm_model_name = llm_model_name
-        self.llm_provider = None
+        self.llm_client = None
         self._mutex = QMutex()  # For thread-safe operations
         self._is_cancelled = False
 
@@ -132,49 +130,49 @@ class LLMSummaryThread(QThread):
         """Clean up resources to prevent memory leaks."""
         try:
             self.cancel()
-            self.llm_provider = None
+            self.llm_client = None
             gc.collect()  # Force garbage collection
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
 
-    def _initialize_llm_provider(self):
-        """Initialize the LLM provider for summarization."""
+    def _initialize_llm_client(self):
+        """Initialize the LLM client for summarization."""
         try:
-            logger.info(f"🔧 Starting LLM provider initialization...")
+            logger.info(f"🔧 Starting LLM client initialization...")
             logger.info(f"🏷️ Provider ID: {self.llm_provider_id}")
             logger.info(f"🏷️ Model Name: {self.llm_model_name}")
             
             if self.status_panel:
-                self.status_panel.append_details(f"Initializing LLM provider: {self.llm_provider_id}/{self.llm_model_name}")
+                self.status_panel.append_details(f"Initializing LLM client: {self.llm_provider_id}/{self.llm_model_name}")
             
-            logger.info("📞 Calling get_configured_llm_provider...")
-            provider_info = get_configured_llm_provider(
+            logger.info("📞 Calling get_configured_llm_client...")
+            client_info = get_configured_llm_client(
                 provider_id_override=self.llm_provider_id,
                 model_override=self.llm_model_name
             )
-            logger.info(f"✅ get_configured_llm_provider returned: {type(provider_info)}")
+            logger.info(f"✅ get_configured_llm_client returned: {type(client_info)}")
             
-            if provider_info:
-                logger.info(f"📋 Provider info keys: {list(provider_info.keys()) if isinstance(provider_info, dict) else 'Not a dict'}")
-                if provider_info.get("provider"):
-                    self.llm_provider = provider_info["provider"]
-                    logger.info(f"✅ LLM provider extracted: {type(self.llm_provider)}")
-                    logger.info(f"🔍 Provider class: {self.llm_provider.__class__.__name__}")
-                    logger.info(f"🔍 Provider initialized: {getattr(self.llm_provider, 'initialized', 'Unknown')}")
+            if client_info:
+                logger.info(f"📋 Client info keys: {list(client_info.keys()) if isinstance(client_info, dict) else 'Not a dict'}")
+                if client_info.get("client"):
+                    self.llm_client = client_info["client"]
+                    logger.info(f"✅ LLM client extracted: {type(self.llm_client)}")
+                    logger.info(f"🔍 Client provider: {getattr(self.llm_client, 'provider', 'Unknown')}")
+                    logger.info(f"🔍 Client is_initialized: {getattr(self.llm_client, 'is_initialized', 'Unknown')}")
                 else:
-                    logger.error("❌ No 'provider' key in provider_info")
-                    self.llm_provider = None
+                    logger.error("❌ No 'client' key in client_info")
+                    self.llm_client = None
             else:
-                logger.error("❌ get_configured_llm_provider returned None/empty")
-                self.llm_provider = None
+                logger.error("❌ get_configured_llm_client returned None/empty")
+                self.llm_client = None
             
-            if self.llm_provider and self.llm_provider.initialized:
-                logger.info(f"🎉 LLM provider initialization successful!")
+            if self.llm_client and self.llm_client.is_initialized:
+                logger.info(f"🎉 LLM client initialization successful!")
                 if self.status_panel:
-                    self.status_panel.append_details(f"LLM provider initialized successfully: {self.llm_provider_id}")
+                    self.status_panel.append_details(f"LLM client initialized successfully: {self.llm_provider_id}")
                 return True
             else:
-                error_msg = f"Failed to get configured LLM provider for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
+                error_msg = f"Failed to get configured LLM client for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
                 logger.error(f"❌ {error_msg}")
                 if self.status_panel:
                     self.status_panel.append_details(f"❌ ERROR: {error_msg}")
@@ -183,7 +181,7 @@ class LLMSummaryThread(QThread):
                 return False
 
         except Exception as e:
-            error_msg = f"Exception initializing LLM provider ({self.llm_provider_id}/{self.llm_model_name}): {str(e)}"
+            error_msg = f"Exception initializing LLM client ({self.llm_provider_id}/{self.llm_model_name}): {str(e)}"
             logger.exception(f"💥 {error_msg}")
             if self.status_panel:
                 self.status_panel.append_details(f"❌ ERROR: {error_msg}")
@@ -208,9 +206,9 @@ class LLMSummaryThread(QThread):
                 file_size = os.path.getsize(file_path)
                 logger.info(f"📊 File {i+1} size: {file_size} bytes")
         
-        logger.info("🔧 Initializing LLM provider...")
-        if not self._initialize_llm_provider():
-            logger.error("❌ LLM provider initialization failed")
+        logger.info("🔧 Initializing LLM client...")
+        if not self._initialize_llm_client():
+            logger.error("❌ LLM client initialization failed")
             self._safe_emit_finished({
                 "total": len(self.markdown_files),
                 "processed": 0,
@@ -218,17 +216,17 @@ class LLMSummaryThread(QThread):
                 "failed": len(self.markdown_files),
                 "files": [],
                 "status": "error",
-                "message": "LLM provider initialization failed. No files processed."
+                "message": "LLM client initialization failed. No files processed."
             })
             return
-        logger.info("✅ LLM provider initialization successful")
+        logger.info("✅ LLM client initialization successful")
 
         try:
-            logger.info("🔍 Checking LLM provider availability...")
-            if not self.llm_provider or not self.llm_provider.initialized:
-                logger.error(f"❌ LLM provider not available - provider: {self.llm_provider}, initialized: {self.llm_provider.initialized if self.llm_provider else 'N/A'}")
+            logger.info("🔍 Checking LLM client availability...")
+            if not self.llm_client or not self.llm_client.is_initialized:
+                logger.error(f"❌ LLM client not available - client: {self.llm_client}, initialized: {self.llm_client.is_initialized if self.llm_client else 'N/A'}")
                 for markdown_path in self.markdown_files:
-                    self.file_error.emit(f"LLM provider not available for {os.path.basename(markdown_path)}.")
+                    self.file_error.emit(f"LLM client not available for {os.path.basename(markdown_path)}.")
                 self._safe_emit_finished({
                     "total": len(self.markdown_files),
                     "processed": 0,
@@ -236,11 +234,11 @@ class LLMSummaryThread(QThread):
                     "failed": len(self.markdown_files),
                     "files": [],
                     "status": "error",
-                    "message": "LLM provider became unavailable. No files processed."
+                    "message": "LLM client became unavailable. No files processed."
                 })    
                 return
             
-            logger.info(f"✅ LLM provider available - Provider: {self.llm_provider.__class__.__name__}")
+            logger.info(f"✅ LLM client available - Provider: {self.llm_client.provider}")
             logger.info("📡 Emitting initial progress signal...")
             self._safe_emit_progress(
                 0, f"Starting LLM summarization for {len(self.markdown_files)} files"
@@ -298,8 +296,8 @@ class LLMSummaryThread(QThread):
                         20, f"Successfully read file contents: {len(markdown_content)} bytes"
                     )
 
-                    logger.info(f"🤖 Starting summarization with {self.llm_provider.__class__.__name__}")
-                    self._safe_emit_file_progress(30, f"Summarizing: {current_file_basename} with {self.llm_provider.__class__.__name__}")
+                    logger.info(f"🤖 Starting summarization with {self.llm_client.provider}")
+                    self._safe_emit_file_progress(30, f"Summarizing: {current_file_basename} with {self.llm_client.provider}")
                     
                     logger.info("🔄 Calling summarize_markdown_file...")
                     summary_content = self.summarize_markdown_file(
@@ -450,31 +448,31 @@ Please include:
         try:
             logger.info("🔄 Starting process_api_response...")
             
-            # First check if the LLM provider is properly initialized
-            if not self.llm_provider:
-                raise Exception("LLM provider not initialized")
+            # First check if the LLM client is properly initialized
+            if not self.llm_client:
+                raise Exception("LLM client not initialized")
 
-            if not self.llm_provider.initialized:
-                raise Exception("LLM provider not properly initialized")
+            if not self.llm_client.is_initialized:
+                raise Exception("LLM client not properly initialized")
 
             # Log request details
-            provider_name = self.llm_provider.__class__.__name__
-            logger.info(f"📡 Making API request to provider: {provider_name}")
+            provider = getattr(self.llm_client, "provider", "unknown")
+            logger.info(f"📡 Making API request to provider: {provider}")
             logger.info(f"📏 Prompt length: {len(prompt)} characters")
             logger.info(f"📏 System prompt length: {len(system_prompt)} characters")
             
-            # Generate the response using the configured provider
-            logger.info("🚀 Calling llm_provider.generate...")
+            # Generate the response using the configured client
+            logger.info("🚀 Calling llm_client.generate_response...")
             
             # Track the start time for timeout monitoring
             api_start_time = time.time()
             
             # Emit progress updates during long API calls
             if self.status_panel:
-                self.status_panel.append_details(f"📡 Making API request to {provider_name}...")
+                self.status_panel.append_details(f"📡 Making API request to {provider}...")
             
-            response = self.llm_provider.generate(
-                prompt=prompt,
+            response = self.llm_client.generate_response(
+                prompt_text=prompt,
                 system_prompt=system_prompt,
                 temperature=0.1,
                 model=self.llm_model_name,  # Add model parameter for Azure OpenAI
@@ -590,7 +588,7 @@ Please include:
                 # Only count tokens with API if the document might be near our chunking threshold
                 if estimated_tokens > 25000:  # Lower threshold for safety
                     logger.info("🔢 Document large enough for API token counting...")
-                    token_count_result = count_tokens_cached(self.llm_provider, text=markdown_content)
+                    token_count_result = cached_count_tokens(self.llm_client, text=markdown_content)
                     if not token_count_result["success"]:
                         logger.warning("⚠️ API token counting failed, using character-based estimation")
                         # Use character-based estimation as fallback
@@ -614,16 +612,12 @@ Please include:
                 logger.info(f"📊 Document requires chunking - Token count: {token_count['token_count']}")
                 try:
                     logger.info("✂️ Starting document chunking...")
-                    # Use markdown-aware chunking
-                    # Get model context window to determine chunk size
-                    context_window = TokenCounter.get_model_context_window(self.llm_model_name)
-                    # Use a conservative chunk size (leave room for prompts)
-                    max_tokens_per_chunk = int(context_window * 0.5)
-                    
-                    chunks = ChunkingStrategy.markdown_headers(
-                        text=markdown_content,
-                        max_tokens=max_tokens_per_chunk,
-                        overlap=2000 * 4  # Convert overlap tokens to characters (approx)
+                    # Use model-aware chunking
+                    chunks = chunk_document_with_overlap(
+                        markdown_content,
+                        client=self.llm_client,
+                        model_name=self.llm_model_name,  # Pass model name for dynamic sizing
+                        overlap=2000,  # Overlap for better continuity
                     )
                     logger.info(f"✅ Document split into {len(chunks)} chunks")
                     
@@ -802,11 +796,11 @@ Please analyze all the chunk summaries and create a unified, coherent summary of
                         logging.error(f"Error loading system prompt template: {e}")
                         system_prompt = f"You are analyzing documents for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
 
-                    # Check if API provider is initialized
-                    if not self.llm_provider:
-                        self._initialize_llm_provider()
-                        if not self.llm_provider:
-                            raise Exception("Failed to initialize LLM provider")
+                    # Check if API client is initialized
+                    if not self.llm_client:
+                        self._initialize_llm_client()
+                        if not self.llm_client:
+                            raise Exception("Failed to initialize LLM client")
 
                     # Process with LLM
                     final_content = self.process_api_response(prompt, system_prompt)

@@ -7,7 +7,7 @@ This package provides a clean, modular interface for working with various LLM pr
 
 from .base import BaseLLMProvider
 from .chunking import ChunkingStrategy
-from .tokens import TokenCounter, MODEL_CONTEXT_WINDOWS
+from .tokens import TokenCounter, MODEL_CONTEXT_WINDOWS, count_tokens_cached
 from .factory import create_provider, get_available_providers
 
 __all__ = [
@@ -15,6 +15,7 @@ __all__ = [
     'ChunkingStrategy',
     'TokenCounter',
     'MODEL_CONTEXT_WINDOWS',
+    'count_tokens_cached',
     'create_provider',
     'get_available_providers',
 ]

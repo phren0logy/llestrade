@@ -9,7 +9,7 @@ from datetime import datetime
 from PySide6.QtCore import QThread, Signal
 
 from file_utils import write_file_content
-from llm.factory import create_provider
+from llm_utils_compat import LLMClientFactory
 
 
 class PromptRunnerThread(QThread):
@@ -25,7 +25,7 @@ class PromptRunnerThread(QThread):
         self.prompts = prompts
         self.output_dir = output_dir
         self.transcript_path = transcript_path
-        self.llm_provider = create_provider(provider="auto")
+        self.llm_client = LLMClientFactory.create_client(provider="auto")
 
     def run(self):
         """Run the prompts through the LLM and save results."""
@@ -69,8 +69,8 @@ class PromptRunnerThread(QThread):
                     )
 
                     # Send prompt to Claude
-                    response = self.llm_provider.generate(
-                        prompt=prompt["content"],
+                    response = self.llm_client.generate_response(
+                        prompt_text=prompt["content"],
                         temperature=0.1,
                     )
 
