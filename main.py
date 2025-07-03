@@ -5,6 +5,10 @@ Brings together all UI components and implements the main window functionality.
 
 import os
 import sys
+import faulthandler
+
+# Enable faulthandler to get Python stack trace on segfault
+faulthandler.enable()
 
 # Configure clean startup before other imports
 from src.config.startup_config import clean_startup
@@ -275,6 +279,13 @@ def main():
         
         if reply == QMessageBox.Yes:
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(recent_crash)))
+        
+        # Delete the crash file after showing the dialog (whether Yes or No)
+        try:
+            recent_crash.unlink()
+            logger.info(f"Deleted crash report: {recent_crash}")
+        except Exception as e:
+            logger.warning(f"Could not delete crash report {recent_crash}: {e}")
     
     # Create main window
     main_window = ForensicReportDrafterApp()

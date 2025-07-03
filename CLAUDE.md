@@ -95,6 +95,7 @@ forensic-report-drafter/
 2. **LLM Integration** (`llm/` directory)
 
    **Modular Structure**:
+
    - `llm/base.py`: Abstract base provider class with Qt patterns (signals, properties)
    - `llm/providers/`:
      - `anthropic.py`: AnthropicProvider with native PDF and extended thinking support
@@ -103,8 +104,9 @@ forensic-report-drafter/
    - `llm/chunking.py`: Markdown-aware chunking using langchain-text-splitters
    - `llm/tokens.py`: Centralized token counting with LRU caching
    - `llm/factory.py`: Provider factory with Qt-style patterns
-   
+
    **Key Features**:
+
    - Token counting with caching via `TokenCounter.count()` and `count_tokens_cached()`
    - Model-aware chunking via `ChunkingStrategy.markdown_headers()` with header preservation
    - `MODEL_CONTEXT_WINDOWS`: Dictionary of model token limits (using 65% for safety)
@@ -181,12 +183,23 @@ OPENAI_API_VERSION=2025-01-01-preview
 
 4. **macOS Qt plugin issues**: `main.py` sets `QT_PLUGIN_PATH` before importing PySide6.
 
+5. **macOS Tahoe (2025-07-03) - Thread Safety & Memory Issues** [UNDER INVESTIGATION]:
+   - **NSWindow main thread error**: Fixed by using Qt signals for all UI operations in exception handler
+   - **malloc double-free error**: Ongoing investigation - occurs with both Azure OpenAI and Anthropic providers
+   - Debug tools added:
+     - `faulthandler` enabled in main.py for crash stack traces
+     - `run_debug.sh` script with memory debugging environment variables
+     - Memory usage logging in `llm_summary_thread.py` 
+     - `test_memory_crash.py` minimal reproduction script
+   - Run with `./run_debug.sh` to enable full debugging
+   - The issue appears to be Qt/PySide6 memory management, not provider-specific
+
 ## Development Notes
 
 - Temperature settings are configured per task (0.1 for summaries, 0.7 for refinements)
 - Document chunking is model-aware - uses 65% of the model's context window for safety
   - GPT-4.1: ~650,000 tokens per chunk
-  - Claude Sonnet 4: ~130,000 tokens per chunk  
+  - Claude Sonnet 4: ~130,000 tokens per chunk
   - Gemini 2.5 Pro: ~1,300,000 tokens per chunk
 - Chunking with 2,000 token overlap for continuity
 - Integrated analysis now supports chunking for large document sets
@@ -198,17 +211,22 @@ OPENAI_API_VERSION=2025-01-01-preview
 ### Startup Configuration
 
 The application uses `startup_config.py` to provide a clean startup experience:
+
 - Reduces logging verbosity for LLM provider initialization
 - Hides Qt plugin warnings unless debugging is enabled
 
 To enable debug output, set these environment variables:
+
 - `DEBUG=true` - General debug output
 - `DEBUG_LLM=true` - LLM provider debug logging
 - `DEBUG_QT=true` - Qt plugin debug output
 
+Logs and crash reports are in `~/.forensic_report_drafter/`
+
 ## LLM Module Architecture
 
 ### Current State (2025-07-03)
+
 - All code now uses the new modular `llm/` package directly
 - Migration from `llm_utils_compat.py` completed
 - Clean, modular structure with Qt integration patterns
@@ -241,6 +259,7 @@ combined = combine_transcript_with_fragments(transcript, fragment)
 ```
 
 ### Qt Integration Patterns
+
 - All providers inherit from `BaseProvider(QObject)`
 - Providers emit Qt signals for async operations
 - Factory uses Qt-style naming conventions

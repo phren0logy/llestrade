@@ -27,6 +27,16 @@ from llm.chunking import ChunkingStrategy
 from src.core.prompt_manager import PromptManager
 from .base_worker_thread import BaseWorkerThread
 
+# Memory debugging imports
+try:
+    import psutil
+    import tracemalloc
+    MEMORY_DEBUG = True
+except ImportError:
+    MEMORY_DEBUG = False
+    psutil = None
+    tracemalloc = None
+
 # Set up logger for this module
 logger = logging.getLogger(__name__)
 
@@ -108,12 +118,28 @@ class LLMSummaryThread(BaseWorkerThread):
         """Clean up resources to prevent memory leaks."""
         try:
             self.cancel()
-            self.llm_provider = None
-            gc.collect()  # Force garbage collection
+            
+            # Safely clean up LLM provider
+            if hasattr(self, 'llm_provider') and self.llm_provider is not None:
+                # Disconnect any signals if connected
+                try:
+                    if hasattr(self.llm_provider, 'deleteLater'):
+                        self.llm_provider.deleteLater()
+                except Exception:
+                    pass
+                self.llm_provider = None
+            
+            # Clear any cached data
+            self.markdown_files = []
+            self.output_dir = None
+            
+            # Force garbage collection
+            gc.collect()
+            
             # Call base class cleanup
             super().cleanup()
         except Exception as e:
-            self.self.logger.error(f"Error during cleanup: {e}")
+            self.logger.error(f"Error during cleanup: {e}")
 
     def _initialize_llm_provider(self):
         """Initialize the LLM provider for summarization."""
@@ -443,6 +469,12 @@ Please include:
             self.logger.info(f"📏 Prompt length: {len(prompt)} characters")
             self.logger.info(f"📏 System prompt length: {len(system_prompt)} characters")
             
+            # Log memory usage before API call if debugging
+            if MEMORY_DEBUG and psutil:
+                process = psutil.Process()
+                mem_info = process.memory_info()
+                self.logger.info(f"📊 Memory before API call - RSS: {mem_info.rss / 1024 / 1024:.1f} MB, VMS: {mem_info.vms / 1024 / 1024:.1f} MB")
+            
             # Generate the response using the configured provider
             self.logger.info("🚀 Calling llm_provider.generate...")
             
@@ -463,6 +495,12 @@ Please include:
             # Calculate API call duration
             api_duration = time.time() - api_start_time
             self.logger.info(f"✅ API response received after {api_duration:.1f} seconds")
+            
+            # Log memory usage if debugging
+            if MEMORY_DEBUG and psutil:
+                process = psutil.Process()
+                mem_info = process.memory_info()
+                self.logger.info(f"📊 Memory after API call - RSS: {mem_info.rss / 1024 / 1024:.1f} MB, VMS: {mem_info.vms / 1024 / 1024:.1f} MB")
             
             if self.status_panel:
                 self.status_panel.append_details(f"✅ API response received ({api_duration:.1f}s)")
@@ -487,8 +525,7 @@ Please include:
 
             self.logger.info(f"✅ API response successful - Content length: {len(content)} characters")
             
-            # Return content directly without aggressive cleanup
-            # The aggressive cleanup might be causing the double free
+            # Return content directly
             return content
 
         except Exception as e:
