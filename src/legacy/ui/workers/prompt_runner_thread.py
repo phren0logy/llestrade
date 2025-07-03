@@ -9,7 +9,7 @@ from datetime import datetime
 from PySide6.QtCore import QThread, Signal
 
 from src.core.file_utils import write_file_content
-from llm.factory import create_provider
+from src.common.llm.factory import create_provider
 
 
 class PromptRunnerThread(QThread):

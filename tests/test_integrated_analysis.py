@@ -16,8 +16,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from llm.providers import GeminiProvider
-from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
+from src.common.llm.providers import GeminiProvider
+from src.legacy.ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

@@ -9,8 +9,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Direct imports from new llm package
-from llm.factory import create_provider
-from llm.base import BaseLLMProvider
+from src.common.llm.factory import create_provider
+from src.common.llm.base import BaseLLMProvider
 
 SETTINGS_FILE = "app_settings.json"
 DEFAULT_SETTINGS = {

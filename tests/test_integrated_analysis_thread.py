@@ -13,8 +13,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from llm import create_provider
-from llm.providers.gemini import GeminiProvider
-from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
+from src.common.llm.providers.gemini import GeminiProvider
+from src.legacy.ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

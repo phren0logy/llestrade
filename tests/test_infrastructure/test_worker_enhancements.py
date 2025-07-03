@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QWidget, QVBoxLayout, QPushButton, Q
 from PySide6.QtCore import Signal, Slot
 
 from src.config.logging_config import ApplicationLogger
-from ui.workers.base_worker_thread import BaseWorkerThread
+from src.legacy.ui.workers.base_worker_thread import BaseWorkerThread
 
 
 class TestWorker(BaseWorkerThread):

@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
 from src.config.app_config import get_available_providers_and_models, get_configured_llm_client
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 from llm import create_provider
-from llm.tokens import TokenCounter
+from src.common.llm.tokens import TokenCounter
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.status_panel import StatusPanel
@@ -1422,7 +1422,6 @@ class AnalysisTab(BaseTab):
             subject_name,
             subject_dob,
             case_info,
-            self.status_panel,
             progress_dialog,
             self.selected_llm_provider_id,
             self.selected_llm_model_name
@@ -1432,6 +1431,9 @@ class AnalysisTab(BaseTab):
         )
         self.integrated_analysis_thread.error_signal.connect(
             self.on_integrated_analysis_error
+        )
+        self.integrated_analysis_thread.status_signal.connect(
+            self.on_status_update, Qt.ConnectionType.QueuedConnection
         )
         self.integrated_analysis_thread.start()
 

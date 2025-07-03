@@ -49,7 +49,7 @@ def test_environment():
     # Test imports
     try:
         from app_config import get_configured_llm_client
-        from ui.workers.llm_summary_thread import LLMSummaryThread
+        from src.legacy.ui.workers.llm_summary_thread import LLMSummaryThread
         logger.info("✅ Successfully imported required modules")
     except ImportError as e:
         logger.error(f"❌ Import error: {e}")
@@ -173,7 +173,7 @@ def test_summarization_workflow():
     try:
         from PySide6.QtCore import QCoreApplication
 
-        from ui.workers.llm_summary_thread import LLMSummaryThread
+        from src.legacy.ui.workers.llm_summary_thread import LLMSummaryThread
         
         # Create Qt application (required for QThread)
         app = QCoreApplication.instance()
@@ -196,7 +196,6 @@ def test_summarization_workflow():
             subject_name="Test Patient",
             subject_dob="1990-01-01",
             case_info="Test case for debugging",
-            status_panel=None,  # No UI component
             llm_provider_id="anthropic",
             llm_model_name="claude-3-7-sonnet-latest"
         )

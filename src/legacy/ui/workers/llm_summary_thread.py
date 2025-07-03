@@ -21,9 +21,9 @@ from tenacity import (
 )
 
 from src.config.app_config import get_configured_llm_provider
-from llm.factory import create_provider
-from llm.tokens import count_tokens_cached, TokenCounter
-from llm.chunking import ChunkingStrategy
+from src.common.llm.factory import create_provider
+from src.common.llm.tokens import count_tokens_cached, TokenCounter
+from src.common.llm.chunking import ChunkingStrategy
 from src.core.prompt_manager import PromptManager
 from .base_worker_thread import BaseWorkerThread
 

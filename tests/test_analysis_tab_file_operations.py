@@ -109,7 +109,7 @@ sys_modules_patch.start()
 
 # Import QTimer and other necessities AFTER sys.modules is patched
 # from PySide6.QtCore import QTimer # No longer needed here if analysis_tab imports it
-from ui.analysis_tab import COMBINED_SUMMARY_FILENAME, SUMMARIES_SUBDIR, AnalysisTab
+from src.legacy.ui.analysis_tab import COMBINED_SUMMARY_FILENAME, SUMMARIES_SUBDIR, AnalysisTab
 
 
 class TestAnalysisTabFileOperations(unittest.TestCase):

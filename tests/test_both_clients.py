@@ -8,8 +8,8 @@ import os
 import sys
 
 from llm import create_provider
-from llm.providers.anthropic import AnthropicProvider
-from llm.providers.gemini import GeminiProvider
+from src.common.llm.providers.anthropic import AnthropicProvider
+from src.common.llm.providers.gemini import GeminiProvider
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

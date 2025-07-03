@@ -55,10 +55,10 @@ def main():
 project/
 ├── main.py              # Smart launcher (NEW)
 ├── main_legacy.py       # Current application (RENAMED)
-├── main_new.py          # New simplified UI (TO CREATE)
+├── main_new.py          # New simplified UI (CREATED)
 ├── src/
-│   ├── legacy/          # Current UI code (TO MOVE)
-│   ├── new/             # New UI implementation
+│   ├── legacy/          # Current UI code (MOVED)
+│   ├── new/             # New UI implementation (IN PROGRESS)
 │   │   ├── core/        # Project management, settings
 │   │   ├── stages/      # Stage-based components
 │   │   ├── widgets/     # Reusable widgets
@@ -154,14 +154,22 @@ SimplifiedMainWindow
 1. **Repository Restructuring**
    - [x] Rename main.py to main_legacy.py
    - [x] Create smart launcher main.py
-   - [ ] Move current UI code to src/legacy/
-   - [ ] Create src/new/ structure
-   - [ ] Update imports in legacy code
+   - [x] Move current UI code to src/legacy/
+   - [x] Create src/new/ structure
+   - [x] Update imports in legacy code
 
 2. **Build System Updates**
-   - [ ] Update run scripts for both UIs
+   - [x] Update run scripts for both UIs (run_new_ui.sh, run_app.sh)
    - [ ] Configure pytest for parallel testing
    - [ ] Setup feature flags
+
+3. **Critical Bug Fixes** (NEW - Completed 2025-01-11)
+   - [x] Fix thread safety issues in worker threads
+   - [x] Replace direct UI access with Qt signals
+   - [x] Update LLMSummaryThread to use status_signal
+   - [x] Update IntegratedAnalysisThread to use status_signal
+   - [x] Remove status_panel parameters from constructors
+   - [x] Update test files for new signatures
 
 ### Phase 1: Core Infrastructure (Week 2-3)
 
@@ -674,6 +682,50 @@ class BaseStage(QWidget):
             self.worker = None
 ```
 
+## Recent Improvements
+
+### 2025-01-11 - Phase 1 Complete
+
+### Thread Safety Fixes
+Fixed critical memory crashes caused by direct UI access from worker threads:
+
+1. **LLMSummaryThread**:
+   - Added `_safe_emit_status()` method for thread-safe UI updates
+   - Replaced all direct `status_panel` calls with signal emissions
+   - Removed `status_panel` parameter from constructor
+   - Connected `status_signal` to handler in `analysis_tab.py`
+
+2. **IntegratedAnalysisThread**:
+   - Applied same pattern as LLMSummaryThread
+   - Replaced 32 instances of direct UI access
+   - All UI updates now go through Qt signal/slot mechanism
+
+3. **Test Updates**:
+   - Updated test files to match new constructor signatures
+   - Fixed token counting function references
+   - All tests passing with new thread-safe implementation
+
+These fixes ensure all UI updates happen on the main thread, preventing the malloc double-free errors observed on macOS.
+
+### Directory Reorganization
+1. **Completed Structure**:
+   - Moved UI code to `src/legacy/ui/`
+   - Moved LLM code to `src/common/llm/`
+   - Created `src/new/` hierarchy
+   - Updated all imports using automated script
+   - Created symlinks for backward compatibility
+
+2. **Foundation Classes Created**:
+   - **SecureSettings**: Manages API keys with OS keychain integration
+   - **ProjectManager**: Handles .frpd project files with auto-save
+   - **StageManager**: Controls workflow stages and transitions
+   - **BaseStage**: Abstract base for all workflow stages
+
+3. **New UI Entry Point**:
+   - `main_new.py` created and functional
+   - Basic window with status message
+   - Both UIs accessible via smart launcher
+
 ## PySide6 Best Practices
 
 ### 1. Signal/Slot Patterns
@@ -939,15 +991,16 @@ class AutoUpdater(QObject):
 
 ### Week 1-2: Foundation
 - [x] Create smart launcher system
-- [ ] Reorganize directory structure
+- [x] Fix critical thread safety issues
+- [x] Reorganize directory structure
 - [ ] Setup parallel testing
-- [ ] Create base infrastructure classes
+- [x] Create base infrastructure classes
 
 ### Week 3-4: Core Features
-- [ ] Implement secure settings
-- [ ] Create project manager
-- [ ] Build stage framework
-- [ ] Add cost tracking
+- [x] Implement secure settings (SecureSettings class)
+- [x] Create project manager (ProjectManager class)
+- [x] Build stage framework (StageManager class)
+- [ ] Add cost tracking widget
 
 ### Week 5-6: UI Components
 - [ ] Create all stage widgets
@@ -998,6 +1051,85 @@ class AutoUpdater(QObject):
 ### Technical Debt
 - **Risk**: Accumulating complexity
 - **Mitigation**: Clean architecture, best practices, regular refactoring
+
+## Next Steps (January 2025)
+
+### Immediate Priorities
+
+#### 1. Create First Stage - ProjectSetupStage (2-3 days)
+```python
+# src/new/stages/setup_stage.py
+class ProjectSetupStage(BaseStage):
+    """Initial project setup and metadata collection."""
+    
+    def setup_ui(self):
+        # Case information form
+        # Subject details
+        # Output directory selection
+        # API key configuration check
+```
+
+Key features:
+- Form validation with real-time feedback
+- Recent projects dropdown
+- Template selection
+- API key status indicators
+
+#### 2. Build Workflow Sidebar (2 days)
+- Visual progress indicator showing all stages
+- Clickable stages (when accessible)
+- Completion checkmarks
+- Current stage highlighting
+- Time estimates per stage
+
+#### 3. Implement Cost Tracking Widget (1 day)
+- Real-time cost display in status bar
+- Breakdown by provider and stage
+- Export cost report functionality
+- Cost estimation before operations
+
+#### 4. Create Welcome Screen (2 days)
+- Recent projects grid with thumbnails
+- Quick start wizard
+- API key configuration status
+- What's new section
+- Tutorial/help links
+
+### Testing Priorities
+
+1. **Memory Leak Testing**
+   - Create test that cycles through stages repeatedly
+   - Monitor memory usage over time
+   - Verify proper cleanup between stages
+
+2. **API Key Security**
+   - Test keyring integration on all platforms
+   - Verify fallback to encrypted file storage
+   - Test key rotation scenarios
+
+3. **Project File Integrity**
+   - Test auto-save functionality
+   - Verify backup creation
+   - Test recovery from corrupted files
+
+### Architecture Decisions
+
+1. **Worker Thread Pattern**
+   - All stages will use the same worker thread pattern
+   - Standardized progress reporting
+   - Consistent error handling
+   - Proper cancellation support
+
+2. **State Management**
+   - Each stage responsible for its own state
+   - Project manager as single source of truth
+   - Automatic state persistence on changes
+
+3. **UI Consistency**
+   - Material Design inspired components
+   - Consistent color scheme
+   - Responsive layouts
+   - Accessibility considerations
 
 ## Conclusion
 

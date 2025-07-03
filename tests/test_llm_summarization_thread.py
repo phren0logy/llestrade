@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ui.workers.llm_summary_thread import LLMSummaryThread
+from src.legacy.ui.workers.llm_summary_thread import LLMSummaryThread
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -27,7 +27,7 @@ class TestLLMSummarizationThread:
     def mock_llm_client(self):
         """Create a mock LLM client for testing."""
         mock_client = MagicMock()
-        mock_client.is_initialized = True
+        mock_client.initialized = True
         mock_client.provider = "anthropic"
         
         def mock_generate_response(*args, **kwargs):
@@ -113,15 +113,15 @@ Minor vehicle accident reported. No injuries sustained.
         status_panel.append_warning = MagicMock()
         return status_panel
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_client")
-    @patch("ui.workers.llm_summary_thread.cached_count_tokens")
-    def test_successful_summarization_with_status_panel(self, mock_cached_count_tokens, 
-                                                       mock_get_client, mock_llm_client, 
+    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    def test_successful_summarization_with_status_panel(self, mock_count_tokens_cached, 
+                                                       mock_get_provider, mock_llm_client, 
                                                        test_files, mock_status_panel):
         """Test successful summarization with status panel logging."""
         # Setup mocks
-        mock_get_client.return_value = {"client": mock_llm_client}
-        mock_cached_count_tokens.return_value = {"success": True, "token_count": 1000}
+        mock_get_provider.return_value = {"provider": mock_llm_client}
+        mock_count_tokens_cached.return_value = {"success": True, "token_count": 1000}
         
         # Create thread instance
         thread = LLMSummaryThread(
@@ -131,7 +131,6 @@ Minor vehicle accident reported. No injuries sustained.
             subject_name="John Doe",
             subject_dob="1985-03-15",
             case_info="Test case for medical evaluation",
-            status_panel=mock_status_panel,
             llm_provider_id="anthropic",
             llm_model_name="claude-3-7-sonnet-latest"
         )
@@ -189,15 +188,15 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_client")
-    @patch("ui.workers.llm_summary_thread.cached_count_tokens")
-    def test_successful_summarization_without_status_panel(self, mock_cached_count_tokens, 
-                                                          mock_get_client, mock_llm_client, 
+    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    def test_successful_summarization_without_status_panel(self, mock_count_tokens_cached, 
+                                                          mock_get_provider, mock_llm_client, 
                                                           test_files):
         """Test successful summarization without status panel (None) - this was the bug we fixed."""
         # Setup mocks
-        mock_get_client.return_value = {"client": mock_llm_client}
-        mock_cached_count_tokens.return_value = {"success": True, "token_count": 1000}
+        mock_get_provider.return_value = {"provider": mock_llm_client}
+        mock_count_tokens_cached.return_value = {"success": True, "token_count": 1000}
         
         # Create thread instance with None status panel
         thread = LLMSummaryThread(
@@ -207,7 +206,6 @@ Minor vehicle accident reported. No injuries sustained.
             subject_name="John Doe",
             subject_dob="1985-03-15",
             case_info="Test case for medical evaluation",
-            status_panel=None,  # This should not cause crashes anymore
             llm_provider_id="anthropic",
             llm_model_name="claude-3-7-sonnet-latest"
         )
@@ -239,11 +237,11 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_client")
-    def test_llm_client_initialization_failure(self, mock_get_client, test_files, mock_status_panel):
+    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
+    def test_llm_client_initialization_failure(self, mock_get_provider, test_files, mock_status_panel):
         """Test behavior when LLM client initialization fails."""
         # Setup mock to return None (initialization failure)
-        mock_get_client.return_value = None
+        mock_get_provider.return_value = None
         
         # Create thread instance
         thread = LLMSummaryThread(
@@ -253,7 +251,6 @@ Minor vehicle accident reported. No injuries sustained.
             subject_name="John Doe",
             subject_dob="1985-03-15",
             case_info="Test case for medical evaluation",
-            status_panel=mock_status_panel,
             llm_provider_id="anthropic",
             llm_model_name="claude-3-7-sonnet-latest"
         )
@@ -284,14 +281,14 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_client")
-    @patch("ui.workers.llm_summary_thread.cached_count_tokens")
-    def test_skip_existing_files(self, mock_cached_count_tokens, mock_get_client, 
+    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    def test_skip_existing_files(self, mock_count_tokens_cached, mock_get_provider, 
                                 mock_llm_client, test_files, mock_status_panel):
         """Test that existing summary files are skipped."""
         # Setup mocks
-        mock_get_client.return_value = {"client": mock_llm_client}
-        mock_cached_count_tokens.return_value = {"success": True, "token_count": 1000}
+        mock_get_provider.return_value = {"provider": mock_llm_client}
+        mock_count_tokens_cached.return_value = {"success": True, "token_count": 1000}
         
         # Create one existing summary file
         existing_summary = test_files["expected_summaries"][0]
@@ -306,7 +303,6 @@ Minor vehicle accident reported. No injuries sustained.
             subject_name="John Doe",
             subject_dob="1985-03-15",
             case_info="Test case for medical evaluation",
-            status_panel=mock_status_panel,
             llm_provider_id="anthropic",
             llm_model_name="claude-3-7-sonnet-latest"
         )
@@ -336,14 +332,14 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_client")
-    @patch("ui.workers.llm_summary_thread.cached_count_tokens")
-    def test_llm_api_error_handling(self, mock_cached_count_tokens, mock_get_client, 
+    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    def test_llm_api_error_handling(self, mock_count_tokens_cached, mock_get_provider, 
                                    test_files, mock_status_panel):
         """Test handling of LLM API errors."""
         # Create mock client that returns errors
         mock_client = MagicMock()
-        mock_client.is_initialized = True
+        mock_client.initialized = True
         mock_client.provider = "anthropic"
         
         def mock_generate_error_response(*args, **kwargs):
@@ -359,7 +355,7 @@ Minor vehicle accident reported. No injuries sustained.
         
         # Setup mocks
         mock_get_client.return_value = {"client": mock_client}
-        mock_cached_count_tokens.return_value = {"success": True, "token_count": 1000}
+        mock_count_tokens_cached.return_value = {"success": True, "token_count": 1000}
         
         # Create thread instance with only one file to avoid excessive errors
         thread = LLMSummaryThread(
@@ -369,7 +365,6 @@ Minor vehicle accident reported. No injuries sustained.
             subject_name="John Doe",
             subject_dob="1985-03-15",
             case_info="Test case for medical evaluation",
-            status_panel=mock_status_panel,
             llm_provider_id="anthropic",
             llm_model_name="claude-3-7-sonnet-latest"
         )
@@ -412,7 +407,6 @@ Minor vehicle accident reported. No injuries sustained.
             subject_name="John Doe",
             subject_dob="1985-03-15",
             case_info="Test case for medical evaluation",
-            status_panel=mock_status_panel,
             llm_provider_id="anthropic",
             llm_model_name="claude-3-7-sonnet-latest"
         )

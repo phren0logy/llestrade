@@ -18,8 +18,8 @@ import psutil
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from llm import create_provider
-from llm.chunking import ChunkingStrategy
-from llm.tokens import TokenCounter
+from src.common.llm.chunking import ChunkingStrategy
+from src.common.llm.tokens import TokenCounter
 
 # Configure logging
 logging.basicConfig(

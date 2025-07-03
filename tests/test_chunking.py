@@ -3,7 +3,7 @@ import sys
 import os
 sys.path.append(os.path.abspath("."))  # Add the project root to the path
 
-from ui.workers.llm_summary_thread import chunk_document_with_overlap
+from src.legacy.ui.workers.llm_summary_thread import chunk_document_with_overlap
 
 class MockClient:
     def __init__(self):

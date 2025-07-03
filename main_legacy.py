@@ -100,17 +100,17 @@ from src.config.config import APP_TITLE, APP_VERSION, setup_environment_variable
 
 # Import utility modules
 from llm import create_provider
-from llm.tokens import TokenCounter
-from ui.analysis_tab import AnalysisTab
-from ui.pdf_processing_tab import PDFProcessingTab
+from src.common.llm.tokens import TokenCounter
+from src.legacy.ui.analysis_tab import AnalysisTab
+from src.legacy.ui.pdf_processing_tab import PDFProcessingTab
 
 # Import UI tab modules
-from ui.prompts_tab import PromptsTab
-from ui.refinement_tab import RefinementTab
-from ui.testing_tab import TestingTab
+from src.legacy.ui.prompts_tab import PromptsTab
+from src.legacy.ui.refinement_tab import RefinementTab
+from src.legacy.ui.testing_tab import TestingTab
 
 # Import debug dashboard if running in debug mode
-from ui.debug_dashboard import DebugDashboard
+from src.legacy.ui.debug_dashboard import DebugDashboard
 
 
 class ForensicReportDrafterApp(QMainWindow):

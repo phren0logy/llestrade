@@ -13,11 +13,12 @@ from PySide6.QtCore import QObject, QThread, Signal
 
 from src.config.app_config import get_configured_llm_provider
 from .base_worker_thread import BaseWorkerThread
-from llm.providers import AnthropicProvider, GeminiProvider
-from llm.base import BaseLLMProvider
-from llm.factory import create_provider
-from llm.tokens import count_tokens_cached, TokenCounter
-from llm.chunking import ChunkingStrategy
+from PySide6.QtCore import Qt
+from src.common.llm.providers import AnthropicProvider, GeminiProvider
+from src.common.llm.base import BaseLLMProvider
+from src.common.llm.factory import create_provider
+from src.common.llm.tokens import count_tokens_cached, TokenCounter
+from src.common.llm.chunking import ChunkingStrategy
 from src.core.prompt_manager import PromptManager
 
 
@@ -35,7 +36,6 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                  subject_name, 
                  subject_dob, 
                  case_info,
-                 status_panel, 
                  progress_dialog, # This is QProgressDialog instance
                  llm_provider_id, 
                  llm_model_name):
@@ -47,7 +47,6 @@ class IntegratedAnalysisThread(BaseWorkerThread):
         self.subject_name = subject_name
         self.subject_dob = subject_dob
         self.case_info = case_info
-        self.status_panel = status_panel
         self.progress_dialog = progress_dialog # Store the QProgressDialog
         self.llm_provider_id = llm_provider_id
         self.llm_model_name = llm_model_name
@@ -56,11 +55,18 @@ class IntegratedAnalysisThread(BaseWorkerThread):
         self.llm_provider_label: Optional[str] = None
         self.llm_effective_model: Optional[str] = None
 
+    def _safe_emit_status(self, message: str, message_type: str = "info"):
+        """Safely emit status updates via signal instead of direct UI access."""
+        self.status_signal.emit({
+            "type": message_type,
+            "message": message
+        })
+
     def _initialize_llm_provider(self) -> bool:
         """Initialize LLM provider using specified provider and model."""
         try:
             self.progress_signal.emit(5, f"Initializing LLM: {self.llm_provider_id} ({self.llm_model_name})...")
-            self.status_panel.append_details(
+            self._safe_emit_status(
                 f"Attempting to initialize LLM provider for integrated analysis: Provider ID: {self.llm_provider_id}, Model: {self.llm_model_name}"
             )
             
@@ -74,26 +80,26 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                 if self.llm_provider.initialized:
                     self.llm_provider_label = provider_info.get("provider_label", self.llm_provider_id)
                     self.llm_effective_model = provider_info.get("effective_model_name", self.llm_model_name)
-                    self.status_panel.append_details(
+                    self._safe_emit_status(
                         f"Successfully initialized LLM provider: {self.llm_provider_label} ({self.llm_effective_model}) for integrated analysis."
                     )
                     self.progress_signal.emit(10, f"LLM provider {self.llm_provider_label} initialized.")
                     return True
                 else:
                     error_msg = f"LLM provider for {provider_info.get('provider_label', self.llm_provider_id)} could not be initialized (initialized flag is false)."
-                    self.status_panel.append_error(error_msg)
+                    self._safe_emit_status(error_msg, "error")
                     logging.error(error_msg)
                     self.error_signal.emit(error_msg)
                     return False
             else:
                 error_msg = f"Failed to get configured LLM provider for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
-                self.status_panel.append_error(error_msg)
+                self._safe_emit_status(error_msg, "error")
                 logging.error(error_msg)
                 self.error_signal.emit(error_msg)
                 return False
         except Exception as e:
             error_msg = f"Exception initializing LLM provider ({self.llm_provider_id}/{self.llm_model_name}) for integrated analysis: {str(e)}"
-            self.status_panel.append_error(error_msg)
+            self._safe_emit_status(error_msg, "error")
             logging.exception(error_msg)
             self.error_signal.emit(error_msg)
             return False
@@ -107,7 +113,7 @@ class IntegratedAnalysisThread(BaseWorkerThread):
 
         if not self.llm_provider or not self.llm_provider.initialized:
             err_msg = "LLM provider not initialized. Cannot process API response."
-            self.status_panel.append_error(err_msg)
+            self._safe_emit_status(err_msg)
             raise Exception(err_msg)
 
         while retry_count < max_retries:
@@ -117,10 +123,10 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                     50,
                     f"Sending request to {provider_name} (Attempt {retry_count + 1}/{max_retries})...",
                 )
-                self.status_panel.append_details(f"Sending request to {provider_name} for integrated analysis. Attempt {retry_count + 1}.")
+                self._safe_emit_status(f"Sending request to {provider_name} for integrated analysis. Attempt {retry_count + 1}.")
                 
                 # Log prompt lengths for debugging
-                # self.status_panel.append_details(f"System prompt length: {len(system_prompt)} chars, User prompt length: {len(prompt)} chars")
+                # self._safe_emit_status(f"System prompt length: {len(system_prompt)} chars, User prompt length: {len(prompt)} chars")
 
                 start_time = time.time()
                 api_complete = False
@@ -140,7 +146,7 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                         # The create_provider in llm should handle this, but good to be mindful.
                         # For now, we assume model is generally required or ignored if not applicable by the provider.
 
-                        self.status_panel.append_details(f"Using model: {self.llm_effective_model} with {provider_name}") 
+                        self._safe_emit_status(f"Using model: {self.llm_effective_model} with {provider_name}") 
                         response_data = self.llm_provider.generate(**request_params)
                         api_complete = True
                     except Exception as e:
@@ -171,28 +177,28 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                     raise api_error # Raise the error caught in the thread
 
                 if response_data and response_data.get("success"):
-                    self.status_panel.append_details(f"Successfully received response from {provider_name}.")
+                    self._safe_emit_status(f"Successfully received response from {provider_name}.")
                     self.progress_signal.emit(90, f"Response received from {provider_name}.")
                     return response_data
                 else:
                     error_detail = response_data.get("error", "Unknown API error") if response_data else "No response data"
-                    self.status_panel.append_error(f"API call to {provider_name} failed: {error_detail}")
+                    self._safe_emit_status(f"API call to {provider_name} failed: {error_detail}", "error")
                     if retry_count < max_retries - 1:
-                        self.status_panel.append_details(f"Retrying in {retry_delay}s...")
+                        self._safe_emit_status(f"Retrying in {retry_delay}s...")
                         time.sleep(retry_delay)
                         retry_delay *= 2 # Exponential backoff
                     else:
                          raise Exception(f"API call failed after {max_retries} retries: {error_detail}")
             
             except TimeoutError as te:
-                self.status_panel.append_error(f"Timeout error with {provider_name} (Attempt {retry_count + 1}): {str(te)}")
+                self._safe_emit_status(f"Timeout error with {provider_name} (Attempt {retry_count + 1}): {str(te)}", "error")
                 logging.error(f"TimeoutError during API call: {str(te)}")
                 if retry_count < max_retries - 1:
                     time.sleep(retry_delay)
                 else:
                     raise TimeoutError(f"API request timed out after {max_retries} attempts.")
             except Exception as e:
-                self.status_panel.append_error(f"Error with {provider_name} (Attempt {retry_count + 1}): {str(e)}")
+                self._safe_emit_status(f"Error with {provider_name} (Attempt {retry_count + 1}): {str(e)}", "error")
                 logging.exception(f"Exception during API call to {provider_name}")
                 if retry_count < max_retries - 1:
                     time.sleep(retry_delay)
@@ -212,24 +218,24 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                 return
 
             self.progress_signal.emit(15, "Reading combined summary file...")
-            self.status_panel.append_details(f"Reading combined summary file: {self.combined_summary_path}")
+            self._safe_emit_status(f"Reading combined summary file: {self.combined_summary_path}")
             with open(self.combined_summary_path, "r", encoding="utf-8") as f:
                 combined_content = f.read()
-            self.status_panel.append_details(f"Combined summary length: {len(combined_content)} characters.")
+            self._safe_emit_status(f"Combined summary length: {len(combined_content)} characters.")
 
             # Read original markdown files content
             original_docs_content = ""
             self.progress_signal.emit(20, "Reading original documents...")
-            self.status_panel.append_details(f"Reading {len(self.original_markdown_files)} original documents.")
+            self._safe_emit_status(f"Reading {len(self.original_markdown_files)} original documents.")
             for i, md_file in enumerate(self.original_markdown_files):
                 try:
                     with open(md_file, "r", encoding="utf-8") as f_md:
                         content = f_md.read()
                         original_docs_content += f"\n\n--- DOCUMENT: {os.path.basename(md_file)} ---\n\n{content}"
-                    self.status_panel.append_details(f"Read original document: {os.path.basename(md_file)} ({len(content)} chars)")
+                    self._safe_emit_status(f"Read original document: {os.path.basename(md_file)} ({len(content)} chars)")
                 except Exception as e:
-                    self.status_panel.append_warning(f"Could not read original document {os.path.basename(md_file)}: {e}")    
-            self.status_panel.append_details(f"Total original documents content length: {len(original_docs_content)} characters.")
+                    self._safe_emit_status(f"Could not read original document {os.path.basename(md_file)}: {e}", "warning")    
+            self._safe_emit_status(f"Total original documents content length: {len(original_docs_content)} characters.")
 
             self.progress_signal.emit(25, "Checking content size for chunking...")
             
@@ -238,14 +244,14 @@ class IntegratedAnalysisThread(BaseWorkerThread):
             
             # Estimate token count
             estimated_tokens = len(total_content) // 4
-            self.status_panel.append_details(f"Estimated total tokens: {estimated_tokens}")
+            self._safe_emit_status(f"Estimated total tokens: {estimated_tokens}")
             
             # Check if content fits in a single request (leaving room for prompts)
             if estimated_tokens < 50000:  # Conservative threshold
                 # Process as single request
                 self.progress_signal.emit(30, "Creating integrated analysis prompt...")
                 prompt_text, system_prompt = self.create_integrated_prompt(combined_content, original_docs_content)
-                self.status_panel.append_details("Integrated analysis prompt created.")
+                self._safe_emit_status("Integrated analysis prompt created.")
                 
                 self.progress_signal.emit(35, "Requesting integrated analysis from LLM...")
                 response = self.process_api_response(prompt=prompt_text, system_prompt=system_prompt)
@@ -257,12 +263,12 @@ class IntegratedAnalysisThread(BaseWorkerThread):
             else:
                 # Process with chunking
                 self.progress_signal.emit(30, "Content too large, using chunked processing...")
-                self.status_panel.append_details("Content exceeds single request limit, using chunked processing...")
+                self._safe_emit_status("Content exceeds single request limit, using chunked processing...")
                 integrated_analysis_content = self.process_with_chunks(combined_content, original_docs_content)
             
             if integrated_analysis_content:
                 if not integrated_analysis_content.strip():
-                    self.status_panel.append_error("LLM returned an empty integrated analysis.")
+                    self._safe_emit_status("LLM returned an empty integrated analysis.")
                     self.finished_signal.emit(False, "LLM returned an empty analysis.", "")
                     return
 
@@ -275,18 +281,18 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                 with open(str(output_path), "w", encoding="utf-8") as f:
                     f.write(integrated_analysis_content)
                 
-                self.status_panel.append_details(f"Integrated analysis saved to: {output_path}")
+                self._safe_emit_status(f"Integrated analysis saved to: {output_path}")
                 self.progress_signal.emit(100, "Integrated analysis complete.")
                 self.finished_signal.emit(True, "Integrated analysis generated successfully.", str(output_path))
             else:
                 error_msg = response.get("error", "Integrated analysis failed. No content generated or API error.") if response else "Integrated analysis failed due to API communication issue."
-                self.status_panel.append_error(f"Failed to generate integrated analysis: {error_msg}")
+                self._safe_emit_status(f"Failed to generate integrated analysis: {error_msg}")
                 self.finished_signal.emit(False, error_msg, "")
 
         except Exception as e:
             error_msg = f"Error during integrated analysis: {str(e)}"
             logging.exception(error_msg)
-            self.status_panel.append_error(error_msg)
+            self._safe_emit_status(error_msg, "error")
             self.error_signal.emit(error_msg)
             self.finished_signal.emit(False, error_msg, "")
 
@@ -326,7 +332,7 @@ class IntegratedAnalysisThread(BaseWorkerThread):
         """
         try:
             # First, process summaries only
-            self.status_panel.append_details("Processing document summaries...")
+            self._safe_emit_status("Processing document summaries...")
             self.progress_signal.emit(40, "Analyzing summaries...")
             
             # Create chunks of the combined summaries
@@ -341,7 +347,7 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                 overlap=2000 * 4  # Convert overlap tokens to characters (approx)
             )
             
-            self.status_panel.append_details(f"Summaries split into {len(summary_chunks)} chunks")
+            self._safe_emit_status(f"Summaries split into {len(summary_chunks)} chunks")
             
             # Process each summary chunk
             chunk_analyses = []
@@ -373,7 +379,7 @@ Extract and organize the most clinically relevant information. This is an interm
                 if response and response.get("success"):
                     chunk_analyses.append(response.get("content", ""))
                 else:
-                    self.status_panel.append_error(f"Failed to process chunk {i+1}")
+                    self._safe_emit_status(f"Failed to process chunk {i+1}")
                     return None
             
             # Combine chunk analyses
@@ -418,10 +424,10 @@ Maintain professional standards and ensure all sections are thoroughly addressed
             if final_response and final_response.get("success"):
                 return final_response.get("content", "")
             else:
-                self.status_panel.append_error("Failed to generate final integrated analysis")
+                self._safe_emit_status("Failed to generate final integrated analysis")
                 return None
                 
         except Exception as e:
-            self.status_panel.append_error(f"Error in chunked processing: {str(e)}")
+            self._safe_emit_status(f"Error in chunked processing: {str(e)}")
             logging.exception("Error in process_with_chunks")
             return None

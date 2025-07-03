@@ -12,8 +12,8 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton, QVBoxLayou
 from PySide6.QtCore import Qt, QTimer
 
 from src.config.logging_config import ApplicationLogger
-from ui.debug_dashboard import DebugDashboard
-from ui.workers.base_worker_thread import BaseWorkerThread
+from src.legacy.ui.debug_dashboard import DebugDashboard
+from src.legacy.ui.workers.base_worker_thread import BaseWorkerThread
 
 
 class TestWorker(BaseWorkerThread):

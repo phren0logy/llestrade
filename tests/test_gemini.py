@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Import our LLM utils
 from llm import create_provider
-from llm.providers.gemini import GeminiProvider
+from src.common.llm.providers.gemini import GeminiProvider
 
 # Test direct Google Generative AI import
 try:

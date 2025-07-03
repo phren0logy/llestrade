@@ -124,7 +124,7 @@ sys_modules_patch.start()
 # --- End Comprehensive Mocking Setup ---
 
 # Import QTimer and other necessities AFTER sys.modules is patched
-from ui.analysis_tab import COMBINED_SUMMARY_FILENAME, SUMMARIES_SUBDIR, AnalysisTab
+from src.legacy.ui.analysis_tab import COMBINED_SUMMARY_FILENAME, SUMMARIES_SUBDIR, AnalysisTab
 
 
 class TestAnalysisTabFileOperations(unittest.TestCase):

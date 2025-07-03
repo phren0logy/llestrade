@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
+from src.legacy.ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
 
 # Configure logging
 logging.basicConfig(
