@@ -94,8 +94,9 @@ class SimplifiedMainWindow(QMainWindow):
     def _startup(self):
         """Handle application startup."""
         # Register stages
-        from src.new.stages import ProjectSetupStage
+        from src.new.stages import ProjectSetupStage, DocumentImportStage
         self.stage_manager.register_stage('setup', ProjectSetupStage)
+        self.stage_manager.register_stage('import', DocumentImportStage)
         
         # Connect stage manager signals
         self.stage_manager.can_go_back_changed.connect(

@@ -3,107 +3,76 @@
 ## Overview
 This plan outlines the step-by-step migration from the current tab-based architecture to a simplified, stage-based workflow that addresses memory management issues and improves stability.
 
-## Phase 1: Foundation (Week 1)
+## Status Update (January 11, 2025)
+- ✅ Phase 1 Complete: Foundation infrastructure built
+- ✅ Thread safety issues fixed in legacy app
+- ✅ Project structure reorganized for parallel development
+- 🚧 Phase 2 In Progress: ProjectSetupStage and DocumentImportStage completed
 
-### 1.1 Project Infrastructure
-```python
-# src/core/project_manager.py
-class ProjectManager:
-    """Manages project files and state persistence"""
-    
-    def create_project(self, path: Path, metadata: dict) -> Project
-    def load_project(self, project_file: Path) -> Project
-    def save_project(self, project: Project) -> None
-    def auto_save(self) -> None  # Called periodically
-    
-# src/core/project.py
-@dataclass
-class Project:
-    """Project data model"""
-    version: str
-    project_id: str
-    metadata: ProjectMetadata
-    settings: ProjectSettings
-    workflow_state: WorkflowState
-    paths: ProjectPaths
-```
+## Phase 1: Foundation (Week 1) ✅ COMPLETED
 
-### 1.2 Stage Management Framework
-```python
-# src/ui/stage_manager.py
-class StageManager(QObject):
-    """Controls stage transitions and lifecycle"""
-    
-    stage_changed = Signal(str)
-    
-    def __init__(self, main_window):
-        self.main_window = main_window
-        self.current_stage = None
-        self.stages = {
-            'setup': ProjectSetupStage,
-            'import': DocumentImportStage,
-            'process': DocumentProcessingStage,
-            'analyze': AnalysisStage,
-            'generate': ReportGenerationStage,
-            'refine': RefinementStage
-        }
-    
-    def load_stage(self, stage_name: str) -> None
-    def cleanup_current_stage(self) -> None
-    def can_proceed(self) -> bool
-    def can_go_back(self) -> bool
+### 1.1 Project Infrastructure ✅
+Implemented in `src/new/core/project_manager.py`:
+- **ProjectManager**: Handles .frpd files with auto-save every 60 seconds
+- **ProjectMetadata**: Dataclass for case information
+- **ProjectCosts**: Tracks costs by provider and stage
+- **WorkflowState**: Manages stage progression
+- Automatic backup system (keeps last 10 versions)
+- Project directory structure creation
 
-# src/ui/base_stage.py
-class BaseStage(QWidget):
-    """Base class for all workflow stages"""
-    
-    progress = Signal(int, str)
-    completed = Signal(dict)
-    error = Signal(str)
-    
-    def __init__(self, project: Project):
-        self.project = project
-        self.worker = None
-        
-    def validate(self) -> tuple[bool, str]
-    def save_state(self) -> None
-    def cleanup(self) -> None
-    def stop_operations(self) -> None
-```
+### 1.2 Stage Management Framework ✅
+Implemented in `src/new/core/stage_manager.py`:
+- **StageManager**: Controls stage transitions with proper cleanup
+- **BaseStage**: Abstract base class with lifecycle methods
+- Dynamic stage registration system
+- Navigation state management (can_proceed, can_go_back)
+- Signal-based communication for UI updates
+- Automatic resource cleanup between stages
 
-### 1.3 Simplified Main Window
-```python
-# main_v2.py (new file for testing)
-class SimplifiedMainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.project = None
-        self.stage_manager = StageManager(self)
-        self.setup_ui()
-    
-    def setup_ui(self):
-        # Simple layout with sidebar and content area
-        self.central_widget = QWidget()
-        self.main_layout = QHBoxLayout()
-        
-        # Progress sidebar
-        self.progress_sidebar = ProgressSidebar()
-        self.main_layout.addWidget(self.progress_sidebar, 1)
-        
-        # Content area
-        self.content_area = QWidget()
-        self.content_layout = QVBoxLayout(self.content_area)
-        self.main_layout.addWidget(self.content_area, 4)
-        
-        # Navigation
-        self.nav_bar = NavigationBar()
-        self.nav_bar.next_clicked.connect(self.next_stage)
-        self.nav_bar.prev_clicked.connect(self.prev_stage)
-```
+### 1.3 Simplified Main Window ✅
+Implemented in `main_new.py`:
+- **SimplifiedMainWindow**: Clean architecture with menu/toolbar
+- Integrated SecureSettings for API key management
+- Connected to StageManager for workflow control
+- Smart launcher (`main.py`) routes between UIs
+- Both UIs run in parallel with `--new-ui` flag
 
-## Phase 2: Core Functionality Migration (Week 2-3)
+### 1.4 Additional Foundation Components ✅
 
-### 2.1 Document Processing Stage
+#### SecureSettings (`src/new/core/secure_settings.py`)
+- OS keychain integration for API keys
+- Fallback to encrypted file storage
+- Window state persistence
+- Recent projects management
+- Settings import/export
+
+#### ProjectSetupStage (`src/new/stages/setup_stage.py`) ✅
+- First functional workflow stage
+- Comprehensive form validation
+- API key status indicators
+- Template selection
+- Output directory configuration
+- Loading spinner during project creation
+- Integration with ProjectManager
+
+#### APIKeyDialog (`src/new/widgets/api_key_dialog.py`) ✅
+- Secure API key configuration
+- Password field with show/hide toggle
+- Direct links to provider dashboards
+- Azure-specific settings support
+
+#### DocumentImportStage (`src/new/stages/import_stage.py`) ✅
+- Drag-and-drop file interface
+- Multiple file selection with validation
+- File type support (PDF, DOC, DOCX, TXT, MD)
+- Live preview for text files
+- Import progress tracking
+- Duplicate file handling
+- State persistence
+
+## Phase 2: Core Functionality Migration (Week 2-3) 🚧 IN PROGRESS
+
+### 2.1 Document Processing Stage 🔄 NEXT
 Migrate PDF processing functionality with improvements:
 
 ```python
@@ -321,10 +290,81 @@ def migrate_directory(old_dir: Path, project_name: str):
 
 ## Timeline Summary
 
-- **Week 1**: Foundation and framework
-- **Week 2-3**: Core functionality migration
+- **Week 1**: Foundation and framework ✅ COMPLETED
+- **Week 2-3**: Core functionality migration 🚧 IN PROGRESS
 - **Week 4**: Testing and validation
 - **Week 5-6**: UI migration and polish
 - **Week 7-8**: Gradual rollout and monitoring
 
 Total estimated time: 8 weeks for complete migration
+
+## Immediate Next Steps (Priority Order)
+
+### 1. Complete ProjectSetupStage Integration (1 day) ✅
+- [x] Hook up form submission to ProjectManager.create_project()
+- [x] Implement project directory creation
+- [x] Add loading spinner during project creation
+- [x] Navigate to next stage on completion
+
+### 2. Create DocumentImportStage (2-3 days) ✅
+- [x] File drag-and-drop interface
+- [x] Multiple file selection
+- [x] File type validation (PDF, DOC, TXT)
+- [x] Preview of imported documents
+- [x] Batch import progress
+
+### 3. Build Workflow Sidebar (2 days) 🔄 NEXT
+- [ ] Visual progress indicator
+- [ ] Stage status (completed/current/pending)
+- [ ] Clickable navigation (when allowed)
+- [ ] Time estimates per stage
+
+### 4. Implement Welcome Screen (1-2 days)
+- [ ] Recent projects grid
+- [ ] New project button
+- [ ] Open project functionality
+- [ ] API key status summary
+- [ ] Quick start guide
+
+### 5. Create Document Processing Stage (2-3 days)
+- [ ] Convert PDFs with Azure Document Intelligence
+- [ ] Process Word documents
+- [ ] Handle text file imports
+- [ ] Show processing progress
+- [ ] Error handling and retry logic
+
+## Technical Debt to Address
+
+### High Priority
+- [ ] Install keyring module for secure API storage
+- [ ] Add pytest fixtures for new UI components
+- [ ] Create integration tests for stage transitions
+- [ ] Document new architecture in README
+
+### Medium Priority  
+- [ ] Implement proper logging for new UI
+- [ ] Add telemetry for usage patterns
+- [ ] Create user preferences dialog
+- [ ] Build help system with tooltips
+- [ ] Integrate Langfuse for LLM observability and cost tracking
+
+### Low Priority
+- [ ] Add theme support (light/dark)
+- [ ] Implement keyboard shortcuts
+- [ ] Create onboarding tutorial
+- [ ] Add export templates
+
+## Deferred Items (Pending Dependencies)
+
+### Cost Tracking Widget (Deferred until Langfuse integration)
+- [ ] Real-time cost display in status bar
+- [ ] Provider breakdown tooltip
+- [ ] Stage-by-stage cost tracking
+- [ ] Export cost report
+- [ ] Integration with ProjectCosts in ProjectManager
+
+**Note**: Cost tracking functionality is deferred until Langfuse is integrated, as it will provide:
+- Automatic cost calculation based on token usage
+- Built-in pricing for all major LLM providers
+- Historical cost analytics and reporting
+- More accurate token counting across providers

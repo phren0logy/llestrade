@@ -396,7 +396,8 @@ class LLMSummaryThread(BaseWorkerThread):
         """
         # Construct the path to the prompt template file
         current_script_path = Path(__file__).resolve()
-        project_root = current_script_path.parent.parent.parent
+        # Navigate to project root from src/legacy/ui/workers/
+        project_root = current_script_path.parent.parent.parent.parent.parent
         prompt_template_path = project_root / "prompt_templates" / "document_summary_prompt.md"
 
         try:
@@ -663,7 +664,8 @@ Please include:
                         
                         # Get system prompt from template
                         try:
-                            app_dir = Path(__file__).parent.parent.parent
+                            # Navigate to project root from src/legacy/ui/workers/
+                            app_dir = Path(__file__).parent.parent.parent.parent.parent
                             template_dir = app_dir / 'prompt_templates'
                             prompt_manager = PromptManager(template_dir=template_dir)
                             system_prompt = prompt_manager.get_template(
@@ -698,7 +700,8 @@ Please include:
 
                             # Get chunk-specific system prompt
                             try:
-                                app_dir = Path(__file__).parent.parent.parent
+                                # Navigate to project root from src/legacy/ui/workers/
+                                app_dir = Path(__file__).parent.parent.parent.parent.parent
                                 template_dir = app_dir / 'prompt_templates'
                                 prompt_manager = PromptManager(template_dir=template_dir)
                                 chunk_system_prompt = prompt_manager.get_template(
@@ -775,7 +778,8 @@ Please analyze all the chunk summaries and create a unified, coherent summary of
 
                         # Get meta system prompt
                         try:
-                            app_dir = Path(__file__).parent.parent.parent
+                            # Navigate to project root from src/legacy/ui/workers/
+                            app_dir = Path(__file__).parent.parent.parent.parent.parent
                             template_dir = app_dir / 'prompt_templates'
                             prompt_manager = PromptManager(template_dir=template_dir)
                             meta_system_prompt = prompt_manager.get_template(
@@ -803,7 +807,8 @@ Please analyze all the chunk summaries and create a unified, coherent summary of
 
                     # Get system prompt from template
                     try:
-                        app_dir = Path(__file__).parent.parent.parent
+                        # Navigate to project root from src/legacy/ui/workers/
+                        app_dir = Path(__file__).parent.parent.parent.parent.parent
                         template_dir = app_dir / 'prompt_templates'
                         prompt_manager = PromptManager(template_dir=template_dir)
                         system_prompt = prompt_manager.get_template(

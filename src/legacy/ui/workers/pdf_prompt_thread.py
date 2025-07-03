@@ -55,7 +55,8 @@ class PDFPromptThread(QThread):
             
             # Initialize PromptManager
             try:
-                app_dir = Path(__file__).parent.parent.parent
+                # Navigate to project root from src/legacy/ui/workers/
+                app_dir = Path(__file__).parent.parent.parent.parent.parent
                 template_dir = app_dir / 'prompt_templates'
                 prompt_manager = PromptManager(template_dir=template_dir)
                 system_prompt = prompt_manager.get_system_prompt()

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QLineEdit, QPushButton, QLabel, QDateEdit,
     QTextEdit, QFileDialog, QMessageBox, QComboBox,
-    QWidget, QSizePolicy
+    QWidget, QSizePolicy, QProgressDialog
 )
 from PySide6.QtCore import Qt, QDate, Signal
 from PySide6.QtGui import QIcon, QPalette
@@ -304,6 +304,22 @@ class ProjectSetupStage(BaseStage):
             QMessageBox.warning(self, "Validation Error", message)
             return
         
+        # Show progress dialog
+        progress = QProgressDialog(
+            "Creating project...",
+            None,  # No cancel button
+            0, 0,  # Indeterminate progress
+            self
+        )
+        progress.setWindowTitle("Creating Project")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)  # Show immediately
+        progress.show()
+        
+        # Process events to ensure dialog shows
+        from PySide6.QtCore import QCoreApplication
+        QCoreApplication.processEvents()
+        
         # Collect metadata
         metadata = ProjectMetadata(
             case_name=self.case_name_edit.text().strip(),
@@ -324,6 +340,9 @@ class ProjectSetupStage(BaseStage):
         
         # Save state
         self.save_state()
+        
+        # Close progress dialog
+        progress.close()
         
         # Emit completion signal
         self.completed.emit(results)

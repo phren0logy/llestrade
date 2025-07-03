@@ -114,6 +114,11 @@ class PDFProcessingThread(QThread):
                         os.makedirs(markdown_dir, exist_ok=True)
                         os.makedirs(json_dir, exist_ok=True)
 
+                        # Check if files already exist before processing
+                        expected_json_path = os.path.join(json_dir, f"{base_name}.json")
+                        expected_markdown_path = os.path.join(markdown_dir, f"{base_name}.md")
+                        already_converted = os.path.exists(expected_json_path) and os.path.exists(expected_markdown_path)
+
                         # Process the PDF with Azure
                         json_path, markdown_path = process_pdf_with_azure(
                             pdf_file,
@@ -126,17 +131,23 @@ class PDFProcessingThread(QThread):
 
                         # Check if conversion was successful
                         if os.path.exists(markdown_path) and os.path.exists(json_path):
-                            self.progress_signal.emit(
-                                progress + 2,
-                                f"Successfully processed {file_name} with Azure Document Intelligence",
-                            )
-                            processed_count += 1
+                            if already_converted:
+                                self.progress_signal.emit(
+                                    progress + 2,
+                                    f"Skipped {file_name} - already converted",
+                                )
+                            else:
+                                self.progress_signal.emit(
+                                    progress + 2,
+                                    f"Successfully processed {file_name} with Azure Document Intelligence",
+                                )
+                                processed_count += 1
                             results.append(
                                 {
                                     "pdf": pdf_file,
                                     "markdown": markdown_path,
                                     "json": json_path,
-                                    "status": "success",
+                                    "status": "skipped" if already_converted else "success",
                                 }
                             )
                         else:
@@ -195,11 +206,17 @@ class PDFProcessingThread(QThread):
                     95, f"Error during cleanup: {str(cleanup_error)}"
                 )
 
-            # Final progress update
-            self.progress_signal.emit(
-                100,
-                f"PDF processing complete: {processed_count}/{total_files} files processed successfully",
-            )
+            # Count skipped files
+            skipped_count = sum(1 for r in results if r.get("status") == "skipped")
+            failed_count = sum(1 for r in results if r.get("status") == "failed")
+            
+            # Final progress update with detailed statistics
+            if skipped_count > 0:
+                summary = f"PDF processing complete: {processed_count} new files processed, {skipped_count} skipped (already converted), {failed_count} failed"
+            else:
+                summary = f"PDF processing complete: {processed_count}/{total_files} files processed successfully"
+            
+            self.progress_signal.emit(100, summary)
 
             # Emit the finished signal with the results
             self.finished_signal.emit(results)

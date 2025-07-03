@@ -319,6 +319,11 @@ class ProjectManager(QObject):
         self.workflow_state.complete_stage(self.workflow_state.current_stage)
         self.mark_modified()
     
+    def complete_stage(self, stage: str):
+        """Mark a specific stage as completed."""
+        self.workflow_state.complete_stage(stage)
+        self.mark_modified()
+    
     def save_stage_data(self, stage: str, data: Any):
         """Save data for a stage."""
         self.workflow_state.set_stage_data(stage, data)

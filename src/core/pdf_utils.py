@@ -271,6 +271,7 @@ def process_pdf_with_azure(
 
     # Skip if both files already exist
     if os.path.exists(json_path) and os.path.exists(markdown_path):
+        print(f"Skipping {file_name} - already converted (found {base_name}.json and {base_name}.md)")
         return json_path, markdown_path
 
     # Initialize the Document Intelligence client with retry mechanism

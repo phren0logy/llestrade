@@ -19,6 +19,7 @@ class StageManager(QObject):
     can_proceed_changed = Signal(bool)
     can_go_back_changed = Signal(bool)
     validation_changed = Signal(bool, str)  # is_valid, message
+    error = Signal(str)  # error message
     
     # Stage workflow order
     STAGE_ORDER = [
@@ -214,13 +215,54 @@ class StageManager(QObject):
         """Handle stage completion."""
         self.logger.info(f"Stage {self.current_stage_name} completed")
         
+        # Special handling for setup stage - create the project
+        if self.current_stage_name == 'setup' and not self.project:
+            self._create_project_from_setup(results)
+        
         # Save stage data to project
         if self.project:
             self.project.save_stage_data(self.current_stage_name, results)
-            self.project.complete_current_stage()
+            self.project.complete_stage(self.current_stage_name)
         
         # Auto-advance to next stage after a short delay
         QTimer.singleShot(500, self.next_stage)
+    
+    def _create_project_from_setup(self, results: Dict):
+        """Create a new project from setup stage results."""
+        from src.new.core import ProjectManager
+        
+        metadata = results.get('metadata')
+        output_dir = results.get('output_directory')
+        template = results.get('template')
+        
+        if not metadata or not output_dir:
+            self.logger.error("Missing metadata or output directory for project creation")
+            return
+        
+        # Create project manager if needed
+        if not self.main_window.project_manager:
+            self.main_window.project_manager = ProjectManager()
+        
+        # Create the project
+        try:
+            from pathlib import Path
+            base_path = Path(output_dir)
+            project_path = self.main_window.project_manager.create_project(base_path, metadata)
+            
+            # Load the project (returns boolean, project manager keeps the project)
+            success = self.main_window.project_manager.load_project(project_path)
+            if success:
+                self.project = self.main_window.project_manager
+                
+                # Store template preference
+                if template:
+                    self.project.update_settings(template=template)
+            
+            self.logger.info(f"Created new project at: {project_path}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create project: {e}")
+            self.error.emit(f"Failed to create project: {str(e)}")
     
     def _on_validation_changed(self, is_valid: bool):
         """Handle validation state change."""
