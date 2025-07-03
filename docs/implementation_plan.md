@@ -7,7 +7,16 @@ This plan outlines the step-by-step migration from the current tab-based archite
 - ✅ Phase 1 Complete: Foundation infrastructure built
 - ✅ Thread safety issues fixed in legacy app
 - ✅ Project structure reorganized for parallel development
-- 🚧 Phase 2 In Progress: ProjectSetupStage and DocumentImportStage completed
+- ✅ Prompt template path issues fixed
+- ✅ PDF processing skip detection implemented
+- 🚧 Phase 2 In Progress: UI components and stages being implemented
+
+## Completed Bug Fixes and Improvements
+
+### Legacy Application Fixes ✅
+- **Thread Safety**: Fixed memory crashes by replacing direct UI access with Qt signals
+- **Prompt Template Paths**: Fixed path calculations after project reorganization
+- **PDF Skip Detection**: Added logging and UI feedback when PDFs are already converted
 
 ## Phase 1: Foundation (Week 1) ✅ COMPLETED
 
@@ -69,6 +78,17 @@ Implemented in `main_new.py`:
 - Import progress tracking
 - Duplicate file handling
 - State persistence
+
+### 1.5 UI Components ✅
+
+#### WorkflowSidebar (`src/new/widgets/workflow_sidebar.py`) ✅
+- Visual progress indicator with custom painting
+- Color-coded stage states (green/blue/gray)
+- Clickable navigation for accessible stages
+- Individual time estimates per stage
+- Total project time estimate display
+- Progress percentage tracking
+- Connected to StageManager for automatic updates
 
 ## Phase 2: Core Functionality Migration (Week 2-3) 🚧 IN PROGRESS
 
@@ -298,6 +318,34 @@ def migrate_directory(old_dir: Path, project_name: str):
 
 Total estimated time: 8 weeks for complete migration
 
+## Completed Components Summary
+
+### New UI Infrastructure
+1. **Main Application** (`main_new.py`)
+   - Smart launcher with --new-ui flag
+   - Integrated workflow sidebar
+   - Menu and toolbar system
+   - Stage-based navigation
+
+2. **Core Systems**
+   - ProjectManager with auto-save and backup
+   - StageManager with proper cleanup
+   - SecureSettings for API keys
+   - BaseStage abstract class
+
+3. **Functional Stages**
+   - ProjectSetupStage (complete with validation)
+   - DocumentImportStage (drag-drop support)
+
+4. **UI Components**
+   - WorkflowSidebar with visual progress
+   - APIKeyDialog for secure configuration
+
+5. **Bug Fixes**
+   - Thread safety in legacy workers
+   - Prompt template path resolution
+   - PDF skip detection and reporting
+
 ## Immediate Next Steps (Priority Order)
 
 ### 1. Complete ProjectSetupStage Integration (1 day) ✅
@@ -313,13 +361,13 @@ Total estimated time: 8 weeks for complete migration
 - [x] Preview of imported documents
 - [x] Batch import progress
 
-### 3. Build Workflow Sidebar (2 days) 🔄 NEXT
-- [ ] Visual progress indicator
-- [ ] Stage status (completed/current/pending)
-- [ ] Clickable navigation (when allowed)
-- [ ] Time estimates per stage
+### 3. Build Workflow Sidebar (2 days) ✅
+- [x] Visual progress indicator
+- [x] Stage status (completed/current/pending)
+- [x] Clickable navigation (when allowed)
+- [x] Time estimates per stage
 
-### 4. Implement Welcome Screen (1-2 days)
+### 4. Implement Welcome Screen (1-2 days) 🔄 NEXT
 - [ ] Recent projects grid
 - [ ] New project button
 - [ ] Open project functionality

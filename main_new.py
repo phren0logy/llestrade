@@ -7,7 +7,7 @@ import sys
 import logging
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget, QHBoxLayout
 from PySide6.QtCore import Qt, QTimer
 
 # Add src to path for imports
@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.config.logging_config import setup_logging
 from src.config.startup_config import configure_startup_logging
 from src.new.core import SecureSettings, ProjectManager, StageManager
+from src.new.widgets import WorkflowSidebar
 
 
 class SimplifiedMainWindow(QMainWindow):
@@ -52,6 +53,25 @@ class SimplifiedMainWindow(QMainWindow):
         
         # Create toolbar
         self._create_toolbar()
+        
+        # Create central widget with sidebar
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # Main horizontal layout
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # Create workflow sidebar
+        self.workflow_sidebar = WorkflowSidebar()
+        self.workflow_sidebar.stage_clicked.connect(self._on_sidebar_stage_clicked)
+        main_layout.addWidget(self.workflow_sidebar)
+        
+        # Create content area (will be replaced by stages)
+        self.content_area = QWidget()
+        self.content_area.setStyleSheet("background-color: white;")
+        main_layout.addWidget(self.content_area, 1)  # Stretch factor 1
         
         # Add status bar with cost widget placeholder
         self.statusBar().showMessage("Ready")
@@ -105,6 +125,7 @@ class SimplifiedMainWindow(QMainWindow):
         self.stage_manager.can_proceed_changed.connect(
             lambda enabled: self.next_action.setEnabled(enabled)
         )
+        self.stage_manager.stage_changed.connect(self._update_sidebar_progress)
         
         # Check for API keys
         providers = ['anthropic', 'gemini', 'azure_openai']
@@ -118,14 +139,27 @@ class SimplifiedMainWindow(QMainWindow):
     
     def set_stage_widget(self, widget):
         """Set the current stage widget."""
-        # This will be called by StageManager
-        self.setCentralWidget(widget)
+        # Remove existing widget from content area
+        if self.content_area.layout():
+            old_layout = self.content_area.layout()
+            while old_layout.count():
+                item = old_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+            old_layout.deleteLater()
+        
+        # Add new widget to content area
+        layout = QHBoxLayout(self.content_area)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(widget)
     
     def _new_project(self):
         """Start a new project."""
         self.logger.info("Starting new project")
         # Load the setup stage
         self.stage_manager.load_stage('setup')
+        # Update sidebar
+        self._update_sidebar_progress('setup')
     
     def _open_project(self):
         """Open an existing project."""
@@ -155,6 +189,16 @@ class SimplifiedMainWindow(QMainWindow):
     def _go_next(self):
         """Navigate to next stage."""
         self.stage_manager.next_stage()
+    
+    def _on_sidebar_stage_clicked(self, stage_name: str):
+        """Handle sidebar stage click."""
+        self.logger.info(f"Sidebar stage clicked: {stage_name}")
+        self.stage_manager.jump_to_stage(stage_name)
+    
+    def _update_sidebar_progress(self, current_stage: str):
+        """Update sidebar with current progress."""
+        progress = self.stage_manager.get_stage_progress()
+        self.workflow_sidebar.set_stage_progress(progress)
     
     def closeEvent(self, event):
         """Handle window close."""
