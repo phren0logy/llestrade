@@ -11,21 +11,21 @@ from typing import Any, Dict, Optional, Tuple
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from app_config import get_configured_llm_provider
+from src.config.app_config import get_configured_llm_provider
+from .base_worker_thread import BaseWorkerThread
 from llm.providers import AnthropicProvider, GeminiProvider
 from llm.base import BaseLLMProvider
 from llm.factory import create_provider
 from llm.tokens import count_tokens_cached, TokenCounter
 from llm.chunking import ChunkingStrategy
-from prompt_manager import PromptManager
+from src.core.prompt_manager import PromptManager
 
 
-class IntegratedAnalysisThread(QThread):
-    """Worker thread for generating an integrated analysis with Claude's thinking model."""
+class IntegratedAnalysisThread(BaseWorkerThread):
+    """Worker thread for generating an integrated analysis with LLM providers."""
 
-    progress_signal = Signal(int, str)
+    # Additional signals specific to this worker
     finished_signal = Signal(bool, str, str)  # success, message, file_path
-    error_signal = Signal(str)
 
     def __init__(self, 
                  parent, 
@@ -40,7 +40,7 @@ class IntegratedAnalysisThread(QThread):
                  llm_provider_id, 
                  llm_model_name):
         """Initialize the thread."""
-        super().__init__(parent)
+        super().__init__(parent, operation_name="IntegratedAnalysis")
         self.combined_summary_path = combined_summary_path
         self.original_markdown_files = original_markdown_files
         self.output_dir = output_dir

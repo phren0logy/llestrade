@@ -6,7 +6,7 @@ Provides a collapsible panel for displaying status and log information.
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QGroupBox, QLabel, QTextEdit, QVBoxLayout
 
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 
 
 class StatusPanel(QGroupBox):

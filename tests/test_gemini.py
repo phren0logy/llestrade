@@ -18,7 +18,7 @@ logging.basicConfig(
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Import our LLM utils
-from llm_utils_compat import GeminiClient, LLMClientFactory
+from llm.llm_utils_compat import GeminiClient, LLMClientFactory
 
 # Test direct Google Generative AI import
 try:

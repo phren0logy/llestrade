@@ -7,7 +7,7 @@ import os
 import sys
 
 # Configure clean startup before other imports
-from startup_config import clean_startup
+from src.config.startup_config import clean_startup
 clean_startup()
 
 # Load environment variables from .env file
@@ -66,11 +66,11 @@ from pathlib import Path
 from typing import Optional
 
 # Import our new logging and exception handling modules
-from logging_config import ApplicationLogger
-from exception_handler import GlobalExceptionHandler
+from src.config.logging_config import ApplicationLogger
+from src.core.exception_handler import GlobalExceptionHandler
 
 # Now we can safely import PySide6
-from PySide6.QtCore import QCoreApplication, QSize, QUrl
+from PySide6.QtCore import QCoreApplication, QSize, QUrl, Qt, Signal
 from PySide6.QtGui import QIcon, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
@@ -80,6 +80,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QVBoxLayout,
     QWidget,
+    QDockWidget,
 )
 
 # Additional plugin path setting using QCoreApplication
@@ -91,10 +92,10 @@ if (
     QCoreApplication.setLibraryPaths(possible_plugin_paths)
 
 # Import configuration settings
-from config import APP_TITLE, APP_VERSION, setup_environment_variables
+from src.config.config import APP_TITLE, APP_VERSION, setup_environment_variables
 
 # Import utility modules
-from llm_utils_compat import LLMClientFactory, cached_count_tokens
+from llm.llm_utils_compat import LLMClientFactory, cached_count_tokens
 from ui.analysis_tab import AnalysisTab
 from ui.pdf_processing_tab import PDFProcessingTab
 
@@ -103,12 +104,18 @@ from ui.prompts_tab import PromptsTab
 from ui.refinement_tab import RefinementTab
 from ui.testing_tab import TestingTab
 
+# Import debug dashboard if running in debug mode
+from ui.debug_dashboard import DebugDashboard
+
 
 class ForensicReportDrafterApp(QMainWindow):
     """
     Main application window for the Forensic Psych Report Drafter.
     Provides a tabbed interface for various functionality.
     """
+    
+    # Signal to track worker operations
+    worker_status_signal = Signal(dict)
 
     def __init__(self):
         """Initialize the main application window."""
@@ -157,6 +164,10 @@ class ForensicReportDrafterApp(QMainWindow):
 
         # Add tab widget to layout
         self.central_layout.addWidget(self.tab_widget)
+
+    def emit_worker_status(self, status_dict):
+        """Emit worker status to debug dashboard."""
+        self.worker_status_signal.emit(status_dict)
 
     def check_api_key(self, provider="auto"):
         """Check if the API key is valid by making a test request."""
@@ -264,6 +275,19 @@ def main():
     
     # Create main window
     main_window = ForensicReportDrafterApp()
+    
+    # Add debug dashboard if in debug mode
+    if "--debug" in sys.argv or os.getenv("DEBUG") == "true":
+        debug_dock = QDockWidget("Debug Dashboard", main_window)
+        debug_dashboard = DebugDashboard(main_window)
+        debug_dock.setWidget(debug_dashboard)
+        main_window.addDockWidget(Qt.BottomDockWidgetArea, debug_dock)
+        
+        # Connect worker signals to debug dashboard
+        main_window.worker_status_signal.connect(debug_dashboard.register_operation)
+        
+        logger.info("Debug dashboard enabled")
+    
     main_window.show()
     
     # Run application

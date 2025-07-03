@@ -1,4 +1,4 @@
-from llm_utils_compat import cached_count_tokens
+from llm.llm_utils_compat import cached_count_tokens
 
 
 def test_cached_count_tokens():

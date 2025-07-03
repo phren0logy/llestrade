@@ -175,12 +175,16 @@ class AzureOpenAIProvider(BaseLLMProvider):
             messages.append({"role": "user", "content": prompt})
             
             # Log request details
+            total_tokens = self.count_tokens(messages=messages).get("token_count", 0)
+            
+            logger.info(f"Azure OpenAI API Request - Deployment: {model}, Total tokens: {total_tokens}")
             if self.debug:
-                logger.debug(f"Azure OpenAI API Request - Deployment: {model}")
                 logger.debug(f"Azure OpenAI API Request - System prompt length: {len(actual_system_prompt or '')}")
                 logger.debug(f"Azure OpenAI API Request - User prompt length: {len(prompt)}")
                 logger.debug(f"Azure OpenAI API Request - Temperature: {temperature}")
                 logger.debug(f"Azure OpenAI API Request - Max tokens: {max_tokens}")
+                logger.debug(f"Azure OpenAI API Request - Endpoint: {self.azure_endpoint}")
+                logger.debug(f"Azure OpenAI API Request - API Version: {self.api_version}")
             
             # Emit progress
             self.emit_progress(10, "Sending request to Azure OpenAI...")
@@ -188,13 +192,50 @@ class AzureOpenAIProvider(BaseLLMProvider):
             # Time the API call
             start_time = time.time()
             
-            # Make the API call
-            completion = self.client.chat.completions.create(
-                model=model,  # Deployment name for Azure
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            # Enhanced retry logic for API calls
+            completion = None
+            last_error = None
+            retry_delay = 1.0  # Start with 1 second delay
+            
+            for attempt in range(self.max_retries + 1):
+                try:
+                    # Log retry attempt
+                    if attempt > 0:
+                        logger.info(f"Retry attempt {attempt}/{self.max_retries} for Azure OpenAI request")
+                        self.emit_progress(10 + (attempt * 10), f"Retrying request (attempt {attempt + 1})...")
+                    
+                    # Make the API call
+                    completion = self.client.chat.completions.create(
+                        model=model,  # Deployment name for Azure
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                        timeout=self.timeout,
+                    )
+                    
+                    # Success - break out of retry loop
+                    break
+                    
+                except (openai.APITimeoutError, openai.APIConnectionError, openai.RateLimitError, openai.InternalServerError) as e:
+                    last_error = e
+                    logger.warning(
+                        f"Retryable error on attempt {attempt + 1}/{self.max_retries + 1}: {type(e).__name__}: {str(e)}"
+                    )
+                    
+                    if attempt < self.max_retries:
+                        # Wait before retrying with exponential backoff
+                        time.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                    else:
+                        # Final attempt failed, re-raise
+                        raise
+                        
+                except Exception as e:
+                    # Non-retryable error, re-raise immediately
+                    raise
+            
+            if completion is None and last_error:
+                raise last_error
             
             # Calculate elapsed time
             elapsed_time = time.time() - start_time
@@ -233,7 +274,11 @@ class AzureOpenAIProvider(BaseLLMProvider):
             
         except openai.APIAuthenticationError as e:
             error_message = f"Authentication error: {str(e)}"
-            logger.error(f"Azure OpenAI {error_message}")
+            logger.error(f"Azure OpenAI {error_message}", extra={
+                "deployment": model,
+                "endpoint": self.azure_endpoint,
+                "api_version": self.api_version
+            })
             self.emit_error(error_message)
             return {"success": False, "error": error_message, "provider": self.provider_name}
             
@@ -245,7 +290,12 @@ class AzureOpenAIProvider(BaseLLMProvider):
             
         except openai.NotFoundError as e:
             error_message = f"Deployment not found (check deployment name '{model}'): {str(e)}"
-            logger.error(f"Azure OpenAI {error_message}")
+            logger.error(f"Azure OpenAI {error_message}", extra={
+                "deployment": model,
+                "endpoint": self.azure_endpoint,
+                "api_version": self.api_version,
+                "hint": "For GPT-4.1, ensure deployment name matches exactly (e.g., 'gpt-4.1' not 'gpt-41')"
+            })
             self.emit_error(error_message)
             return {"success": False, "error": error_message, "provider": self.provider_name}
             
@@ -257,7 +307,13 @@ class AzureOpenAIProvider(BaseLLMProvider):
             
         except Exception as e:
             error_message = f"API error: {str(e)}"
-            logger.error(f"Azure OpenAI {error_message}")
+            logger.error(f"Azure OpenAI {error_message}", extra={
+                "deployment": model,
+                "endpoint": self.azure_endpoint,
+                "api_version": self.api_version,
+                "error_type": type(e).__name__,
+                "total_tokens": total_tokens if 'total_tokens' in locals() else "unknown"
+            }, exc_info=True)
             self.emit_error(error_message)
             return {"success": False, "error": error_message, "provider": self.provider_name}
     

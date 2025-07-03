@@ -8,7 +8,7 @@ from datetime import datetime
 
 from PySide6.QtCore import QThread, Signal
 
-from file_utils import write_file_content
+from src.core.file_utils import write_file_content
 from llm.factory import create_provider
 
 

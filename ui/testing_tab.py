@@ -24,8 +24,8 @@ from ui.components.workflow_indicator import WorkflowIndicator
 from ui.components.content_viewer import ContentViewer
 from ui.components.file_selector import FileSelector
 from ui.workers import PDFPromptThread
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
-from file_utils import read_file_content, read_file_preview
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from src.core.file_utils import read_file_content, read_file_preview
 
 
 class TestingTab(BaseTab):

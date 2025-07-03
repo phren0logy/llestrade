@@ -3,6 +3,7 @@ Refinement tab module for the Forensic Psych Report Drafter.
 Handles the report refinement with extended thinking functionality.
 """
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -19,10 +20,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
-from file_utils import read_file_content, read_file_preview, write_file_content
-from llm_utils_compat import LLMClientFactory
-from prompt_manager import PromptManager
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
+from src.core.file_utils import read_file_content, read_file_preview, write_file_content
+from llm.llm_utils_compat import LLMClientFactory
+from src.core.prompt_manager import PromptManager
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.results_viewer import ResultsViewer

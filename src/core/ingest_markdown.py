@@ -1,5 +1,5 @@
 from langchain_text_splitters import MarkdownHeaderTextSplitter
-from prompt_manager import PromptManager
+from src.core.prompt_manager import PromptManager
 
 # Initialize prompt manager
 prompt_manager = PromptManager()

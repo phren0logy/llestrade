@@ -10,8 +10,8 @@ import time
 from pathlib import Path
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget, QTextEdit, QLabel
 
-from logging_config import ApplicationLogger
-from exception_handler import GlobalExceptionHandler
+from src.config.logging_config import ApplicationLogger
+from src.core.exception_handler import GlobalExceptionHandler
 
 
 class TestWindow(QWidget):

@@ -11,7 +11,7 @@ from pathlib import Path
 from PySide6.QtCore import QThread, Signal
 
 from llm.factory import create_provider
-from prompt_manager import PromptManager
+from src.core.prompt_manager import PromptManager
 
 class PDFPromptThread(QThread):
     """Thread for processing PDFs with Claude in the background."""

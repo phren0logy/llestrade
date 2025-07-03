@@ -1,5 +1,15 @@
 # Debugging & Logging Enhancement Plan
 
+## Implementation Status (as of 2025-07-03)
+
+### ✅ Completed Phases
+- **Phase 1: Core Infrastructure** - Centralized logging, crash reporting, and exception handling
+- **Phase 2: Worker Thread Enhancements** - Base worker class with retry logic and enhanced error handling
+- **Phase 3: Debug Dashboard** - Real-time monitoring and debugging UI with system stats and operation tracking
+
+### 🔄 Remaining Phases
+- **Phase 4: Provider-Specific Fixes** - Additional Azure OpenAI optimizations (partially completed)
+
 ## Executive Summary
 
 This document outlines a comprehensive plan to improve debugging and logging capabilities in the Forensic Psych Report Drafter application, addressing crashes (particularly with GPT-4.1) and implementing PySide6 best practices.
@@ -841,29 +851,62 @@ async def _make_request_with_retry(self, messages, **kwargs):
 
 ## Implementation Timeline
 
-### Phase 1: Core Infrastructure (Week 1)
-1. Implement `logging_config.py`
-2. Implement `exception_handler.py`
-3. Update `main.py` with crash detection
-4. Test basic logging and exception handling
+### Phase 1: Core Infrastructure (Week 1) ✅ COMPLETED
+1. ✅ Implement `logging_config.py`
+2. ✅ Implement `exception_handler.py`
+3. ✅ Update `main.py` with crash detection
+4. ✅ Test basic logging and exception handling
 
-### Phase 2: Worker Thread Enhancements (Week 2)
-1. Implement `base_worker_thread.py`
-2. Update existing worker threads to inherit from new base
-3. Add retry logic to LLM provider calls
-4. Test thread safety and cancellation
+**Completion Notes:**
+- Successfully implemented centralized logging with rotation (10MB max, 5 backups)
+- Global exception handler creates detailed crash reports in `~/.forensic_report_drafter/crashes/`
+- Main application now checks for recent crashes on startup and offers recovery
+- Created comprehensive test script `test_logging_and_exceptions.py`
+- Verified integration with existing application startup
 
-### Phase 3: Debug Dashboard (Week 3)
-1. Implement `debug_dashboard.py`
-2. Integrate with main window
-3. Connect worker signals to dashboard
-4. Test real-time monitoring
+### Phase 2: Worker Thread Enhancements (Week 2) ✅ COMPLETED
+1. ✅ Implement `base_worker_thread.py`
+2. ✅ Update existing worker threads to inherit from new base (partially)
+3. ✅ Add retry logic to LLM provider calls
+4. ✅ Test thread safety and cancellation
 
-### Phase 4: Provider-Specific Fixes (Week 4)
-1. Enhanced error handling in Azure OpenAI provider
-2. Add request/response logging
-3. Implement connection pooling
-4. Test with large documents
+**Completion Notes:**
+- Created `base_worker_thread.py` with enhanced error handling, retry logic, and operation tracking
+- Updated `llm_summary_thread.py` to inherit from base class with improved logging
+- Partially updated `integrated_analysis_thread.py` as demonstration
+- Enhanced Azure OpenAI provider with retry logic for transient errors
+- Added detailed error logging with context for GPT-4.1 debugging
+- Created `test_worker_enhancements.py` to verify functionality
+- Remaining worker threads can be migrated gradually as needed
+
+### Phase 3: Debug Dashboard (Week 3) ✅ COMPLETED
+1. ✅ Implement `debug_dashboard.py`
+2. ✅ Integrate with main window
+3. ✅ Connect worker signals to dashboard
+4. ✅ Test real-time monitoring
+
+**Completion Notes:**
+- Created `ui/debug_dashboard.py` with comprehensive monitoring capabilities
+- Integrated as dockable widget in main window when running with `--debug` or `DEBUG=true`
+- Real-time log capture with color-coded severity levels
+- System statistics monitoring (memory, CPU, threads, I/O)
+- Active operation tracking with unique IDs and duration
+- Export functionality for debug information (JSON format)
+- Created `test_debug_dashboard.py` to verify all functionality
+- Thread-safe implementation with proper Qt signal/slot connections
+
+### Phase 4: Provider-Specific Fixes (Week 4) 🔄 PARTIALLY COMPLETED
+1. ✅ Enhanced error handling in Azure OpenAI provider
+2. ✅ Add request/response logging
+3. ⏳ Implement connection pooling
+4. ⏳ Test with large documents
+
+**Completed Improvements for GPT-4.1:**
+- Added retry logic with exponential backoff for transient errors
+- Enhanced error messages with deployment name and endpoint context
+- Added helpful hints for common GPT-4.1 configuration issues
+- Improved request logging with token counts and timing
+- Better error categorization (retryable vs non-retryable)
 
 ## Testing Strategy
 
@@ -897,3 +940,35 @@ async def _make_request_with_retry(self, messages, **kwargs):
 4. **Documentation**: Keep debug features documented
 
 This comprehensive plan addresses the current debugging limitations and provides robust tools for diagnosing and preventing crashes, particularly with the GPT-4.1 provider.
+
+## Key Achievements (Phases 1, 2 & 3)
+
+### Improved Debugging Capabilities
+- **Centralized Logging**: All logs now go to `~/.forensic_report_drafter/logs/` with automatic rotation
+- **Crash Reports**: Automatic crash dumps saved to `~/.forensic_report_drafter/crashes/`
+- **Operation Tracking**: Each worker operation has a unique ID for tracing
+- **Enhanced Error Context**: Errors include deployment info, token counts, and timing data
+
+### Better Reliability
+- **Automatic Retry**: Transient network errors are retried with exponential backoff
+- **Graceful Degradation**: Better error messages help users understand and fix issues
+- **Thread Safety**: Standardized cancellation and signal emission patterns
+
+### GPT-4.1 Specific Improvements
+- **Retry Logic**: Handles timeout, connection, and rate limit errors automatically
+- **Better Error Messages**: Clear indication when deployment name is incorrect
+- **Request Logging**: Token counts and timing help identify performance issues
+- **Context Preservation**: Error logs include all relevant Azure configuration
+
+### Developer Experience
+- **Debug Mode**: Run with `--debug` or `DEBUG=true` for detailed logging
+- **Test Scripts**: `test_logging_and_exceptions.py`, `test_worker_enhancements.py`, and `test_debug_dashboard.py`
+- **Modular Design**: Easy to extend base classes for new functionality
+- **Debug Dashboard**: Real-time monitoring UI available in debug mode
+
+### Debug Dashboard Features (Phase 3)
+- **Live Log Viewer**: Color-coded logs with adjustable verbosity level
+- **System Monitor**: Real-time CPU, memory, thread, and I/O statistics
+- **Operation Tracker**: View active operations with unique IDs and durations
+- **Export Capability**: Save debug snapshots for offline analysis
+- **Dock Widget**: Resizable and movable debug panel in main window

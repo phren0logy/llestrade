@@ -5,7 +5,7 @@ Worker thread for processing PDF files with Azure Document Intelligence.
 import os
 from PySide6.QtCore import QThread, Signal
 
-from pdf_utils import (
+from src.core.pdf_utils import (
     process_pdfs_with_azure,
 )
 

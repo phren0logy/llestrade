@@ -7,6 +7,10 @@ wheels/
 *.egg-info
 
 /test_output
+test_output/
+logs/
+*.log
+debug_summarization_*.log
 
 # Virtual environments and environment variables
 .venv
@@ -15,4 +19,13 @@ wheels/
 # macOS
 .DS_Store
 
+# Application data
 .forensic-report-drafter/
+.forensic_report_drafter/
+
+# IDE
+.vscode/
+.idea/
+
+# pytest
+.pytest_cache/

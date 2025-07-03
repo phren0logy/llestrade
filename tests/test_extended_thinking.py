@@ -6,7 +6,7 @@ Test script for Gemini extended thinking capabilities
 import logging
 import sys
 
-from llm_utils_compat import GeminiClient, LLMClientFactory
+from llm.llm_utils_compat import GeminiClient, LLMClientFactory
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

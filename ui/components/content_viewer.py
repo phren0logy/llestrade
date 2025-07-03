@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QTextEdit, QWidget, QVBoxLayout
 
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 
 
 class ContentViewer(QWidget):

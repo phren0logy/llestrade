@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm_utils_compat import GeminiClient, LLMClientFactory
+from llm.llm_utils_compat import GeminiClient, LLMClientFactory
 from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
 
 # Configure logging

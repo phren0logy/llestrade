@@ -19,10 +19,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
-from file_utils import read_file_content, read_file_preview, write_file_content
-from ingest_markdown import generate_template_fragments, ingest_and_split_markdown
-from llm_utils_compat import LLMClient, combine_transcript_with_fragments
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
+from src.core.file_utils import read_file_content, read_file_preview, write_file_content
+from src.core.ingest_markdown import generate_template_fragments, ingest_and_split_markdown
+from llm.llm_utils_compat import LLMClient, combine_transcript_with_fragments
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.progress_dialog import ProgressDialog

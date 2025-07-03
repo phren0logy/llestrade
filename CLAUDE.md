@@ -17,14 +17,11 @@ uv run main.py
 ### Running Tests
 
 ```bash
-# Test API connectivity
-uv run verify_llm_connection.py
+# Run tests from the tests directory
+uv run pytest tests/
 
-# Test LLM summarization functionality
-uv run direct_test.py
-
-# Test problematic files
-uv run test_diagnosis.py path/to/file.md
+# Run specific test files
+uv run python tests/test_api_keys.py
 
 # Run individual test files
 uv run tests/test_llm_utils.py
@@ -50,7 +47,40 @@ uv remove
 
 
 # Interactive environment setup
-uv run setup_env.py
+uv run scripts/setup_env.py
+```
+
+## Project Structure
+
+```
+forensic-report-drafter/
+├── main.py                    # Application entry point
+├── src/
+│   ├── config/               # Configuration modules
+│   │   ├── app_config.py    # LLM provider configuration
+│   │   ├── config.py        # App constants
+│   │   ├── logging_config.py # Centralized logging
+│   │   └── startup_config.py # Startup configuration
+│   └── core/                 # Core utilities
+│       ├── exception_handler.py # Global exception handling
+│       ├── file_utils.py    # File operations
+│       ├── ingest_markdown.py # Markdown processing
+│       ├── pdf_utils.py     # PDF processing
+│       └── prompt_manager.py # Prompt template management
+├── llm/                      # LLM provider package
+│   ├── base.py              # Base provider class
+│   ├── providers/           # Provider implementations
+│   ├── chunking.py          # Document chunking
+│   ├── tokens.py            # Token counting
+│   ├── factory.py           # Provider factory
+│   └── llm_utils_compat.py  # Compatibility layer
+├── ui/                       # User interface
+│   ├── workers/             # Worker threads
+│   └── components/          # Reusable UI components
+├── tests/                    # Test suite
+├── scripts/                  # Utility scripts
+│   └── setup_env.py         # Environment setup
+└── prompt_templates/         # LLM prompt templates
 ```
 
 ## Architecture Overview
@@ -62,7 +92,7 @@ uv run setup_env.py
    - Entry point, handles Qt plugin paths for macOS
    - Creates the main window with tabbed interface
 
-2. **LLM Integration** (`llm/` directory and `llm_utils_compat.py`)
+2. **LLM Integration** (`llm/` directory and `llm/llm_utils_compat.py`)
 
    **New Modular Structure** (`llm/` directory):
    - `llm/base.py`: Abstract base provider class with Qt patterns (signals, properties)
@@ -74,7 +104,7 @@ uv run setup_env.py
    - `llm/tokens.py`: Centralized token counting with LRU caching
    - `llm/factory.py`: Provider factory with Qt-style patterns
    
-   **Compatibility Layer** (`llm_utils_compat.py`):
+   **Compatibility Layer** (`llm/llm_utils_compat.py`):
    - Temporary shim for backward compatibility during migration
    - Maps old API (`LLMClient`, `LLMClientFactory`) to new structure
    - Provides deprecation warnings for smooth transition
@@ -86,7 +116,7 @@ uv run setup_env.py
    - `MODEL_CONTEXT_WINDOWS`: Dictionary of model token limits (using 65% for safety)
    - Extended thinking support for Anthropic and Gemini providers
 
-3. **Configuration System** (`app_config.py`)
+3. **Configuration System** (`src/config/app_config.py`)
 
    - Manages LLM provider settings via `app_settings.json`
    - Azure deployment names read from `AZURE_OPENAI_DEPLOYMENT_NAME` env var
@@ -107,7 +137,7 @@ uv run setup_env.py
      - `pdf_processing_thread.py`: Converts PDFs to markdown
      - All inherit from `QThread` for non-blocking operations
 
-5. **Prompt Management** (`prompt_manager.py`)
+5. **Prompt Management** (`src/core/prompt_manager.py`)
    - Loads prompts from `prompt_templates/` directory
    - Key prompts: `document_summary_prompt.md`, `document_analysis_system_prompt.md`, `integrated_analysis_prompt.md`
    - `get_template()`: Returns single prompt string with variable substitution

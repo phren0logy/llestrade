@@ -67,7 +67,7 @@ class BaseLLMProvider(QObject):
     def _load_default_system_prompt(self) -> str:
         """Load default system prompt from PromptManager or use fallback."""
         try:
-            from prompt_manager import PromptManager
+            from src.core.prompt_manager import PromptManager
             prompt_manager = PromptManager()
             prompt = prompt_manager.get_system_prompt()
             if self.debug:

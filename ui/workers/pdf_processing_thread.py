@@ -6,7 +6,7 @@ import os
 
 from PySide6.QtCore import QThread, Signal
 
-from pdf_utils import (
+from src.core.pdf_utils import (
     get_pdf_page_count,
     prepare_pdf_files,
     process_pdf_with_azure,

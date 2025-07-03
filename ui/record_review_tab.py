@@ -38,7 +38,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.results_viewer import ResultsViewer
@@ -1194,7 +1194,7 @@ class RecordReviewTab(BaseTab):
             QCoreApplication.processEvents()
 
             # Import the test function directly
-            from pdf_utils import test_azure_connection
+            from src.core.pdf_utils import test_azure_connection
 
             # Test the connection directly
             result = test_azure_connection(azure_endpoint, azure_key)

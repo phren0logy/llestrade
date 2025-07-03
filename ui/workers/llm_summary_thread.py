@@ -20,11 +20,12 @@ from tenacity import (
     wait_exponential,
 )
 
-from app_config import get_configured_llm_provider
+from src.config.app_config import get_configured_llm_provider
 from llm.factory import create_provider
 from llm.tokens import count_tokens_cached, TokenCounter
 from llm.chunking import ChunkingStrategy
-from prompt_manager import PromptManager
+from src.core.prompt_manager import PromptManager
+from .base_worker_thread import BaseWorkerThread
 
 # Set up logger for this module
 logger = logging.getLogger(__name__)
@@ -35,16 +36,14 @@ logger = logging.getLogger(__name__)
 from pathlib import Path
 
 
-class LLMSummaryThread(QThread):
-    """Worker thread for summarizing markdown files with Claude."""
+class LLMSummaryThread(BaseWorkerThread):
+    """Worker thread for summarizing markdown files with LLM providers."""
 
-    progress_signal = Signal(int, str)
+    # Additional signals specific to this worker
     file_progress = Signal(int, str)
     file_finished = Signal(dict)
     file_error = Signal(str)
-    
     finished_signal = Signal(dict)
-    error_signal = Signal(str)
 
     def __init__(
         self, 
@@ -59,7 +58,7 @@ class LLMSummaryThread(QThread):
         llm_model_name
     ):
         """Initialize the thread with the markdown files to summarize."""
-        super().__init__(parent)
+        super().__init__(parent, operation_name="LLMSummary")
         self.markdown_files = markdown_files
         self.output_dir = output_dir
         self.subject_name = subject_name
@@ -69,61 +68,38 @@ class LLMSummaryThread(QThread):
         self.llm_provider_id = llm_provider_id
         self.llm_model_name = llm_model_name
         self.llm_provider = None
-        self._mutex = QMutex()  # For thread-safe operations
-        self._is_cancelled = False
 
     def _safe_emit_progress(self, percent, message):
         """Safely emit progress signal with memory management."""
-        try:
-            if not self._is_cancelled:
-                # Create copies of the data to avoid memory issues
-                percent_copy = int(percent)
-                message_copy = str(message)
-                self.progress_signal.emit(percent_copy, message_copy)
-        except Exception as e:
-            logger.error(f"Error emitting progress signal: {e}")
+        # Use base class method
+        self.emit_progress(percent, message)
 
     def _safe_emit_file_progress(self, percent, message):
         """Safely emit file progress signal with memory management."""
-        try:
-            if not self._is_cancelled:
-                # Create copies of the data to avoid memory issues
-                percent_copy = int(percent)
-                message_copy = str(message)
-                self.file_progress.emit(percent_copy, message_copy)
-        except Exception as e:
-            logger.error(f"Error emitting file progress signal: {e}")
+        self.safe_emit(self.file_progress, int(percent), str(message))
 
     def _safe_emit_finished(self, results):
         """Safely emit finished signal with memory management."""
-        try:
-            if not self._is_cancelled:
-                # Create a clean copy of results to avoid memory issues
-                results_copy = {
-                    "total": int(results.get("total", 0)),
-                    "processed": int(results.get("processed", 0)),
-                    "skipped": int(results.get("skipped", 0)),
-                    "failed": int(results.get("failed", 0)),
-                    "status": str(results.get("status", "unknown")),
-                    "message": str(results.get("message", "")),
-                    "files": []  # Simplified - avoid passing large data structures
-                }
-                self.finished_signal.emit(results_copy)
-        except Exception as e:
-            logger.error(f"Error emitting finished signal: {e}")
+        # Create a clean copy of results to avoid memory issues
+        results_copy = {
+            "total": int(results.get("total", 0)),
+            "processed": int(results.get("processed", 0)),
+            "skipped": int(results.get("skipped", 0)),
+            "failed": int(results.get("failed", 0)),
+            "status": str(results.get("status", "unknown")),
+            "message": str(results.get("message", "")),
+            "files": []  # Simplified - avoid passing large data structures
+        }
+        self.safe_emit(self.finished_signal, results_copy)
 
     def _safe_emit_error(self, error_message):
         """Safely emit error signal with memory management."""
-        try:
-            if not self._is_cancelled:
-                error_copy = str(error_message)
-                self.error_signal.emit(error_copy)
-        except Exception as e:
-            logger.error(f"Error emitting error signal: {e}")
+        self.safe_emit(self.error_signal, str(error_message))
 
     def cancel(self):
         """Cancel the operation safely."""
-        self._is_cancelled = True
+        # Call base class cancel method
+        super().cancel()
         if self.isRunning():
             self.terminate()
             self.wait(3000)  # Wait up to 3 seconds for clean termination
@@ -134,48 +110,50 @@ class LLMSummaryThread(QThread):
             self.cancel()
             self.llm_provider = None
             gc.collect()  # Force garbage collection
+            # Call base class cleanup
+            super().cleanup()
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            self.self.logger.error(f"Error during cleanup: {e}")
 
     def _initialize_llm_provider(self):
         """Initialize the LLM provider for summarization."""
         try:
-            logger.info(f"🔧 Starting LLM provider initialization...")
-            logger.info(f"🏷️ Provider ID: {self.llm_provider_id}")
-            logger.info(f"🏷️ Model Name: {self.llm_model_name}")
+            self.logger.info(f"🔧 Starting LLM provider initialization...")
+            self.logger.info(f"🏷️ Provider ID: {self.llm_provider_id}")
+            self.logger.info(f"🏷️ Model Name: {self.llm_model_name}")
             
             if self.status_panel:
                 self.status_panel.append_details(f"Initializing LLM provider: {self.llm_provider_id}/{self.llm_model_name}")
             
-            logger.info("📞 Calling get_configured_llm_provider...")
+            self.logger.info("📞 Calling get_configured_llm_provider...")
             provider_info = get_configured_llm_provider(
                 provider_id_override=self.llm_provider_id,
                 model_override=self.llm_model_name
             )
-            logger.info(f"✅ get_configured_llm_provider returned: {type(provider_info)}")
+            self.logger.info(f"✅ get_configured_llm_provider returned: {type(provider_info)}")
             
             if provider_info:
-                logger.info(f"📋 Provider info keys: {list(provider_info.keys()) if isinstance(provider_info, dict) else 'Not a dict'}")
+                self.logger.info(f"📋 Provider info keys: {list(provider_info.keys()) if isinstance(provider_info, dict) else 'Not a dict'}")
                 if provider_info.get("provider"):
                     self.llm_provider = provider_info["provider"]
-                    logger.info(f"✅ LLM provider extracted: {type(self.llm_provider)}")
-                    logger.info(f"🔍 Provider class: {self.llm_provider.__class__.__name__}")
-                    logger.info(f"🔍 Provider initialized: {getattr(self.llm_provider, 'initialized', 'Unknown')}")
+                    self.logger.info(f"✅ LLM provider extracted: {type(self.llm_provider)}")
+                    self.logger.info(f"🔍 Provider class: {self.llm_provider.__class__.__name__}")
+                    self.logger.info(f"🔍 Provider initialized: {getattr(self.llm_provider, 'initialized', 'Unknown')}")
                 else:
-                    logger.error("❌ No 'provider' key in provider_info")
+                    self.logger.error("❌ No 'provider' key in provider_info")
                     self.llm_provider = None
             else:
-                logger.error("❌ get_configured_llm_provider returned None/empty")
+                self.logger.error("❌ get_configured_llm_provider returned None/empty")
                 self.llm_provider = None
             
             if self.llm_provider and self.llm_provider.initialized:
-                logger.info(f"🎉 LLM provider initialization successful!")
+                self.logger.info(f"🎉 LLM provider initialization successful!")
                 if self.status_panel:
                     self.status_panel.append_details(f"LLM provider initialized successfully: {self.llm_provider_id}")
                 return True
             else:
                 error_msg = f"Failed to get configured LLM provider for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
-                logger.error(f"❌ {error_msg}")
+                self.logger.error(f"❌ {error_msg}")
                 if self.status_panel:
                     self.status_panel.append_details(f"❌ ERROR: {error_msg}")
                 logging.error(error_msg)
@@ -193,24 +171,27 @@ class LLMSummaryThread(QThread):
 
     def run(self):
         """Run the LLM summarization operations."""
-        logger.info("🚀 LLMSummaryThread.run() started")
-        logger.info(f"📁 Files to process: {len(self.markdown_files)}")
-        logger.info(f"📂 Output directory: {self.output_dir}")
-        logger.info(f"👤 Subject: {self.subject_name}")
-        logger.info(f"🏗️ LLM Provider: {self.llm_provider_id}, Model: {self.llm_model_name}")
+        # Call base class run() first
+        super().run()
+        
+        self.self.logger.info("🚀 LLMSummaryThread.run() started")
+        self.self.logger.info(f"📁 Files to process: {len(self.markdown_files)}")
+        self.self.logger.info(f"📂 Output directory: {self.output_dir}")
+        self.self.logger.info(f"👤 Subject: {self.subject_name}")
+        self.self.logger.info(f"🏗️ LLM Provider: {self.llm_provider_id}, Model: {self.llm_model_name}")
         
         # Log all input files
         for i, file_path in enumerate(self.markdown_files):
-            logger.info(f"📄 File {i+1}: {file_path}")
+            self.logger.info(f"📄 File {i+1}: {file_path}")
             if not os.path.exists(file_path):
-                logger.error(f"❌ File does not exist: {file_path}")
+                self.logger.error(f"❌ File does not exist: {file_path}")
             else:
                 file_size = os.path.getsize(file_path)
-                logger.info(f"📊 File {i+1} size: {file_size} bytes")
+                self.logger.info(f"📊 File {i+1} size: {file_size} bytes")
         
-        logger.info("🔧 Initializing LLM provider...")
+        self.logger.info("🔧 Initializing LLM provider...")
         if not self._initialize_llm_provider():
-            logger.error("❌ LLM provider initialization failed")
+            self.logger.error("❌ LLM provider initialization failed")
             self._safe_emit_finished({
                 "total": len(self.markdown_files),
                 "processed": 0,
@@ -221,12 +202,12 @@ class LLMSummaryThread(QThread):
                 "message": "LLM provider initialization failed. No files processed."
             })
             return
-        logger.info("✅ LLM provider initialization successful")
+        self.logger.info("✅ LLM provider initialization successful")
 
         try:
-            logger.info("🔍 Checking LLM provider availability...")
+            self.logger.info("🔍 Checking LLM provider availability...")
             if not self.llm_provider or not self.llm_provider.initialized:
-                logger.error(f"❌ LLM provider not available - provider: {self.llm_provider}, initialized: {self.llm_provider.initialized if self.llm_provider else 'N/A'}")
+                self.logger.error(f"❌ LLM provider not available - provider: {self.llm_provider}, initialized: {self.llm_provider.initialized if self.llm_provider else 'N/A'}")
                 for markdown_path in self.markdown_files:
                     self.file_error.emit(f"LLM provider not available for {os.path.basename(markdown_path)}.")
                 self._safe_emit_finished({
@@ -240,12 +221,12 @@ class LLMSummaryThread(QThread):
                 })    
                 return
             
-            logger.info(f"✅ LLM provider available - Provider: {self.llm_provider.__class__.__name__}")
-            logger.info("📡 Emitting initial progress signal...")
+            self.logger.info(f"✅ LLM provider available - Provider: {self.llm_provider.__class__.__name__}")
+            self.logger.info("📡 Emitting initial progress signal...")
             self._safe_emit_progress(
                 0, f"Starting LLM summarization for {len(self.markdown_files)} files"
             )
-            logger.info("✅ Initial progress signal emitted")
+            self.logger.info("✅ Initial progress signal emitted")
 
             results = {
                 "total": len(self.markdown_files),
@@ -255,27 +236,27 @@ class LLMSummaryThread(QThread):
                 "files": [],
             }
 
-            logger.info(f"🔄 Starting file processing loop for {len(self.markdown_files)} files")
+            self.logger.info(f"🔄 Starting file processing loop for {len(self.markdown_files)} files")
             for i, markdown_path in enumerate(self.markdown_files):
                 try:
                     current_file_basename = os.path.basename(markdown_path)
-                    logger.info(f"📋 Processing file {i+1}/{len(self.markdown_files)}: {current_file_basename}")
+                    self.logger.info(f"📋 Processing file {i+1}/{len(self.markdown_files)}: {current_file_basename}")
                     file_progress_msg = f"Processing file {i+1} of {len(self.markdown_files)}: {current_file_basename}"
                     
-                    logger.info("📡 Emitting file progress signal (0%)...")
+                    self.logger.info("📡 Emitting file progress signal (0%)...")
                     self._safe_emit_file_progress(0, f"Starting: {file_progress_msg}")
-                    logger.info("✅ File progress signal emitted")
+                    self.logger.info("✅ File progress signal emitted")
 
                     basename = os.path.splitext(os.path.basename(markdown_path))[0]
                     summary_file = os.path.join(
                         self.output_dir, f"{basename}_summary.md"
                     )
-                    logger.info(f"📝 Target summary file: {summary_file}")
+                    self.logger.info(f"📝 Target summary file: {summary_file}")
 
                     # Check if file already exists and handle properly
-                    logger.info(f"🔍 Checking if summary file exists: {summary_file}")
+                    self.logger.info(f"🔍 Checking if summary file exists: {summary_file}")
                     if os.path.exists(summary_file):
-                        logger.info(f"⏭️ Skipping {current_file_basename} - summary already exists")
+                        self.logger.info(f"⏭️ Skipping {current_file_basename} - summary already exists")
                         self._safe_emit_file_progress(100, f"Skipped: {current_file_basename} (already exists)")
                         results["skipped"] += 1
                         results["files"].append({
@@ -289,23 +270,23 @@ class LLMSummaryThread(QThread):
                             self.status_panel.append_details(f"✓ SKIPPED: {current_file_basename} - already processed")
                         continue
 
-                    logger.info(f"📖 Reading file contents: {markdown_path}")
+                    self.logger.info(f"📖 Reading file contents: {markdown_path}")
                     self._safe_emit_file_progress(10, f"Reading: {current_file_basename}")
                     with open(markdown_path, "r", encoding="utf-8") as f:
                         markdown_content = f.read()
-                    logger.info(f"✅ File read successfully - {len(markdown_content)} characters")
+                    self.logger.info(f"✅ File read successfully - {len(markdown_content)} characters")
                     self._safe_emit_file_progress(
                         20, f"Successfully read file contents: {len(markdown_content)} bytes"
                     )
 
-                    logger.info(f"🤖 Starting summarization with {self.llm_provider.__class__.__name__}")
+                    self.logger.info(f"🤖 Starting summarization with {self.llm_provider.__class__.__name__}")
                     self._safe_emit_file_progress(30, f"Summarizing: {current_file_basename} with {self.llm_provider.__class__.__name__}")
                     
-                    logger.info("🔄 Calling summarize_markdown_file...")
+                    self.logger.info("🔄 Calling summarize_markdown_file...")
                     summary_content = self.summarize_markdown_file(
                         markdown_path, summary_file, markdown_content
                     )
-                    logger.info(f"✅ Summarization completed - Content length: {len(summary_content) if summary_content else 0}")
+                    self.logger.info(f"✅ Summarization completed - Content length: {len(summary_content) if summary_content else 0}")
                     self._safe_emit_file_progress(80, f"Finalizing: {current_file_basename}")
 
                     if summary_content and summary_content.strip():
@@ -360,10 +341,9 @@ class LLMSummaryThread(QThread):
 
         except Exception as e:
             run_error_msg = f"Critical error in LLM summary thread: {str(e)}"
-            logging.exception(run_error_msg)
+            self.handle_error(e, {"stage": "main_run", "files_count": len(self.markdown_files)})
             if self.status_panel:
                 self.status_panel.append_details(f"❌ ERROR: {run_error_msg}")
-            self._safe_emit_error(run_error_msg)
             self._safe_emit_finished({
                 "total": len(self.markdown_files),
                 "processed": results.get("processed", 0) if 'results' in locals() else 0,
@@ -448,7 +428,7 @@ Please include:
     def process_api_response(self, prompt, system_prompt):
         """Process API response with tenacity retry handling."""
         try:
-            logger.info("🔄 Starting process_api_response...")
+            self.logger.info("🔄 Starting process_api_response...")
             
             # First check if the LLM provider is properly initialized
             if not self.llm_provider:
@@ -459,12 +439,12 @@ Please include:
 
             # Log request details
             provider_name = self.llm_provider.__class__.__name__
-            logger.info(f"📡 Making API request to provider: {provider_name}")
-            logger.info(f"📏 Prompt length: {len(prompt)} characters")
-            logger.info(f"📏 System prompt length: {len(system_prompt)} characters")
+            self.logger.info(f"📡 Making API request to provider: {provider_name}")
+            self.logger.info(f"📏 Prompt length: {len(prompt)} characters")
+            self.logger.info(f"📏 System prompt length: {len(system_prompt)} characters")
             
             # Generate the response using the configured provider
-            logger.info("🚀 Calling llm_provider.generate...")
+            self.logger.info("🚀 Calling llm_provider.generate...")
             
             # Track the start time for timeout monitoring
             api_start_time = time.time()
@@ -482,7 +462,7 @@ Please include:
             
             # Calculate API call duration
             api_duration = time.time() - api_start_time
-            logger.info(f"✅ API response received after {api_duration:.1f} seconds")
+            self.logger.info(f"✅ API response received after {api_duration:.1f} seconds")
             
             if self.status_panel:
                 self.status_panel.append_details(f"✅ API response received ({api_duration:.1f}s)")
@@ -490,7 +470,7 @@ Please include:
             # Check response
             if not response.get("success"):
                 error_msg = response.get("error", "Unknown error")
-                logger.error(f"❌ API response indicates failure: {error_msg}")
+                self.logger.error(f"❌ API response indicates failure: {error_msg}")
                 
                 # Check for specific error types that should trigger retry
                 if any(keyword in error_msg.lower() for keyword in 
@@ -502,10 +482,10 @@ Please include:
             # Check if the response is empty
             content = response.get("content", "").strip()
             if not content:
-                logger.error("❌ LLM returned empty response")
+                self.logger.error("❌ LLM returned empty response")
                 raise Exception("LLM returned empty response")
 
-            logger.info(f"✅ API response successful - Content length: {len(content)} characters")
+            self.logger.info(f"✅ API response successful - Content length: {len(content)} characters")
             
             # Return content directly without aggressive cleanup
             # The aggressive cleanup might be causing the double free
@@ -513,16 +493,16 @@ Please include:
 
         except Exception as e:
             # Log the error but let tenacity handle retries
-            logger.error(f"❌ Error in process_api_response: {str(e)}")
+            self.logger.error(f"❌ Error in process_api_response: {str(e)}")
             error_msg = str(e).lower()
             if any(keyword in error_msg for keyword in 
                    ["rate limit", "timeout", "connection", "429", "502", "503", "504"]):
                 # This is a retryable error - tenacity will handle it
-                logger.info("🔄 Retryable error detected, tenacity will retry...")
+                self.logger.info("🔄 Retryable error detected, tenacity will retry...")
                 raise ConnectionError(str(e))
             else:
                 # This is a non-retryable error
-                logger.error("🚫 Non-retryable error detected, failing immediately")
+                self.logger.error("🚫 Non-retryable error detected, failing immediately")
                 raise Exception(str(e))
 
     def summarize_markdown_file(self, markdown_path, summary_file, markdown_content):
@@ -585,25 +565,25 @@ Please include:
             try:
                 # Start with character-based estimation to avoid unnecessary API calls
                 estimated_tokens = len(markdown_content) // 4  # Reasonable approximation
-                logger.info(f"📏 Estimated tokens (character-based): {estimated_tokens}")
+                self.logger.info(f"📏 Estimated tokens (character-based): {estimated_tokens}")
 
                 # Only count tokens with API if the document might be near our chunking threshold
                 if estimated_tokens > 25000:  # Lower threshold for safety
-                    logger.info("🔢 Document large enough for API token counting...")
+                    self.logger.info("🔢 Document large enough for API token counting...")
                     token_count_result = count_tokens_cached(self.llm_provider, text=markdown_content)
                     if not token_count_result["success"]:
-                        logger.warning("⚠️ API token counting failed, using character-based estimation")
+                        self.logger.warning("⚠️ API token counting failed, using character-based estimation")
                         # Use character-based estimation as fallback
                         token_count = {"success": True, "token_count": estimated_tokens}
                     else:
-                        logger.info(f"✅ API token count successful: {token_count_result['token_count']} tokens")
+                        self.logger.info(f"✅ API token count successful: {token_count_result['token_count']} tokens")
                         token_count = token_count_result
                 else:
                     # Small document, use estimation
-                    logger.info("📄 Small document, using character-based estimation")
+                    self.logger.info("📄 Small document, using character-based estimation")
                     token_count = {"success": True, "token_count": estimated_tokens}
             except Exception as e:
-                logger.error(f"❌ Error in token counting: {str(e)}")
+                self.logger.error(f"❌ Error in token counting: {str(e)}")
                 # Use character-based estimation as fallback
                 estimated_tokens = len(markdown_content) // 4
                 token_count = {"success": True, "token_count": estimated_tokens}
@@ -611,9 +591,9 @@ Please include:
             # Process based on document size
             if token_count["success"] and token_count["token_count"] > 30000:
                 # Document is large, use chunking
-                logger.info(f"📊 Document requires chunking - Token count: {token_count['token_count']}")
+                self.logger.info(f"📊 Document requires chunking - Token count: {token_count['token_count']}")
                 try:
-                    logger.info("✂️ Starting document chunking...")
+                    self.logger.info("✂️ Starting document chunking...")
                     # Use markdown-aware chunking
                     # Get model context window to determine chunk size
                     context_window = TokenCounter.get_model_context_window(self.llm_model_name)
@@ -625,18 +605,18 @@ Please include:
                         max_tokens=max_tokens_per_chunk,
                         overlap=2000 * 4  # Convert overlap tokens to characters (approx)
                     )
-                    logger.info(f"✅ Document split into {len(chunks)} chunks")
+                    self.logger.info(f"✅ Document split into {len(chunks)} chunks")
                     
                     # Estimate processing time (2-3 minutes per chunk is typical)
                     estimated_minutes = len(chunks) * 2.5
-                    logger.info(f"⏱️ Estimated processing time: {estimated_minutes:.1f} minutes for {len(chunks)} chunks")
+                    self.logger.info(f"⏱️ Estimated processing time: {estimated_minutes:.1f} minutes for {len(chunks)} chunks")
                     
                     if self.status_panel:
                         self.status_panel.append_details(f"📊 Document split into {len(chunks)} chunks (est. {estimated_minutes:.1f} min)")
                     
                     # Log chunk sizes for debugging
                     for i, chunk in enumerate(chunks):
-                        logger.info(f"📋 Chunk {i+1}/{len(chunks)}: {len(chunk)} characters")
+                        self.logger.info(f"📋 Chunk {i+1}/{len(chunks)}: {len(chunk)} characters")
 
                     # Process each chunk separately
                     chunk_summaries = []
@@ -664,11 +644,11 @@ Please include:
                         final_content = self.process_api_response(prompt, system_prompt)
                     else:
                         # Multiple chunks - process each separately then combine
-                        logger.info(f"🔄 Processing {len(chunks)} chunks separately...")
+                        self.logger.info(f"🔄 Processing {len(chunks)} chunks separately...")
                         chunk_start_time = time.time()
                         
                         for i, chunk in enumerate(chunks):
-                            logger.info(f"🎯 Starting processing of chunk {i+1}/{len(chunks)}")
+                            self.logger.info(f"🎯 Starting processing of chunk {i+1}/{len(chunks)}")
                             
                             # Update progress for this chunk
                             chunk_progress = int((i / len(chunks)) * 50) + 30  # 30-80% for chunk processing
@@ -680,7 +660,7 @@ Please include:
                             chunk_prompt = self.create_summary_prompt(
                                 f"{document_name} (chunk {i+1}/{len(chunks)})", chunk
                             )
-                            logger.info(f"📝 Created prompt for chunk {i+1}/{len(chunks)} - Prompt length: {len(chunk_prompt)}")
+                            self.logger.info(f"📝 Created prompt for chunk {i+1}/{len(chunks)} - Prompt length: {len(chunk_prompt)}")
 
                             # Get chunk-specific system prompt
                             try:
@@ -697,9 +677,9 @@ Please include:
                                 logging.error(f"Error loading chunk system prompt template: {e}")
                                 chunk_system_prompt = f"You are analyzing chunk {i+1}/{len(chunks)} of a document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
 
-                            logger.info(f"🚀 Processing chunk {i+1}/{len(chunks)} with API...")
+                            self.logger.info(f"🚀 Processing chunk {i+1}/{len(chunks)} with API...")
                             chunk_content = self.process_api_response(chunk_prompt, chunk_system_prompt)
-                            logger.info(f"✅ Chunk {i+1}/{len(chunks)} processed successfully - Content length: {len(chunk_content)}")
+                            self.logger.info(f"✅ Chunk {i+1}/{len(chunks)} processed successfully - Content length: {len(chunk_content)}")
                             
                             # Create chunk summary and append to list
                             chunk_summary = f"## Chunk {i+1}/{len(chunks)} Summary\n\n{chunk_content}"
@@ -727,12 +707,12 @@ Please include:
                             self._safe_emit_file_progress(chunk_done_progress, progress_msg)
 
                         # Combine all chunk summaries
-                        logger.info(f"🔗 Combining {len(chunk_summaries)} chunk summaries...")
+                        self.logger.info(f"🔗 Combining {len(chunk_summaries)} chunk summaries...")
                         combined_chunks = "\n\n".join(chunk_summaries)
-                        logger.info(f"📄 Combined chunks length: {len(combined_chunks)} characters")
+                        self.logger.info(f"📄 Combined chunks length: {len(combined_chunks)} characters")
 
                         # Create a meta-summary prompt
-                        logger.info("🎯 Creating meta-analysis prompt for combined chunks...")
+                        self.logger.info("🎯 Creating meta-analysis prompt for combined chunks...")
                         meta_prompt = f"""
 # Document Integration Task
 
@@ -774,9 +754,9 @@ Please analyze all the chunk summaries and create a unified, coherent summary of
                             logging.error(f"Error loading meta system prompt template: {e}")
                             meta_system_prompt = f"You are analyzing a large document for {self.subject_name} (DOB: {self.subject_dob}). The following case information provides context: {self.case_info}"
                         
-                        logger.info("🚀 Starting meta-analysis API call...")
+                        self.logger.info("🚀 Starting meta-analysis API call...")
                         final_content = self.process_api_response(meta_prompt, meta_system_prompt)
-                        logger.info(f"✅ Meta-analysis completed - Final content length: {len(final_content)}")
+                        self.logger.info(f"✅ Meta-analysis completed - Final content length: {len(final_content)}")
 
                 except Exception as e:
                     raise Exception(f"Error in chunk processing: {str(e)}")

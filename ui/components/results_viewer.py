@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QSplitter, QTreeWidget, QTreeWidgetItem, QTextEdit
 
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 
 
 class ResultsViewer(QSplitter):

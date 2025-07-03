@@ -10,6 +10,7 @@ dependencies = [
     "google-generativeai>=0.8.5",
     "langchain-text-splitters>=0.3.6",
     "openai>=1.84.0",
+    "psutil>=7.0.0",
     "pymupdf>=1.25.5",
     "pyside6>=6.9.1",
     "python-dotenv>=1.1.0",

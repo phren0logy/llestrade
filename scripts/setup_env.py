@@ -163,7 +163,7 @@ def test_api_connectivity():
     # Try to import and initialize the LLM client
     try:
         try:
-            from llm_utils_compat import LLMClientFactory
+            from llm.llm_utils_compat import LLMClientFactory
 
             print("✅ Successfully imported LLMClientFactory")
         except ImportError as e:
@@ -244,7 +244,7 @@ John Doe is a 35-year-old individual born on 1988-01-15.
     # Now try summarizing it directly
     try:
         print("Creating LLM client...")
-        from llm_utils_compat import LLMClientFactory
+        from llm.llm_utils_compat import LLMClientFactory
 
         client = LLMClientFactory.create_client(provider="auto")
 

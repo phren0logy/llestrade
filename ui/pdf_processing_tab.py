@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
+from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.status_panel import StatusPanel
@@ -367,7 +367,7 @@ class PDFProcessingTab(BaseTab):
         progress_dialog.show()
         
         # Import the correct test function
-        from pdf_utils import test_azure_connection as azure_test_func
+        from src.core.pdf_utils import test_azure_connection as azure_test_func
         
         # Test the connection
         try:
