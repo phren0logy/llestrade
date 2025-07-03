@@ -61,11 +61,17 @@ if sys.platform == "darwin":  # macOS specific fix
 
 import logging
 import traceback
+import time
 from pathlib import Path
+from typing import Optional
+
+# Import our new logging and exception handling modules
+from logging_config import ApplicationLogger
+from exception_handler import GlobalExceptionHandler
 
 # Now we can safely import PySide6
-from PySide6.QtCore import QCoreApplication, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import QCoreApplication, QSize, QUrl
+from PySide6.QtGui import QIcon, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication,
     QMainWindow,
@@ -208,12 +214,66 @@ class ForensicReportDrafterApp(QMainWindow):
             event.ignore()
 
 
+def check_for_crashes(crash_dir: Path) -> Optional[Path]:
+    """Check for recent crash files."""
+    if not crash_dir.exists():
+        return None
+        
+    crash_files = sorted(crash_dir.glob("crash_*.txt"), 
+                        key=lambda p: p.stat().st_mtime, 
+                        reverse=True)
+    
+    if crash_files and crash_files[0].stat().st_mtime > (time.time() - 86400):
+        return crash_files[0]
+    return None
+
+
 def main():
     """Main function to start the application."""
+    # Setup logging first
+    logger_config = ApplicationLogger()
+    logger_config.setup(debug="--debug" in sys.argv or os.getenv("DEBUG") == "true")
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Starting Forensic Report Drafter")
+    
+    # Check for recent crashes
+    crash_dir = Path.home() / ".forensic_report_drafter" / "crashes"
+    recent_crash = check_for_crashes(crash_dir)
+    
+    # Create Qt application
     app = QApplication(sys.argv)
+    app.setApplicationName("Forensic Report Drafter")
+    
+    # Install global exception handler
+    exception_handler = GlobalExceptionHandler(crash_dir)
+    exception_handler.install()
+    
+    # Show crash recovery dialog if needed
+    if recent_crash:
+        reply = QMessageBox.question(
+            None,
+            "Previous Crash Detected",
+            f"The application crashed previously.\n\n"
+            f"Would you like to view the crash report?\n{recent_crash}",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(recent_crash)))
+    
+    # Create main window
     main_window = ForensicReportDrafterApp()
     main_window.show()
-    sys.exit(app.exec())
+    
+    # Run application
+    exit_code = app.exec()
+    
+    # Cleanup
+    exception_handler.uninstall()
+    logger.info(f"Application exiting with code {exit_code}")
+    
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
