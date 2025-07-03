@@ -159,11 +159,18 @@ class GeminiProvider(BaseLLMProvider):
                 # Get a GenerativeModel instance
                 gemini_model = self.genai.GenerativeModel(model_name=model)
                 
-                # Add system instruction if provided
-                if system_prompt:
-                    gemini_model = gemini_model.with_system_instruction(system_prompt)
-                elif self.default_system_prompt:
-                    gemini_model = gemini_model.with_system_instruction(self.default_system_prompt)
+                # Add system instruction if provided and supported
+                if hasattr(gemini_model, "with_system_instruction"):
+                    if system_prompt:
+                        gemini_model = gemini_model.with_system_instruction(system_prompt)
+                    elif self.default_system_prompt:
+                        gemini_model = gemini_model.with_system_instruction(self.default_system_prompt)
+                else:
+                    # If with_system_instruction is not available, prepend system prompt to user prompt
+                    if system_prompt:
+                        prompt = f"{system_prompt}\n\n{prompt}"
+                    elif self.default_system_prompt:
+                        prompt = f"{self.default_system_prompt}\n\n{prompt}"
                 
                 # Generate content
                 response = gemini_model.generate_content(

@@ -163,19 +163,19 @@ def test_api_connectivity():
     # Try to import and initialize the LLM client
     try:
         try:
-            from llm.llm_utils_compat import LLMClientFactory
+            from llm import create_provider
 
-            print("✅ Successfully imported LLMClientFactory")
+            print("✅ Successfully imported create_provider")
         except ImportError as e:
-            print(f"❌ Failed to import LLMClientFactory: {str(e)}")
+            print(f"❌ Failed to import create_provider: {str(e)}")
             return False
 
         try:
-            client = LLMClientFactory.create_client(provider="auto")
-            if client:
-                print("✅ Successfully initialized LLM client")
+            provider = create_provider(provider="auto")
+            if provider:
+                print("✅ Successfully initialized LLM provider")
             else:
-                print("❌ LLM client failed to initialize properly")
+                print("❌ LLM provider failed to initialize properly")
                 return False
         except Exception as e:
             print(f"❌ Error initializing LLM client: {str(e)}")
@@ -183,11 +183,11 @@ def test_api_connectivity():
 
         # Test API connectivity with a simple token count request
         try:
-            response = client.count_tokens(text="Test message to count tokens.")
+            response = provider.count_tokens(text="Test message to count tokens.")
 
             if response.get("success", False):
-                provider = getattr(client, "provider", "unknown")
-                print(f"✅ Successfully connected to {provider.capitalize()} API")
+                provider_name = getattr(provider, "provider_name", "unknown")
+                print(f"✅ Successfully connected to {provider_name.capitalize()} API")
                 print(f"   Token count: {response.get('token_count', 'unknown')}")
                 return True
             else:
@@ -244,21 +244,21 @@ John Doe is a 35-year-old individual born on 1988-01-15.
     # Now try summarizing it directly
     try:
         print("Creating LLM client...")
-        from llm.llm_utils_compat import LLMClientFactory
+        from llm import create_provider
 
-        client = LLMClientFactory.create_client(provider="auto")
+        provider = create_provider(provider="auto")
 
         # Check provider information
-        provider = getattr(client, "provider", "unknown")
-        if provider == "anthropic":
+        provider_name = getattr(provider, "provider_name", "unknown")
+        if provider_name == "anthropic":
             print("Using Anthropic Claude for summarization")
             llm_provider = "Anthropic Claude"
-        elif provider == "gemini":
+        elif provider_name == "gemini":
             print("Using Google Gemini for summarization")
             llm_provider = "Google Gemini"
         else:
-            print(f"Using {provider} provider for summarization")
-            llm_provider = provider.capitalize() if provider else "Unknown"
+            print(f"Using {provider_name} provider for summarization")
+            llm_provider = provider_name.capitalize() if provider_name else "Unknown"
 
         # Create prompt
         prompt = f"""
@@ -285,8 +285,8 @@ Keep your analysis focused on factual information directly stated in the documen
         print(f"Prompt length: {len(prompt)} characters")
 
         # Execute summarization
-        response = client.generate_response(
-            prompt_text=prompt,
+        response = provider.generate(
+            prompt=prompt,
             system_prompt="You are analyzing a test document for John Doe.",
             temperature=0.1,
         )

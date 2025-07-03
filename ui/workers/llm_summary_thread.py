@@ -174,11 +174,11 @@ class LLMSummaryThread(BaseWorkerThread):
         # Call base class run() first
         super().run()
         
-        self.self.logger.info("🚀 LLMSummaryThread.run() started")
-        self.self.logger.info(f"📁 Files to process: {len(self.markdown_files)}")
-        self.self.logger.info(f"📂 Output directory: {self.output_dir}")
-        self.self.logger.info(f"👤 Subject: {self.subject_name}")
-        self.self.logger.info(f"🏗️ LLM Provider: {self.llm_provider_id}, Model: {self.llm_model_name}")
+        self.logger.info("🚀 LLMSummaryThread.run() started")
+        self.logger.info(f"📁 Files to process: {len(self.markdown_files)}")
+        self.logger.info(f"📂 Output directory: {self.output_dir}")
+        self.logger.info(f"👤 Subject: {self.subject_name}")
+        self.logger.info(f"🏗️ LLM Provider: {self.llm_provider_id}, Model: {self.llm_model_name}")
         
         # Log all input files
         for i, file_path in enumerate(self.markdown_files):

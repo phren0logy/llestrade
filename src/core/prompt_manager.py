@@ -147,3 +147,19 @@ class PromptManager:
             "system_prompt": system_prompt,
             "user_prompt": user_prompt
         }
+
+
+def combine_transcript_with_fragments(transcript_text: str, fragment: str) -> str:
+    """
+    Combine transcript text with a template fragment.
+    
+    Args:
+        transcript_text: The transcript text to combine with the fragment
+        fragment: Template fragment as a string
+        
+    Returns:
+        Combined prompt as a string
+    """
+    # Add the fragment first, then the transcript with proper wrapping
+    combined = f"{fragment}\n\n<transcript>\n{transcript_text}\n</transcript>"
+    return combined

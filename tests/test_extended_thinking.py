@@ -5,8 +5,12 @@ Test script for Gemini extended thinking capabilities
 
 import logging
 import sys
+from pathlib import Path
 
-from llm.llm_utils_compat import GeminiClient, LLMClientFactory
+# Ensure we can import from the parent directory
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from llm import create_provider
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -15,11 +19,11 @@ def test_gemini_thinking():
     """Test that the Gemini client can use extended thinking."""
     logging.info("Testing Gemini extended thinking...")
     
-    # Create a Gemini client
-    client = LLMClientFactory.create_client(provider="gemini")
+    # Create a Gemini provider
+    provider = create_provider("gemini")
     
-    assert client.is_initialized, "Failed to initialize Gemini client"
-    logging.info("✅ Gemini client initialized successfully")
+    assert provider.initialized, "Failed to initialize Gemini provider"
+    logging.info("✅ Gemini provider initialized successfully")
     
     # Test extended thinking
     # Complex prompt that should trigger multi-step thinking
@@ -32,11 +36,11 @@ def test_gemini_thinking():
     and travel toward each other, how long will it take for them to meet?
     """
     
-    response = client.generate_response_with_extended_thinking(
-        prompt_text=complex_prompt,
+    response = provider.generate_with_thinking(
+        prompt=complex_prompt,
         model="gemini-2.5-pro-preview-05-06",
         temperature=0.7,
-        thinking_budget_tokens=2000,
+        thinking_budget=2000,
     )
     
     assert response["success"], f"Gemini extended thinking failed: {response.get('error', 'Unknown error')}"

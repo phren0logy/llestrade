@@ -9,13 +9,14 @@ import logging
 from pathlib import Path
 from datetime import datetime
 from PySide6.QtWidgets import QMessageBox, QApplication
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QMetaObject, Qt, Q_ARG
 
 
 class GlobalExceptionHandler(QObject):
     """Global exception handler with crash reporting."""
     
     crash_occurred = Signal(str)  # Signal with crash file path
+    show_error_dialog = Signal(str, str, str)  # exc_type, exc_value, crash_file
     
     def __init__(self, crash_dir: Path = None):
         super().__init__()
@@ -45,7 +46,12 @@ class GlobalExceptionHandler(QObject):
         
         # Show user-friendly error dialog if Qt app is running
         if QApplication.instance():
-            self._show_crash_dialog(exc_type, exc_value, crash_file)
+            # Use signal to show dialog on main thread
+            self.show_error_dialog.emit(
+                exc_type.__name__, 
+                str(exc_value), 
+                str(crash_file)
+            )
             
     def _create_crash_dump(self, exc_type, exc_value, exc_traceback):
         """Create a detailed crash dump file."""
@@ -78,13 +84,17 @@ class GlobalExceptionHandler(QObject):
                 
         return crash_file
         
-    def _show_crash_dialog(self, exc_type, exc_value, crash_file):
-        """Show user-friendly crash dialog."""
+    def show_crash_dialog_on_main_thread(self, exc_type_name: str, exc_value: str, crash_file: str):
+        """Show user-friendly crash dialog on main thread.
+        
+        This method should be connected to the show_error_dialog signal
+        and will be called on the main thread via Qt's signal/slot mechanism.
+        """
         QMessageBox.critical(
             None,
             "Application Error",
             f"An unexpected error occurred:\n\n"
-            f"{exc_type.__name__}: {exc_value}\n\n"
+            f"{exc_type_name}: {exc_value}\n\n"
             f"A crash report has been saved to:\n{crash_file}\n\n"
             "Please restart the application and check the logs."
         )

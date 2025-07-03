@@ -35,7 +35,7 @@ def configure_startup_logging():
 def suppress_startup_warnings():
     """Suppress deprecation warnings during startup."""
     # Filter deprecation warnings from compatibility module
-    warnings.filterwarnings('ignore', category=DeprecationWarning, module='llm_utils_compat')
+    # No longer needed - llm_utils_compat has been removed
     warnings.filterwarnings('ignore', category=DeprecationWarning, module='__main__')
     
     # Filter Qt-related warnings

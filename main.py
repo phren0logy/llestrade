@@ -95,7 +95,8 @@ if (
 from src.config.config import APP_TITLE, APP_VERSION, setup_environment_variables
 
 # Import utility modules
-from llm.llm_utils_compat import LLMClientFactory, cached_count_tokens
+from llm import create_provider
+from llm.tokens import TokenCounter
 from ui.analysis_tab import AnalysisTab
 from ui.pdf_processing_tab import PDFProcessingTab
 
@@ -172,21 +173,17 @@ class ForensicReportDrafterApp(QMainWindow):
     def check_api_key(self, provider="auto"):
         """Check if the API key is valid by making a test request."""
         try:
-            # Create client with auto provider selection first
-            # Suppress deprecation warnings since we're intentionally using compatibility layer
-            import warnings
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=DeprecationWarning)
-                client = LLMClientFactory.create_client(provider=provider)
+            # Create provider with auto provider selection first
+            provider_instance = create_provider(provider=provider)
 
-                # Simple test with token counting (minimal API impact)
-                response = cached_count_tokens(client, text="Test connection")
+            # Simple test with token counting (minimal API impact)
+            response = TokenCounter.count(text="Test connection", provider=provider)
 
             # Check response
             if response.get("success", False):
-                provider = getattr(client, "provider", "auto")
+                provider_name = getattr(provider_instance, "provider_name", provider)
                 self.status_bar.showMessage(
-                    f"{provider.capitalize()} API key found. Ready to use.", 5000
+                    f"{provider_name.capitalize()} API key found. Ready to use.", 5000
                 )
             else:
                 error = response.get("error", "Unknown error")
@@ -259,6 +256,12 @@ def main():
     # Install global exception handler
     exception_handler = GlobalExceptionHandler(crash_dir)
     exception_handler.install()
+    
+    # Connect the signal to show error dialogs on main thread
+    exception_handler.show_error_dialog.connect(
+        exception_handler.show_crash_dialog_on_main_thread,
+        Qt.ConnectionType.QueuedConnection  # Ensure it runs on main thread
+    )
     
     # Show crash recovery dialog if needed
     if recent_crash:

@@ -92,9 +92,9 @@ forensic-report-drafter/
    - Entry point, handles Qt plugin paths for macOS
    - Creates the main window with tabbed interface
 
-2. **LLM Integration** (`llm/` directory and `llm/llm_utils_compat.py`)
+2. **LLM Integration** (`llm/` directory)
 
-   **New Modular Structure** (`llm/` directory):
+   **Modular Structure**:
    - `llm/base.py`: Abstract base provider class with Qt patterns (signals, properties)
    - `llm/providers/`:
      - `anthropic.py`: AnthropicProvider with native PDF and extended thinking support
@@ -104,23 +104,18 @@ forensic-report-drafter/
    - `llm/tokens.py`: Centralized token counting with LRU caching
    - `llm/factory.py`: Provider factory with Qt-style patterns
    
-   **Compatibility Layer** (`llm/llm_utils_compat.py`):
-   - Temporary shim for backward compatibility during migration
-   - Maps old API (`LLMClient`, `LLMClientFactory`) to new structure
-   - Provides deprecation warnings for smooth transition
-   - Will be removed once full migration is complete
-   
    **Key Features**:
-   - Token counting with caching via `cached_count_tokens()`
-   - Model-aware chunking via `chunk_document()` with markdown header preservation
+   - Token counting with caching via `TokenCounter.count()` and `count_tokens_cached()`
+   - Model-aware chunking via `ChunkingStrategy.markdown_headers()` with header preservation
    - `MODEL_CONTEXT_WINDOWS`: Dictionary of model token limits (using 65% for safety)
    - Extended thinking support for Anthropic and Gemini providers
+   - Factory pattern via `create_provider()` for easy provider instantiation
 
 3. **Configuration System** (`src/config/app_config.py`)
 
    - Manages LLM provider settings via `app_settings.json`
    - Azure deployment names read from `AZURE_OPENAI_DEPLOYMENT_NAME` env var
-   - `get_configured_llm_client()`: Main factory method for LLM providers (currently using compatibility layer)
+   - `get_configured_llm_provider()`: Main factory method for LLM providers (returns provider instance)
 
 4. **UI Structure** (in `ui/` directory)
 
@@ -203,7 +198,6 @@ OPENAI_API_VERSION=2025-01-01-preview
 ### Startup Configuration
 
 The application uses `startup_config.py` to provide a clean startup experience:
-- Suppresses deprecation warnings from the compatibility layer
 - Reduces logging verbosity for LLM provider initialization
 - Hides Qt plugin warnings unless debugging is enabled
 
@@ -212,34 +206,38 @@ To enable debug output, set these environment variables:
 - `DEBUG_LLM=true` - LLM provider debug logging
 - `DEBUG_QT=true` - Qt plugin debug output
 
-## LLM Module Migration Status
+## LLM Module Architecture
 
-### Current State (2025-06-30)
-- All code currently uses `llm_utils_compat.py` as a compatibility layer
-- The old monolithic `llm_utils.py` (2,467 lines) is still present but not imported
-- New modular `llm/` package is fully implemented and functional
+### Current State (2025-07-03)
+- All code now uses the new modular `llm/` package directly
+- Migration from `llm_utils_compat.py` completed
+- Clean, modular structure with Qt integration patterns
 
-### Migration Path
-1. **Phase 1 (COMPLETED)**: Create new modular structure and compatibility layer
-2. **Phase 2 (CURRENT)**: Update all imports to use compatibility layer
-3. **Phase 3 (TODO)**: Gradually migrate from compatibility layer to direct `llm/` imports
-4. **Phase 4 (TODO)**: Remove `llm_utils.py` and `llm_utils_compat.py`
-
-### New LLM API Examples
+### LLM API Examples
 
 ```python
-# Current (using compatibility layer)
-from llm_utils_compat import LLMClientFactory
-client = LLMClientFactory.create_client(provider="auto")
-
-# Future (direct usage)
+# Create a provider
 from llm import create_provider
-provider = create_provider("anthropic", api_key="...")
-response = await provider.generate_async(prompt, model="claude-3")
+provider = create_provider("anthropic")  # or "gemini", "azure_openai", "auto"
+
+# Generate a response
+response = provider.generate(
+    prompt="What is the capital of France?",
+    model="claude-3-sonnet",
+    temperature=0.7
+)
+
+# Count tokens
+from llm.tokens import TokenCounter
+result = TokenCounter.count(text="Hello world", provider="anthropic")
 
 # Markdown-aware chunking
-from llm.chunking import chunk_document
-chunks = chunk_document(text, max_tokens=100000, overlap_tokens=2000)
+from llm.chunking import ChunkingStrategy
+chunks = ChunkingStrategy.markdown_headers(text, max_tokens=100000, overlap_tokens=2000)
+
+# Combine transcript with fragments (utility function)
+from src.core.prompt_manager import combine_transcript_with_fragments
+combined = combine_transcript_with_fragments(transcript, fragment)
 ```
 
 ### Qt Integration Patterns

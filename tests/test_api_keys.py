@@ -6,8 +6,13 @@ Test script for API key detection and client initialization
 import logging
 import os
 import sys
+from pathlib import Path
 
-from llm.llm_utils_compat import GeminiClient, LLMClientFactory
+# Ensure we can import from the parent directory
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from llm import create_provider
+from llm.providers import GeminiProvider
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -31,23 +36,24 @@ def test_api_keys():
     
     assert gemini_key is not None and anthropic_key is not None, "Both Gemini and Anthropic API keys must be available"
 
-def test_direct_gemini_client():
-    """Test direct creation of Gemini client."""
-    logging.info("Creating Gemini client directly...")
+def test_direct_gemini_provider():
+    """Test direct creation of Gemini provider."""
+    logging.info("Creating Gemini provider directly...")
     
     try:
-        # Directly create Gemini client
-        client = LLMClientFactory.create_client(provider="gemini")
+        # Directly create Gemini provider
+        provider = create_provider("gemini")
         
-        assert isinstance(client, GeminiClient), f"Expected GeminiClient, got {client.__class__.__name__}"
-        logging.info("Created GeminiClient instance")
+        assert isinstance(provider, GeminiProvider), f"Expected GeminiProvider, got {provider.__class__.__name__}"
+        logging.info("Created GeminiProvider instance")
         
-        assert client.is_initialized, "Gemini client should be initialized"
-        logging.info("Gemini client initialized successfully")
+        assert provider.initialized, "Gemini provider should be initialized"
+        logging.info("Gemini provider initialized successfully")
         
         # Test simple request
-        response = client.generate_response(
-            prompt_text="What is the capital of France?",
+        response = provider.generate(
+            prompt="What is the capital of France?",
+            system_prompt="You are a helpful assistant.",
             model="gemini-2.5-pro-preview-05-06",
             temperature=0.1
         )
@@ -56,7 +62,7 @@ def test_direct_gemini_client():
         logging.info(f"Gemini response: {response['content'][:50]}...")
         
     except Exception as e:
-        logging.error(f"Error creating Gemini client: {str(e)}")
+        logging.error(f"Error creating Gemini provider: {str(e)}")
         raise
 
 def main():
@@ -64,8 +70,8 @@ def main():
     logging.info("Testing API key availability...")
     test_api_keys()
     
-    logging.info("Testing direct Gemini client creation...")
-    test_direct_gemini_client()
+    logging.info("Testing direct Gemini provider creation...")
+    test_direct_gemini_provider()
     
     logging.info("🎉 All tests passed!")
     return 0

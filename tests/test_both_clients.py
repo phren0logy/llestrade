@@ -7,7 +7,9 @@ import logging
 import os
 import sys
 
-from llm.llm_utils_compat import AnthropicClient, GeminiClient, LLMClientFactory
+from llm import create_provider
+from llm.providers.anthropic import AnthropicProvider
+from llm.providers.gemini import GeminiProvider
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -17,14 +19,14 @@ def test_both_clients():
     
     # Initialize both clients directly
     logging.info("Initializing Anthropic client...")
-    anthropic_client = LLMClientFactory.create_client(provider="anthropic")
+    anthropic_client = create_provider(provider="anthropic")
     
     logging.info("Initializing Gemini client...")
-    gemini_client = LLMClientFactory.create_client(provider="gemini")
+    gemini_client = create_provider(provider="gemini")
     
     # Test if both clients initialized (using hasattr to avoid isinstance issues with mocks)
-    anthropic_working = hasattr(anthropic_client, 'is_initialized') and anthropic_client.is_initialized
-    gemini_working = hasattr(gemini_client, 'is_initialized') and gemini_client.is_initialized
+    anthropic_working = hasattr(anthropic_client, 'initialized') and anthropic_client.initialized
+    gemini_working = hasattr(gemini_client, 'initialized') and gemini_client.initialized
     
     logging.info(f"Anthropic client initialized: {anthropic_working}")
     logging.info(f"Gemini client initialized: {gemini_working}")

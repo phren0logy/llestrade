@@ -29,7 +29,8 @@ from PySide6.QtWidgets import (
 
 from src.config.app_config import get_available_providers_and_models, get_configured_llm_client
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
-from llm.llm_utils_compat import LLMClientFactory, cached_count_tokens
+from llm import create_provider
+from llm.tokens import TokenCounter
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
 from ui.components.status_panel import StatusPanel

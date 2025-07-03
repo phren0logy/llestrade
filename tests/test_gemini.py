@@ -18,7 +18,8 @@ logging.basicConfig(
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 # Import our LLM utils
-from llm.llm_utils_compat import GeminiClient, LLMClientFactory
+from llm import create_provider
+from llm.providers.gemini import GeminiProvider
 
 # Test direct Google Generative AI import
 try:
@@ -33,15 +34,15 @@ def test_gemini_client():
     logging.info("Testing Gemini client initialization...")
     
     # Create a Gemini client directly
-    gemini_client = LLMClientFactory.create_client(provider="gemini")
+    gemini_client = create_provider(provider="gemini")
     
-    assert gemini_client.is_initialized, "Failed to initialize Gemini client"
+    assert gemini_client.initialized, "Failed to initialize Gemini client"
     logging.info("✅ Gemini client initialized successfully")
     
     # Test a simple response
     logging.info("Testing Gemini response generation...")
-    response = gemini_client.generate_response(
-        prompt_text="What is the capital of France?",
+    response = gemini_client.generate(
+        prompt="What is the capital of France?",
         model="gemini-2.5-pro-preview-05-06",
         temperature=0.1,
     )
@@ -60,10 +61,10 @@ def test_auto_client_fallback():
     try:
         if original_anthropic_key:
             logging.info("Testing auto client with Anthropic API key available...")
-            auto_client = LLMClientFactory.create_client(provider="auto")
+            auto_client = create_provider(provider="auto")
             
             # Check if Anthropic was selected (using hasattr to avoid isinstance issues)
-            if hasattr(auto_client, 'is_initialized') and auto_client.is_initialized:
+            if hasattr(auto_client, 'initialized') and auto_client.initialized:
                 logging.info("✅ Auto client correctly selected a working client (likely Anthropic)")
                 return  # Early return if a working client is available
     finally:
@@ -75,14 +76,14 @@ def test_auto_client_fallback():
             os.environ.pop("ANTHROPIC_API_KEY", None)
             logging.info("Testing fallback to Gemini (removed Anthropic key)...")
         
-        auto_client = LLMClientFactory.create_client(provider="auto")
+        auto_client = create_provider(provider="auto")
         
-        assert hasattr(auto_client, 'is_initialized') and auto_client.is_initialized, "Auto client selection should have initialized a working client"
+        assert hasattr(auto_client, 'initialized') and auto_client.initialized, "Auto client selection should have initialized a working client"
         logging.info("✅ Auto client selection correctly fell back to a working client")
         
         # Test a response
-        response = auto_client.generate_response(
-            prompt_text="Tell me a short joke.",
+        response = auto_client.generate(
+            prompt="Tell me a short joke.",
             model="gemini-2.5-pro-preview-05-06",
             temperature=0.7,
         )
