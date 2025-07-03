@@ -14,6 +14,8 @@ from dataclasses import dataclass, asdict, field
 
 from PySide6.QtCore import QObject, Signal, QTimer
 
+from .secure_settings import SecureSettings
+
 
 @dataclass
 class ProjectMetadata:
@@ -166,6 +168,15 @@ class ProjectManager(QObject):
         # Save initial project file
         self.save_project()
         
+        # Add to recent projects
+        settings = SecureSettings()
+        project_info = {
+            'name': project_name,
+            'metadata': asdict(self.metadata),
+            'last_modified': datetime.now().isoformat()
+        }
+        settings.add_recent_project(str(self.project_path), project_info)
+        
         # Start auto-save
         self._auto_save_timer.start()
         
@@ -198,6 +209,15 @@ class ProjectManager(QObject):
             self.costs = ProjectCosts.from_dict(data.get("costs", {}))
             self.workflow_state = WorkflowState.from_dict(data.get("workflow_state", {}))
             self.settings = data.get("settings", {})
+            
+            # Update recent projects
+            settings = SecureSettings()
+            project_info = {
+                'name': self.project_name,
+                'metadata': asdict(self.metadata),
+                'last_modified': datetime.now().isoformat()
+            }
+            settings.add_recent_project(str(self.project_path), project_info)
             
             # Start auto-save
             self._auto_save_timer.start()
@@ -251,6 +271,15 @@ class ProjectManager(QObject):
             
             # Move temp file to actual path
             temp_path.replace(self.project_path)
+            
+            # Update recent projects
+            settings = SecureSettings()
+            project_info = {
+                'name': self.project_name or self.project_path.stem,
+                'metadata': asdict(self.metadata) if self.metadata else {},
+                'last_modified': datetime.now().isoformat()
+            }
+            settings.add_recent_project(str(self.project_path), project_info)
             
             self._modified = False
             self.project_saved.emit()

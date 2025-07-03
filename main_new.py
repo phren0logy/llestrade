@@ -7,7 +7,7 @@ import sys
 import logging
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget, QHBoxLayout
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget, QHBoxLayout, QFileDialog
 from PySide6.QtCore import Qt, QTimer
 
 # Add src to path for imports
@@ -114,7 +114,8 @@ class SimplifiedMainWindow(QMainWindow):
     def _startup(self):
         """Handle application startup."""
         # Register stages
-        from src.new.stages import ProjectSetupStage, DocumentImportStage
+        from src.new.stages import WelcomeStage, ProjectSetupStage, DocumentImportStage
+        self.stage_manager.register_stage('welcome', WelcomeStage)
         self.stage_manager.register_stage('setup', ProjectSetupStage)
         self.stage_manager.register_stage('import', DocumentImportStage)
         
@@ -134,8 +135,8 @@ class SimplifiedMainWindow(QMainWindow):
         if missing_keys:
             self.logger.info(f"Missing API keys for: {missing_keys}")
         
-        # For now, start with project setup
-        self._new_project()
+        # Start with welcome screen
+        self._show_welcome()
     
     def set_stage_widget(self, widget):
         """Set the current stage widget."""
@@ -153,9 +154,29 @@ class SimplifiedMainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(widget)
     
+    def _show_welcome(self):
+        """Show the welcome screen."""
+        self.logger.info("Showing welcome screen")
+        # Hide navigation buttons on welcome screen
+        self.back_action.setVisible(False)
+        self.next_action.setVisible(False)
+        # Load welcome stage
+        stage = self.stage_manager.load_stage('welcome')
+        if stage:
+            # Connect welcome stage signals
+            stage.new_project_requested.connect(self._new_project)
+            stage.project_opened.connect(self._load_project)
+        # Hide sidebar on welcome screen
+        self.workflow_sidebar.setVisible(False)
+    
     def _new_project(self):
         """Start a new project."""
         self.logger.info("Starting new project")
+        # Show navigation buttons
+        self.back_action.setVisible(True)
+        self.next_action.setVisible(True)
+        # Show sidebar
+        self.workflow_sidebar.setVisible(True)
         # Load the setup stage
         self.stage_manager.load_stage('setup')
         # Update sidebar
@@ -163,8 +184,52 @@ class SimplifiedMainWindow(QMainWindow):
     
     def _open_project(self):
         """Open an existing project."""
-        # TODO: Implement project open dialog
-        self.logger.info("Open project - not yet implemented")
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open Project",
+            str(Path.home()),
+            "Forensic Report Project (*.frpd)"
+        )
+        
+        if file_path:
+            self._load_project(Path(file_path))
+    
+    def _load_project(self, project_path: Path):
+        """Load a specific project."""
+        self.logger.info(f"Loading project: {project_path}")
+        
+        # Create project manager if needed
+        if not self.project_manager:
+            self.project_manager = ProjectManager()
+        
+        try:
+            # Load the project
+            project = self.project_manager.load_project(project_path)
+            
+            # Show navigation and sidebar
+            self.back_action.setVisible(True)
+            self.next_action.setVisible(True)
+            self.workflow_sidebar.setVisible(True)
+            
+            # Determine which stage to show based on project state
+            if project.state.current_stage:
+                self.stage_manager.load_stage(project.state.current_stage)
+            else:
+                # Project exists but no progress, start at import
+                self.stage_manager.load_stage('import')
+            
+            # Update UI
+            self._update_sidebar_progress(project.state.current_stage or 'import')
+            self.statusBar().showMessage(f"Loaded project: {project.metadata.case_name}")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to load project: {e}")
+            QMessageBox.critical(
+                self,
+                "Failed to Load Project",
+                f"Could not load the project:\n{str(e)}"
+            )
     
     def _open_settings(self):
         """Open settings dialog."""
@@ -184,7 +249,13 @@ class SimplifiedMainWindow(QMainWindow):
     
     def _go_back(self):
         """Navigate to previous stage."""
-        self.stage_manager.previous_stage()
+        # Check if we're going back to welcome
+        current_stage = self.stage_manager.current_stage_name
+        if current_stage == 'setup':
+            # Going back to welcome
+            self._show_welcome()
+        else:
+            self.stage_manager.previous_stage()
     
     def _go_next(self):
         """Navigate to next stage."""

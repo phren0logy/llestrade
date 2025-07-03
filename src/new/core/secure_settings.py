@@ -6,6 +6,7 @@ Handles API keys and sensitive configuration using OS keychain.
 import json
 import logging
 from pathlib import Path
+from datetime import datetime
 from typing import Dict, Optional, Any
 
 try:
@@ -195,16 +196,26 @@ class SecureSettings(QObject):
         return settings_copy
     
     # Recent Projects
-    def add_recent_project(self, project_path: str):
-        """Add a project to recent projects list."""
+    def add_recent_project(self, project_path: str, project_info: dict = None):
+        """Add a project to recent projects list with metadata."""
         recent = self._settings.get("recent_projects", [])
         
-        # Remove if already exists
-        if project_path in recent:
-            recent.remove(project_path)
+        # Remove if already exists (check by path)
+        recent = [p for p in recent if (isinstance(p, dict) and p.get('path') != project_path) or (isinstance(p, str) and p != project_path)]
+        
+        # Create project entry
+        if project_info:
+            entry = project_info
+            entry['path'] = project_path
+        else:
+            entry = {
+                'path': project_path,
+                'name': Path(project_path).stem,
+                'last_modified': datetime.now().isoformat()
+            }
         
         # Add to front
-        recent.insert(0, project_path)
+        recent.insert(0, entry)
         
         # Limit size
         max_recent = self._settings.get("max_recent_projects", 10)
@@ -214,8 +225,33 @@ class SecureSettings(QObject):
         self._save_settings()
     
     def get_recent_projects(self) -> list:
-        """Get list of recent projects."""
-        return self._settings.get("recent_projects", [])
+        """Get list of recent projects with backward compatibility."""
+        recent = self._settings.get("recent_projects", [])
+        
+        # Convert old string format to new dict format
+        converted = []
+        for item in recent:
+            if isinstance(item, str):
+                # Old format - convert to dict
+                converted.append({
+                    'path': item,
+                    'name': Path(item).stem,
+                    'last_modified': ''
+                })
+            else:
+                converted.append(item)
+        
+        return converted
+    
+    def remove_recent_project(self, project_path: str):
+        """Remove a project from recent projects list."""
+        recent = self._settings.get("recent_projects", [])
+        
+        # Remove by path (handle both old string and new dict format)
+        recent = [p for p in recent if (isinstance(p, dict) and p.get('path') != project_path) or (isinstance(p, str) and p != project_path)]
+        
+        self._settings["recent_projects"] = recent
+        self._save_settings()
     
     def clear_recent_projects(self):
         """Clear recent projects list."""
