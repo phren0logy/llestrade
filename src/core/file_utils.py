@@ -6,6 +6,7 @@ Provides functions for file operations, including reading, writing, and previewi
 import logging
 import os
 from pathlib import Path
+from datetime import datetime
 
 
 def read_file_content(file_path):
@@ -174,3 +175,129 @@ def suggest_output_filename(input_path, suffix="output", default_name="output.md
         return f"{name}-{suffix}{ext}"
     except:
         return default_name
+
+
+def process_docx_to_markdown(docx_path: str, output_dir: str) -> str:
+    """
+    Convert a Word document to markdown format.
+    
+    Args:
+        docx_path: Path to the Word document
+        output_dir: Directory to save the output
+        
+    Returns:
+        str: Path to the generated markdown file
+    """
+    try:
+        import pypandoc
+        
+        # Prepare output path
+        docx_path = Path(docx_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(exist_ok=True)
+        
+        output_filename = docx_path.stem + ".md"
+        output_path = output_dir / output_filename
+        
+        # Convert using pandoc
+        pypandoc.convert_file(
+            str(docx_path),
+            'md',
+            outputfile=str(output_path),
+            extra_args=['--wrap=none', '--extract-media=' + str(output_dir / 'media')]
+        )
+        
+        logging.info(f"Converted {docx_path.name} to markdown")
+        return str(output_path)
+        
+    except ImportError:
+        # Fallback: use python-docx to extract text
+        logging.warning("pypandoc not available, using basic text extraction")
+        try:
+            from docx import Document
+            
+            doc = Document(str(docx_path))
+            
+            # Extract text from paragraphs
+            content = []
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    content.append(para.text)
+                    
+            # Extract text from tables
+            for table in doc.tables:
+                content.append("\n| " + " | ".join(["Column"] * len(table.columns)) + " |")
+                content.append("| " + " | ".join(["---"] * len(table.columns)) + " |")
+                for row in table.rows:
+                    row_text = "| " + " | ".join(cell.text.strip() for cell in row.cells) + " |"
+                    content.append(row_text)
+                content.append("")
+                
+            # Save as markdown
+            output_filename = docx_path.stem + ".md"
+            output_path = output_dir / output_filename
+            
+            markdown_content = "\n\n".join(content)
+            
+            # Add metadata
+            metadata = f"""---
+title: {docx_path.stem}
+source: {docx_path.name}
+converted: {datetime.now().isoformat()}
+---
+
+"""
+            
+            write_file_content(str(output_path), metadata + markdown_content)
+            logging.info(f"Extracted text from {docx_path.name} to markdown")
+            return str(output_path)
+            
+        except ImportError:
+            raise ImportError("Neither pypandoc nor python-docx is available for Word document processing")
+    except Exception as e:
+        logging.error(f"Error processing Word document: {e}")
+        raise
+
+
+def process_txt_to_markdown(txt_path: str, output_dir: str) -> str:
+    """
+    Convert a text file to markdown format.
+    
+    Args:
+        txt_path: Path to the text file
+        output_dir: Directory to save the output
+        
+    Returns:
+        str: Path to the generated markdown file
+    """
+    try:
+        txt_path = Path(txt_path)
+        output_dir = Path(output_dir)
+        output_dir.mkdir(exist_ok=True)
+        
+        # Read the text file
+        content = read_file_content(str(txt_path))
+        
+        # Add metadata header
+        metadata = f"""---
+title: {txt_path.stem}
+source: {txt_path.name}
+converted: {datetime.now().isoformat()}
+---
+
+"""
+        
+        # Basic formatting: treat double newlines as paragraph breaks
+        formatted_content = content.replace('\n\n', '\n\n')
+        
+        # Save as markdown
+        output_filename = txt_path.stem + ".md"
+        output_path = output_dir / output_filename
+        
+        write_file_content(str(output_path), metadata + formatted_content)
+        logging.info(f"Converted {txt_path.name} to markdown")
+        return str(output_path)
+        
+    except Exception as e:
+        logging.error(f"Error processing text file: {e}")
+        raise

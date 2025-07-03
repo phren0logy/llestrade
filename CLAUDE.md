@@ -275,3 +275,59 @@ combined = combine_transcript_with_fragments(transcript, fragment)
 - Providers emit Qt signals for async operations
 - Factory uses Qt-style naming conventions
 - Thread-safe operations with proper signal/slot connections
+
+## New Simplified UI Development (January 2025)
+
+A new memory-safe, stage-based UI is being developed in parallel with the current tab-based UI:
+
+### Running the New UI
+
+```bash
+# Run new UI
+uv run main.py --new-ui
+# or
+./run_new_ui.sh
+```
+
+### Completed Stages
+
+1. **Welcome Stage** (`src/new/stages/welcome_stage.py`)
+   - Recent projects grid with metadata display
+   - API key status indicators
+   - Quick actions (New Project, Open Project)
+
+2. **Project Setup Stage** (`src/new/stages/setup_stage.py`)
+   - Case information form
+   - Subject details
+   - Output directory selection
+   - API key configuration
+
+3. **Document Import Stage** (`src/new/stages/import_stage.py`)
+   - Drag-and-drop file interface
+   - Multiple file selection
+   - File type validation (PDF, DOC, DOCX, TXT, MD)
+   - Live preview for text files
+
+4. **Document Processing Stage** (`src/new/stages/process_stage.py`)
+   - PDF conversion via Azure Document Intelligence
+   - Word document conversion
+   - Text file to markdown conversion
+   - Thread-safe processing with progress tracking
+
+5. **Analysis Stage** (`src/new/stages/analysis_stage.py`)
+   - LLM provider selection (Anthropic, Gemini, Azure OpenAI)
+   - Document summarization with chunking for large files
+   - Progress tracking and status updates
+   - Skip already summarized files option
+
+### Architecture
+
+- **Project-based workflow**: All work organized in `.frpd` project files
+- **Stage-based navigation**: Linear workflow with back/next navigation
+- **Memory-safe design**: Single worker thread per stage, proper cleanup
+- **Auto-save**: Project state saved every 60 seconds
+- **Secure API storage**: Uses OS keychain with encrypted fallback
+
+### Status
+
+The new UI is functional through the Analysis stage. Remaining stages (Report Generation, Refinement) are still in development.

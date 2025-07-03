@@ -342,7 +342,7 @@ class WelcomeStage(BaseStage):
     def _on_configure_api_keys(self):
         """Open API key configuration dialog."""
         from src.new.widgets import APIKeyDialog
-        dialog = APIKeyDialog(self)
+        dialog = APIKeyDialog(self.settings, self)
         if dialog.exec():
             # Update status after configuration
             self._update_api_status()

@@ -168,13 +168,29 @@ def get_configured_llm_provider(
 
     effective_model_name = None
     if selected_provider_id == "azure_openai":
-        factory_args["azure_endpoint"] = specific_config.get("azure_endpoint")
-        factory_args["api_version"] = specific_config.get("api_version")
-        effective_model_name = model_override if model_override else specific_config.get("default_deployment_name")
+        # Try to get Azure settings from SecureSettings if available
+        try:
+            from src.new.core import SecureSettings
+            secure_settings = SecureSettings()
+            azure_settings = secure_settings.get("azure_openai_settings", {})
+            
+            # Use SecureSettings values if available, otherwise fall back to config
+            factory_args["azure_endpoint"] = azure_settings.get("endpoint") or specific_config.get("azure_endpoint")
+            factory_args["api_version"] = azure_settings.get("api_version") or specific_config.get("api_version")
+            
+            # For deployment name, check SecureSettings first
+            effective_model_name = model_override or azure_settings.get("deployment") or specific_config.get("default_deployment_name")
+        except Exception as e:
+            logging.debug(f"Could not load SecureSettings for Azure OpenAI: {e}")
+            # Fall back to original behavior
+            factory_args["azure_endpoint"] = specific_config.get("azure_endpoint")
+            factory_args["api_version"] = specific_config.get("api_version")
+            effective_model_name = model_override if model_override else specific_config.get("default_deployment_name")
+        
         if not effective_model_name:
             logging.error(
-                f"Azure OpenAI is selected, but its 'default_deployment_name' is not configured "
-                f"(either via override or in '{SETTINGS_FILE}' for provider '{provider_label}'). This is required."
+                f"Azure OpenAI is selected, but its 'deployment_name' is not configured "
+                f"(either via override, SecureSettings, or in '{SETTINGS_FILE}' for provider '{provider_label}'). This is required."
             )
             return None
     else:  # For Anthropic, Gemini, etc.

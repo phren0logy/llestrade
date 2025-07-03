@@ -1381,9 +1381,9 @@ class AnalysisTab(BaseTab):
         subject_dob = self.dob_input.text()
         case_info = self.case_info_input.toPlainText()
 
-        combined_summary_filename = f"{subject_name}_Combined_Summaries.md" if subject_name else "Combined_Summaries.md"
+        # Use the same filename that was used when combining summaries
         combined_summary_path = os.path.join(
-            self.results_output_directory, "summaries", combined_summary_filename
+            self.results_output_directory, COMBINED_SUMMARY_FILENAME
         )
 
         if not os.path.exists(combined_summary_path):

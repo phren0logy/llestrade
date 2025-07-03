@@ -9,7 +9,17 @@ This plan outlines the step-by-step migration from the current tab-based archite
 - ✅ Project structure reorganized for parallel development
 - ✅ Prompt template path issues fixed
 - ✅ PDF processing skip detection implemented
-- 🚧 Phase 2 In Progress: UI components and stages being implemented
+- ✅ Phase 2 Core Stages Complete: Document Processing and Analysis stages functional
+- 🚧 Phase 2 In Progress: Report Generation and Refinement stages
+
+## Recent Accomplishments (January 11, 2025)
+
+### New UI Development ✅
+- **Analysis Stage**: Complete implementation with multi-provider LLM support
+- **Document Chunking**: Smart chunking for large documents based on model context windows
+- **API Key Dialog Enhancement**: Added support for all required services (Azure OpenAI, Azure DI, Langfuse)
+- **SecureSettings Integration**: Azure configurations now pull from secure storage
+- **Progress Tracking**: Real-time status updates during document analysis
 
 ## Completed Bug Fixes and Improvements
 
@@ -17,6 +27,11 @@ This plan outlines the step-by-step migration from the current tab-based archite
 - **Thread Safety**: Fixed memory crashes by replacing direct UI access with Qt signals
 - **Prompt Template Paths**: Fixed path calculations after project reorganization
 - **PDF Skip Detection**: Added logging and UI feedback when PDFs are already converted
+
+### New UI Fixes ✅
+- **APIKeyDialog**: Fixed parameter passing from WelcomeStage
+- **Import Paths**: Corrected process_pdf_with_azure import name
+- **Azure Configuration**: Updated app_config to use SecureSettings for Azure OpenAI
 
 ## Phase 1: Foundation (Week 1) ✅ COMPLETED
 
@@ -65,10 +80,13 @@ Implemented in `main_new.py`:
 - Integration with ProjectManager
 
 #### APIKeyDialog (`src/new/widgets/api_key_dialog.py`) ✅
-- Secure API key configuration
-- Password field with show/hide toggle
+- Secure API key configuration with tab-based organization
+- Password fields with show/hide toggle
 - Direct links to provider dashboards
-- Azure-specific settings support
+- Azure OpenAI settings (endpoint, deployment, API version)
+- Azure Document Intelligence configuration
+- Langfuse integration settings (public/private keys, URL)
+- Integration with SecureSettings for persistent storage
 
 #### DocumentImportStage (`src/new/stages/import_stage.py`) ✅
 - Drag-and-drop file interface
@@ -90,10 +108,10 @@ Implemented in `main_new.py`:
 - Progress percentage tracking
 - Connected to StageManager for automatic updates
 
-## Phase 2: Core Functionality Migration (Week 2-3) 🚧 IN PROGRESS
+## Phase 2: Core Functionality Migration (Week 2-3) 🚧 MOSTLY COMPLETE
 
-### 2.1 Document Processing Stage 🔄 NEXT
-Migrate PDF processing functionality with improvements:
+### 2.1 Document Processing Stage ✅ COMPLETED
+Implemented in `src/new/stages/process_stage.py`:
 
 ```python
 # src/ui/stages/document_processing.py
@@ -117,8 +135,8 @@ class DocumentProcessingStage(BaseStage):
             self.worker.deleteLater()
 ```
 
-### 2.2 Analysis Stage
-Simplified analysis with better resource management:
+### 2.2 Analysis Stage ✅ COMPLETED
+Implemented in `src/new/stages/analysis_stage.py`:
 
 ```python
 # src/ui/stages/analysis.py
@@ -326,25 +344,50 @@ Total estimated time: 8 weeks for complete migration
    - Integrated workflow sidebar
    - Menu and toolbar system
    - Stage-based navigation
+   - Welcome screen integration
 
 2. **Core Systems**
    - ProjectManager with auto-save and backup
    - StageManager with proper cleanup
-   - SecureSettings for API keys
+   - SecureSettings for API keys and recent projects
    - BaseStage abstract class
+   - Recent projects tracking with metadata
 
 3. **Functional Stages**
+   - WelcomeStage (recent projects, API status)
    - ProjectSetupStage (complete with validation)
    - DocumentImportStage (drag-drop support)
+   - DocumentProcessStage (PDF/Word/text conversion)
+   - AnalysisStage (LLM-powered document summarization)
 
 4. **UI Components**
    - WorkflowSidebar with visual progress
    - APIKeyDialog for secure configuration
+   - Project cards with metadata display
+   - Processing log with color-coded output
 
-5. **Bug Fixes**
+5. **Document Processing**
+   - PDF conversion via Azure Document Intelligence
+   - Word document conversion (pypandoc/python-docx)
+   - Text file to markdown conversion
+   - Skip detection for already processed files
+   - Thread-safe processing with progress tracking
+   - Integration with SecureSettings for Azure DI credentials
+
+6. **Document Analysis**
+   - Multi-provider LLM support (Anthropic, Gemini, Azure OpenAI)
+   - Automatic document chunking for large files
+   - Progress tracking with real-time status updates
+   - Skip detection for already summarized files
+   - Integration with SecureSettings for provider configuration
+
+7. **Bug Fixes**
    - Thread safety in legacy workers
    - Prompt template path resolution
    - PDF skip detection and reporting
+   - QRect import location fix
+   - APIKeyDialog parameter passing fix
+   - Azure OpenAI configuration from SecureSettings
 
 ## Immediate Next Steps (Priority Order)
 
@@ -367,27 +410,49 @@ Total estimated time: 8 weeks for complete migration
 - [x] Clickable navigation (when allowed)
 - [x] Time estimates per stage
 
-### 4. Implement Welcome Screen (1-2 days) 🔄 NEXT
-- [ ] Recent projects grid
-- [ ] New project button
-- [ ] Open project functionality
-- [ ] API key status summary
-- [ ] Quick start guide
+### 4. Implement Welcome Screen (1-2 days) ✅
+- [x] Recent projects grid
+- [x] New project button
+- [x] Open project functionality
+- [x] API key status summary
+- [x] Quick start guide
 
-### 5. Create Document Processing Stage (2-3 days)
-- [ ] Convert PDFs with Azure Document Intelligence
-- [ ] Process Word documents
-- [ ] Handle text file imports
-- [ ] Show processing progress
-- [ ] Error handling and retry logic
+### 5. Create Document Processing Stage (2-3 days) ✅
+- [x] Convert PDFs with Azure Document Intelligence
+- [x] Process Word documents
+- [x] Handle text file imports
+- [x] Show processing progress
+- [x] Error handling and retry logic
+
+### 6. Create Analysis Stage (2-3 days) ✅
+- [x] Load processed markdown files
+- [x] Generate summaries using LLM
+- [x] Show progress for each document
+- [x] Handle chunking for large documents
+- [x] Save summaries to project
+
+### 7. Create Report Generation Stage (2-3 days) 🔄 NEXT
+- [ ] Load document summaries
+- [ ] Generate integrated analysis
+- [ ] Combine summaries into cohesive report
+- [ ] Template-based report generation
+- [ ] Export options (markdown, PDF, Word)
+
+### 8. Create Refinement Stage (2-3 days)
+- [ ] Load generated report
+- [ ] LLM-powered refinement suggestions
+- [ ] Manual editing capabilities
+- [ ] Version history tracking
+- [ ] Final export functionality
 
 ## Technical Debt to Address
 
 ### High Priority
-- [ ] Install keyring module for secure API storage
+- [x] Install keyring module for secure API storage (completed in pyproject.toml)
 - [ ] Add pytest fixtures for new UI components
 - [ ] Create integration tests for stage transitions
 - [ ] Document new architecture in README
+- [ ] Add error handling for missing Azure DI credentials
 
 ### Medium Priority  
 - [ ] Implement proper logging for new UI

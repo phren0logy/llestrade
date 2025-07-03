@@ -26,7 +26,7 @@ class StageManager(QObject):
         'setup',      # Project setup
         'import',     # Document import
         'process',    # Document processing
-        'analyze',    # Analysis
+        'analysis',   # Analysis
         'generate',   # Report generation
         'refine'      # Refinement
     ]
