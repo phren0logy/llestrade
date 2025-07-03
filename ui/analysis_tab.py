@@ -925,7 +925,6 @@ class AnalysisTab(BaseTab):
                 subject_name=self.subject_name,
                 subject_dob=self.subject_dob,
                 case_info=self.case_info,
-                status_panel=self.status_panel, # Pass status panel for detailed logging by thread
                 llm_provider_id=self.llm_provider_id_for_summary, # Pass stored LLM info
                 llm_model_name=self.llm_model_name_for_summary  # Pass stored LLM info
             )
@@ -939,6 +938,9 @@ class AnalysisTab(BaseTab):
             )
             self.single_file_thread.error_signal.connect(
                 self.on_file_error, Qt.ConnectionType.QueuedConnection
+            )
+            self.single_file_thread.status_signal.connect(
+                self.on_status_update, Qt.ConnectionType.QueuedConnection
             )
 
             # Start processing
@@ -1023,6 +1025,17 @@ class AnalysisTab(BaseTab):
         # Move to next file
         self.current_file_index += 1
         QTimer.singleShot(100, self.process_next_file)
+
+    def on_status_update(self, status_info):
+        """Handle status updates from the thread."""
+        if isinstance(status_info, dict):
+            message = status_info.get("message", "")
+            message_type = status_info.get("type", "info")
+            
+            if message_type == "error":
+                self.status_panel.append_error(message)
+            else:
+                self.status_panel.append_details(message)
 
     def _cleanup_current_thread(self):
         """Clean up the current thread safely."""

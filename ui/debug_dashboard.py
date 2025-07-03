@@ -3,7 +3,7 @@ Debug dashboard for real-time application monitoring and debugging.
 Provides logs, system stats, and active operation tracking.
 """
 
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPlainTextEdit,
                              QPushButton, QTabWidget, QTableWidget, QTableWidgetItem,
                              QCheckBox, QSpinBox, QLabel, QFileDialog, QDockWidget)
 from PySide6.QtCore import QTimer, Qt, Signal, Slot, QMutexLocker, QMutex
@@ -100,7 +100,7 @@ class DebugDashboard(QWidget):
         layout = QVBoxLayout()
         
         # Log viewer
-        self.log_viewer = QTextEdit()
+        self.log_viewer = QPlainTextEdit()
         self.log_viewer.setReadOnly(True)
         self.log_viewer.setMaximumBlockCount(10000)  # Limit log size
         layout.addWidget(self.log_viewer)

@@ -11,7 +11,16 @@ This is a Forensic Psych Report Drafter - a PySide6 (Qt) desktop application for
 ### Running the Application
 
 ```bash
+# Run current (legacy) UI
 uv run main.py
+
+# Run new simplified UI (under development)
+uv run main.py --new-ui
+# or
+./run_new_ui.sh
+
+# Run with debug mode
+./run_debug.sh
 ```
 
 ### Running Tests
@@ -54,7 +63,9 @@ uv run scripts/setup_env.py
 
 ```
 forensic-report-drafter/
-├── main.py                    # Application entry point
+├── main.py                    # Smart launcher (NEW - routes to legacy or new UI)
+├── main_legacy.py             # Current application (RENAMED from main.py)
+├── main_new.py                # New simplified UI (UNDER DEVELOPMENT)
 ├── src/
 │   ├── config/               # Configuration modules
 │   │   ├── app_config.py    # LLM provider configuration

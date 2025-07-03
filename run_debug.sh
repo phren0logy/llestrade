@@ -36,4 +36,4 @@ echo ""
 # Run the application with uv
 echo "Launching application..."
 echo "================================================"
-uv run main.py
+uv run main.py "$@"

@@ -92,6 +92,8 @@ Better progress tracking than current implementation:
 
 - Replace .env file and the folder of templates with an option that is more distribution-friendly
 
+## 9. Notifications
+
 ## Notes
 
 These features were part of a different UI paradigm (Streamlit's page-based approach) so implementation in PySide6 would need to be adapted to fit the desktop application model. The most valuable features appear to be cost tracking, model auto-discovery, and enhanced progress indicators.

@@ -63,6 +63,7 @@ class LLMSummaryThread(BaseWorkerThread):
         subject_name, 
         subject_dob, 
         case_info,
+        status_panel,
         llm_provider_id,
         llm_model_name
     ):
@@ -73,6 +74,7 @@ class LLMSummaryThread(BaseWorkerThread):
         self.subject_name = subject_name
         self.subject_dob = subject_dob
         self.case_info = case_info
+        self.status_panel = status_panel
         self.llm_provider_id = llm_provider_id
         self.llm_model_name = llm_model_name
         self.llm_provider = None
@@ -180,13 +182,19 @@ class LLMSummaryThread(BaseWorkerThread):
             if self.llm_provider and self.llm_provider.initialized:
                 self.logger.info(f"🎉 LLM provider initialization successful!")
                 # Use signal instead of direct UI access
-                self._safe_emit_status(f"LLM provider initialized successfully: {self.llm_provider_id}", "info")
+                self.status_signal.emit({
+                    "type": "info",
+                    "message": f"LLM provider initialized successfully: {self.llm_provider_id}"
+                })
                 return True
             else:
                 error_msg = f"Failed to get configured LLM provider for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
                 self.logger.error(f"❌ {error_msg}")
                 # Use signal instead of direct UI access
-                self._safe_emit_status(f"❌ ERROR: {error_msg}", "error")
+                self.status_signal.emit({
+                    "type": "error", 
+                    "message": f"❌ ERROR: {error_msg}"
+                })
                 logging.error(error_msg)
                 self._safe_emit_error(error_msg)
                 return False
@@ -332,8 +340,8 @@ class LLMSummaryThread(BaseWorkerThread):
                             "status": "success",
                             "message": f"Successfully summarized {len(summary_content)} characters"
                         })
-                        # Use signal instead of direct UI access
-                        self._safe_emit_status(f"✓ SUCCESS: {current_file_basename} - summary created ({len(summary_content)} chars)")
+                        if self.status_panel:
+                            self.status_panel.append_details(f"✓ SUCCESS: {current_file_basename} - summary created ({len(summary_content)} chars)")
                         self.file_finished.emit(results["files"][-1])
                     else:
                         results["failed"] += 1
@@ -345,14 +353,15 @@ class LLMSummaryThread(BaseWorkerThread):
                             "error": error_msg,
                             "message": error_msg
                         })
-                        self._safe_emit_status(f"❌ FAILED: {current_file_basename} - {error_msg}", "error")
+                        if self.status_panel:
+                            self.status_panel.append_details(f"❌ FAILED: {current_file_basename} - {error_msg}")
                         self.file_error.emit(f"Summarization failed for {current_file_basename}: {error_msg}")
 
                 except Exception as e:
                     error_message = f"Error summarizing {os.path.basename(markdown_path)}: {str(e)}"
                     logging.exception(error_message)
-                    # Use signal instead of direct UI access
-                    self._safe_emit_status(f"❌ ERROR: {os.path.basename(markdown_path)} - {str(e)}", "error")
+                    if self.status_panel:
+                        self.status_panel.append_details(f"❌ ERROR: {os.path.basename(markdown_path)} - {str(e)}")
                     results["failed"] += 1
                     results["files"].append({
                         "path": markdown_path,
@@ -372,7 +381,8 @@ class LLMSummaryThread(BaseWorkerThread):
         except Exception as e:
             run_error_msg = f"Critical error in LLM summary thread: {str(e)}"
             self.handle_error(e, {"stage": "main_run", "files_count": len(self.markdown_files)})
-            self._safe_emit_status(f"❌ ERROR: {run_error_msg}", "error")
+            if self.status_panel:
+                self.status_panel.append_details(f"❌ ERROR: {run_error_msg}")
             self._safe_emit_finished({
                 "total": len(self.markdown_files),
                 "processed": results.get("processed", 0) if 'results' in locals() else 0,
@@ -404,7 +414,8 @@ class LLMSummaryThread(BaseWorkerThread):
                 prompt_template = f.read()
         except FileNotFoundError:
             error_msg = f"Prompt template file not found at {prompt_template_path}"
-            self._safe_emit_status(f"❌ ERROR: {error_msg}", "error")
+            if self.status_panel:
+                self.status_panel.append_details(f"❌ ERROR: {error_msg}")
             logging.error(error_msg)
             # Return a basic fallback prompt
             return f"""Please provide a comprehensive summary of the following document for {self.subject_name} (DOB: {self.subject_dob}).
@@ -424,7 +435,8 @@ Please include:
 """
         except Exception as e:
             error_msg = f"Error reading prompt template: {str(e)}"
-            self._safe_emit_status(f"❌ ERROR: {error_msg}", "error")
+            if self.status_panel:
+                self.status_panel.append_details(f"❌ ERROR: {error_msg}")
             logging.error(error_msg)
             # Return a basic fallback prompt
             return f"Summarize this document for {self.subject_name}: {markdown_content}"
@@ -440,7 +452,8 @@ Please include:
             return prompt
         except Exception as e:
             error_msg = f"Error formatting prompt template: {str(e)}"
-            self._safe_emit_status(f"❌ ERROR: {error_msg}", "error")
+            if self.status_panel:
+                self.status_panel.append_details(f"❌ ERROR: {error_msg}")
             logging.error(error_msg)
             # Return a basic fallback prompt
             return f"Summarize this document for {self.subject_name}: {markdown_content}"
@@ -482,8 +495,8 @@ Please include:
             api_start_time = time.time()
             
             # Emit progress updates during long API calls
-            # Use signal instead of direct UI access
-            self._safe_emit_status(f"📡 Making API request to {provider_name}...")
+            if self.status_panel:
+                self.status_panel.append_details(f"📡 Making API request to {provider_name}...")
             
             response = self.llm_provider.generate(
                 prompt=prompt,
@@ -502,7 +515,8 @@ Please include:
                 mem_info = process.memory_info()
                 self.logger.info(f"📊 Memory after API call - RSS: {mem_info.rss / 1024 / 1024:.1f} MB, VMS: {mem_info.vms / 1024 / 1024:.1f} MB")
             
-            self._safe_emit_status(f"✅ API response received ({api_duration:.1f}s)")
+            if self.status_panel:
+                self.status_panel.append_details(f"✅ API response received ({api_duration:.1f}s)")
 
             # Check response
             if not response.get("success"):
@@ -647,7 +661,8 @@ Please include:
                     estimated_minutes = len(chunks) * 2.5
                     self.logger.info(f"⏱️ Estimated processing time: {estimated_minutes:.1f} minutes for {len(chunks)} chunks")
                     
-                    self._safe_emit_status(f"📊 Document split into {len(chunks)} chunks (est. {estimated_minutes:.1f} min)")
+                    if self.status_panel:
+                        self.status_panel.append_details(f"📊 Document split into {len(chunks)} chunks (est. {estimated_minutes:.1f} min)")
                     
                     # Log chunk sizes for debugging
                     for i, chunk in enumerate(chunks):
@@ -689,7 +704,8 @@ Please include:
                             chunk_progress = int((i / len(chunks)) * 50) + 30  # 30-80% for chunk processing
                             self._safe_emit_file_progress(chunk_progress, f"Processing chunk {i+1}/{len(chunks)}")
                             
-                            self._safe_emit_status(f"🔍 Processing chunk {i+1} of {len(chunks)} chunks")
+                            if self.status_panel:
+                                self.status_panel.append_details(f"🔍 Processing chunk {i+1} of {len(chunks)} chunks")
                             
                             chunk_prompt = self.create_summary_prompt(
                                 f"{document_name} (chunk {i+1}/{len(chunks)})", chunk
