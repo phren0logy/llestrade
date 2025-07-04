@@ -297,13 +297,13 @@ The application has two UIs running in parallel:
    
 2. **New UI** (in development) - Modern stage-based workflow
    - Run with: `uv run main.py --new-ui`
-   - 5 of 6 stages complete:
+   - 6 of 7 stages complete:
      - ✅ Welcome & Project Management
      - ✅ Project Setup (case information)
      - ✅ Document Import (drag & drop)
      - ✅ Document Processing (PDF/Word/Text conversion)
      - ✅ Analysis (LLM summarization)
-     - ❌ Report Generation (not implemented)
+     - ✅ Report Generation (integrated analysis)
      - ❌ Refinement & Export (not implemented)
 
 The new UI addresses memory issues through single-stage architecture and provides a project-based workflow with `.frpd` files.

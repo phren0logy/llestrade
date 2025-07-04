@@ -320,6 +320,12 @@ uv run main.py --new-ui
    - Progress tracking and status updates
    - Skip already summarized files option
 
+6. **Report Generation Stage** (`src/new/stages/report_stage.py`)
+   - Integrated analysis from all summaries
+   - Choice between comprehensive and template-based reports
+   - LLM provider selection
+   - Report preview and export
+
 ### Architecture
 
 - **Project-based workflow**: All work organized in `.frpd` project files
@@ -330,7 +336,7 @@ uv run main.py --new-ui
 
 ### Status
 
-The new UI is functional through the Analysis stage (5 of 6 stages complete). Users can create projects, import documents, process them, and generate summaries. The Report Generation and Refinement stages are not yet implemented.
+The new UI is functional through the Report Generation stage (6 of 7 stages complete). Users can create projects, import documents, process them, generate summaries, and create integrated reports. Only the Refinement stage remains to be implemented.
 
 ## Documentation
 

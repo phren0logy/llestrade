@@ -2,6 +2,15 @@
 
 This document tracks completed work on the Forensic Psych Report Drafter.
 
+## 2025-07-04 - Report Generation Stage Implementation
+- Implemented ReportGenerationStage for the new UI (stage 6 of 7)
+- Created ReportGenerationThread worker for async report creation
+- Added support for both integrated analysis and template-based reports
+- Integrated with existing LLM providers (Anthropic, Gemini, Azure OpenAI)
+- Updated StageManager to properly load the new stage
+- Updated documentation to reflect 6/7 stages now complete
+- Only Refinement stage remains to complete the new UI
+
 ## 2025-07-04 - Documentation Consolidation
 - Consolidated 6 overlapping documentation files into 4 focused documents
 - Updated main README.md with current project status and two-UI explanation

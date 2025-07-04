@@ -133,7 +133,9 @@ class StageManager(QObject):
                 return
             
             # Try to import from stages module
-            module = __import__(f'src.new.stages.{stage_name}_stage', fromlist=[class_name])
+            # Special case for 'generate' which maps to 'report_stage'
+            module_name = 'report_stage' if stage_name == 'generate' else f'{stage_name}_stage'
+            module = __import__(f'src.new.stages.{module_name}', fromlist=[class_name])
             stage_class = getattr(module, class_name, None)
             
             if stage_class:
