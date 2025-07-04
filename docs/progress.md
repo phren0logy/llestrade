@@ -2,6 +2,15 @@
 
 This document tracks completed work on the Forensic Psych Report Drafter.
 
+## 2025-07-04 - Fixed Project Advancement from Setup to Import Stage
+- Added `project_data` property to ProjectManager to provide data in format expected by stages
+- Added `project_name` property to extract name from project path
+- Updated StageManager to properly propagate project reference to ALL stages after creation
+- Fixed metadata update to accept ProjectMetadata objects directly
+- Ensured all stages receive project reference when project is created
+- Resolved issue where users couldn't advance past project setup stage
+- Created and ran tests to verify the fixes work correctly
+
 ## 2025-07-04 - QStackedWidget UI Simplification
 - Replaced complex dynamic widget replacement system with QStackedWidget
 - Pre-create all stage widgets at startup for predictable memory usage

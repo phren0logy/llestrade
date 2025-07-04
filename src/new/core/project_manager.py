@@ -316,11 +316,16 @@ class ProjectManager(QObject):
         self.project_changed.emit()
     
     # Metadata management
-    def update_metadata(self, **kwargs):
+    def update_metadata(self, metadata=None, **kwargs):
         """Update project metadata."""
-        if not self.metadata:
+        if metadata and isinstance(metadata, ProjectMetadata):
+            # If a ProjectMetadata object is passed, use it directly
+            self.metadata = metadata
+        elif not self.metadata:
+            # Create new metadata from kwargs
             self.metadata = ProjectMetadata(**kwargs)
         else:
+            # Update existing metadata with kwargs
             for key, value in kwargs.items():
                 if hasattr(self.metadata, key):
                     setattr(self.metadata, key, value)
@@ -385,6 +390,37 @@ class ProjectManager(QObject):
         return []
     
     # Cleanup
+    @property
+    def project_data(self) -> Dict[str, Any]:
+        """Provide project data in the format expected by stages."""
+        if not self.project_path:
+            return {}
+        
+        return {
+            'paths': {
+                'base': str(self.project_dir),
+                'source_documents': str(self.project_dir / 'source_documents'),
+                'processed_documents': str(self.project_dir / 'processed_documents'),
+                'summaries': str(self.project_dir / 'summaries'),
+                'reports': str(self.project_dir / 'reports'),
+                'templates': str(self.project_dir / 'templates'),
+                'logs': str(self.project_dir / 'logs'),
+                'backups': str(self.project_dir / 'backups')
+            },
+            'metadata': self.metadata.to_dict() if self.metadata else {},
+            'settings': self.settings,
+            'workflow_state': self.workflow_state.to_dict(),
+            'costs': self.costs.to_dict(),
+            'project_id': self.project_id
+        }
+    
+    @property
+    def project_name(self) -> str:
+        """Get the project name from the project path."""
+        if self.project_path:
+            return self.project_path.stem
+        return ""
+    
     def close_project(self):
         """Close the current project."""
         # Stop auto-save

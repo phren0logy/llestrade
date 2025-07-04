@@ -206,20 +206,30 @@ class StageManager(QObject):
             base_path = Path(output_dir)
             project_path = self.main_window.project_manager.create_project(base_path, metadata)
             
-            # Load the project
-            self.project = self.main_window.project_manager.load_project(project_path)
+            # The project is already loaded in create_project, so just get the reference
+            self.project = self.main_window.project_manager
             if self.project:
                 # Store template preference
                 if template:
                     self.project.update_settings(template=template)
-                # Update the current stage with the new project
-                if self.current_stage:
-                    self.current_stage.project = self.project
+                
+                # Update ALL stage widgets with the new project
+                for stage_name, stage_widget in self.stage_widgets.items():
+                    if hasattr(stage_widget, 'project'):
+                        stage_widget.project = self.project
+                        self.logger.debug(f"Updated project reference for stage: {stage_name}")
+                    if hasattr(stage_widget, 'load_state'):
+                        try:
+                            # Only load state for stages that should have data
+                            if stage_name in self.project.workflow_state.completed_stages:
+                                stage_widget.load_state()
+                        except Exception as e:
+                            self.logger.debug(f"Could not load state for {stage_name}: {e}")
             
             self.logger.info(f"Created new project at: {project_path}")
             
         except Exception as e:
-            self.logger.error(f"Failed to create project: {e}")
+            self.logger.error(f"Failed to create project: {e}", exc_info=True)
             self.error.emit(f"Failed to create project: {str(e)}")
     
     def _on_validation_changed(self, is_valid: bool):
