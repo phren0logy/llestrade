@@ -276,7 +276,7 @@ combined = combine_transcript_with_fragments(transcript, fragment)
 - Factory uses Qt-style naming conventions
 - Thread-safe operations with proper signal/slot connections
 
-## New Simplified UI Development (January 2025)
+## New Simplified UI Development
 
 A new memory-safe, stage-based UI is being developed in parallel with the current tab-based UI:
 
@@ -330,4 +330,20 @@ uv run main.py --new-ui
 
 ### Status
 
-The new UI is functional through the Analysis stage. Remaining stages (Report Generation, Refinement) are still in development.
+The new UI is functional through the Analysis stage (5 of 6 stages complete). Users can create projects, import documents, process them, and generate summaries. The Report Generation and Refinement stages are not yet implemented.
+
+## Documentation
+
+### Documentation Structure
+- `README.md` - Main project documentation and status
+- `CLAUDE.md` - Technical reference for AI assistants
+- `docs/progress.md` - Changelog of completed work
+- `docs/roadmap.md` - Future development plans and feature ideas
+- `docs/simplified_workflow.md` - New UI architectural design
+
+### Documentation Guidelines
+- Keep the main README.md updated with current project status
+- Log completed work in docs/progress.md with dates
+- Add feature ideas and plans to docs/roadmap.md
+- Avoid specific dates in forward-looking documentation
+- Technical implementation details belong in CLAUDE.md

@@ -1,11 +1,24 @@
-# Progress Report - January 11, 2025
+# Development Progress
 
-## Overview
-Today we completed Phase 1 of the new UI implementation, establishing the foundation for parallel UI development while fixing critical thread safety issues in the legacy application.
+This document tracks completed work on the Forensic Psych Report Drafter.
+
+## 2025-07-04 - Documentation Consolidation
+- Consolidated 6 overlapping documentation files into 4 focused documents
+- Updated main README.md with current project status and two-UI explanation
+- Created comprehensive roadmap.md combining feature ideas with development priorities
+- Removed outdated files with incorrect January 2025 dates
+- Established clear documentation hierarchy
+
+## 2025-07-03 - New UI Implementation
+
+### Overview
+
+Completed Phase 1 of the new UI implementation, establishing the foundation for parallel UI development while fixing critical thread safety issues in the legacy application.
 
 ## Completed Tasks
 
 ### 1. Fixed Critical Thread Safety Issues ✅
+
 - **Problem**: Direct UI access from worker threads causing malloc double-free crashes
 - **Solution**: Replaced all direct UI access with Qt signal/slot mechanism
 - **Files Updated**:
@@ -15,6 +28,7 @@ Today we completed Phase 1 of the new UI implementation, establishing the founda
 - **Result**: Thread-safe UI updates, preventing memory crashes
 
 ### 2. Reorganized Project Structure ✅
+
 - **Created Directory Structure**:
   ```
   src/
@@ -30,13 +44,16 @@ Today we completed Phase 1 of the new UI implementation, establishing the founda
 - **Backward Compatibility**: Created symlinks for smooth transition
 
 ### 3. Implemented Foundation Classes ✅
+
 - **SecureSettings** (`src/new/core/secure_settings.py`)
+
   - OS keychain integration for API keys
   - Falls back to encrypted file storage
   - Window state persistence
   - Recent projects management
 
 - **ProjectManager** (`src/new/core/project_manager.py`)
+
   - Handles .frpd project files
   - Auto-save every 60 seconds
   - Automatic backups (keeps last 10)
@@ -50,6 +67,7 @@ Today we completed Phase 1 of the new UI implementation, establishing the founda
   - Dynamic stage loading
 
 ### 4. Created New UI Entry Point ✅
+
 - **main_new.py**: Functional new UI with basic window
 - **Smart Launcher**: `main.py` routes to either UI based on `--new-ui` flag
 - **Both UIs Working**: Can run side-by-side for testing
@@ -65,16 +83,16 @@ Today we completed Phase 1 of the new UI implementation, establishing the founda
 ## Next Steps
 
 ### Week 2 Priorities
+
 1. **ProjectSetupStage** (2-3 days)
    - Case information form
    - API key validation
    - Template selection
-   
 2. **Workflow Sidebar** (2 days)
    - Visual progress indicator
    - Stage navigation
-   
 3. **Cost Tracking Widget** (1 day)
+
    - Real-time display
    - Export functionality
 
@@ -85,6 +103,7 @@ Today we completed Phase 1 of the new UI implementation, establishing the founda
 ## Technical Notes
 
 ### Running the Application
+
 ```bash
 # Legacy UI (default)
 ./main.py
@@ -97,20 +116,20 @@ USE_NEW_UI=true ./main.py
 ```
 
 ### Import Changes
+
 - UI imports: `from ui.` → `from src.legacy.ui.`
 - LLM imports: `from llm.` → `from src.common.llm.`
 
 ### Testing
+
 All existing tests updated and passing. Ready to create parallel test suite for new UI.
 
 ## Risks & Mitigations
 
 1. **Risk**: Import errors during transition
    - **Mitigation**: Symlinks maintain compatibility
-   
 2. **Risk**: Memory leaks in new stages
    - **Mitigation**: BaseStage class enforces cleanup pattern
-   
 3. **Risk**: API key security
    - **Mitigation**: OS keychain with encrypted fallback
 

@@ -286,3 +286,31 @@ See `pyproject.toml` for complete dependency list.
 For issues and feature requests, please use the GitHub issue tracker.
 
 For detailed documentation, see the `docs/` directory and `CLAUDE.md` for AI assistant guidance.
+
+## Project Status
+
+### Current Implementation
+The application has two UIs running in parallel:
+
+1. **Legacy UI** (default) - Fully functional tab-based interface
+   - Run with: `uv run main.py`
+   
+2. **New UI** (in development) - Modern stage-based workflow
+   - Run with: `uv run main.py --new-ui`
+   - 5 of 6 stages complete:
+     - ✅ Welcome & Project Management
+     - ✅ Project Setup (case information)
+     - ✅ Document Import (drag & drop)
+     - ✅ Document Processing (PDF/Word/Text conversion)
+     - ✅ Analysis (LLM summarization)
+     - ❌ Report Generation (not implemented)
+     - ❌ Refinement & Export (not implemented)
+
+The new UI addresses memory issues through single-stage architecture and provides a project-based workflow with `.frpd` files.
+
+## Documentation
+
+- `CLAUDE.md` - AI assistant guidance and technical details
+- `docs/progress.md` - Development changelog
+- `docs/roadmap.md` - Future features and development priorities
+- `docs/simplified_workflow.md` - New UI architecture reference
