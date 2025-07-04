@@ -16,18 +16,16 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QDate, Signal
 from PySide6.QtGui import QIcon, QPalette
 
-from src.new.core import BaseStage, ProjectMetadata
+from src.new.core import BaseStage, ProjectMetadata, SecureSettings
 
 
 class ProjectSetupStage(BaseStage):
     """Initial project setup and metadata collection."""
     
-    # Additional signal for API key configuration
-    configure_api_keys = Signal()
-    
     def __init__(self, project=None):
         # Track if this is a new project or editing existing
         self.is_new_project = project is None
+        self.settings = SecureSettings()
         
         # Call parent init after setting our attributes
         super().__init__(project)
@@ -49,10 +47,6 @@ class ProjectSetupStage(BaseStage):
         desc.setStyleSheet("color: #666;")
         layout.addWidget(desc)
         
-        # API Key Status
-        self.api_status_widget = self._create_api_status_widget()
-        layout.addWidget(self.api_status_widget)
-        
         # Main form
         form_widget = self._create_form_widget()
         layout.addWidget(form_widget)
@@ -64,37 +58,6 @@ class ProjectSetupStage(BaseStage):
         # Add stretch to push everything to the top
         layout.addStretch()
         
-        # Update API status
-        self._update_api_status()
-        
-    def _create_api_status_widget(self) -> QWidget:
-        """Create widget showing API key status."""
-        group = QGroupBox("API Configuration")
-        layout = QHBoxLayout(group)
-        
-        # Status indicators for each provider
-        self.api_indicators = {}
-        providers = [
-            ("Anthropic", "anthropic"),
-            ("Google Gemini", "gemini"),
-            ("Azure OpenAI", "azure_openai")
-        ]
-        
-        for display_name, key in providers:
-            indicator = QLabel(f"● {display_name}")
-            indicator.setToolTip(f"{display_name} API key status")
-            self.api_indicators[key] = indicator
-            layout.addWidget(indicator)
-        
-        layout.addStretch()
-        
-        # Configure button
-        configure_btn = QPushButton("Configure API Keys")
-        configure_btn.clicked.connect(self._on_configure_api_keys)
-        layout.addWidget(configure_btn)
-        
-        return group
-    
     def _create_form_widget(self) -> QWidget:
         """Create the main form widget."""
         widget = QWidget()
@@ -113,9 +76,23 @@ class ProjectSetupStage(BaseStage):
         self.case_number_edit.setPlaceholderText("e.g., 2025-CV-1234")
         case_layout.addRow("Case Number:", self.case_number_edit)
         
+        # Evaluator name - auto-populated from settings
         self.evaluator_edit = QLineEdit()
-        self.evaluator_edit.setPlaceholderText("e.g., Dr. Jane Smith")
+        evaluator_name = self.settings.get_setting("evaluator_name", "")
+        if evaluator_name:
+            self.evaluator_edit.setText(evaluator_name)
+            self.evaluator_edit.setReadOnly(True)
+            self.evaluator_edit.setStyleSheet("QLineEdit { background-color: #f5f5f5; }")
+            self.evaluator_edit.setToolTip("Evaluator name is set in application settings")
+        else:
+            self.evaluator_edit.setPlaceholderText("Set evaluator name in app settings")
         case_layout.addRow("Evaluator:", self.evaluator_edit)
+        
+        # Note about evaluator
+        if not evaluator_name:
+            evaluator_note = QLabel("⚠️ Please set your name in File → Settings")
+            evaluator_note.setStyleSheet("color: #ff9800; font-size: 12px;")
+            case_layout.addRow("", evaluator_note)
         
         layout.addWidget(case_group)
         
@@ -200,243 +177,161 @@ class ProjectSetupStage(BaseStage):
         
         layout.addStretch()
         
-        # Cancel button (only for new projects)
-        if self.is_new_project:
-            cancel_btn = QPushButton("Cancel")
-            cancel_btn.clicked.connect(self._on_cancel)
-            layout.addWidget(cancel_btn)
-        
-        # Create/Save button
-        self.create_btn = QPushButton("Create Project" if self.is_new_project else "Save Changes")
-        self.create_btn.setObjectName("primary")
-        self.create_btn.setStyleSheet("""
-            QPushButton#primary {
-                background-color: #1976d2;
-                color: white;
-                font-weight: bold;
-                padding: 8px 20px;
-                border-radius: 4px;
-            }
-            QPushButton#primary:hover {
-                background-color: #1565c0;
-            }
-            QPushButton#primary:disabled {
-                background-color: #ccc;
-            }
-        """)
-        self.create_btn.clicked.connect(self._on_create_project)
-        layout.addWidget(self.create_btn)
+        # Settings button (if evaluator not set)
+        evaluator_name = self.settings.get_setting("evaluator_name", "")
+        if not evaluator_name:
+            settings_btn = QPushButton("Open Settings")
+            settings_btn.clicked.connect(self._open_settings)
+            layout.addWidget(settings_btn)
         
         return widget
     
-    def _update_api_status(self):
-        """Update API key status indicators."""
-        # Get settings from parent window
-        main_window = self.window()
-        if not hasattr(main_window, 'settings'):
-            return
-        
-        for provider, indicator in self.api_indicators.items():
-            has_key = main_window.settings.has_api_key(provider)
-            
-            # Extract base label text (remove existing ✓/✗)
-            text = indicator.text()
-            if text.startswith(('✓ ', '✗ ')):
-                text = text[2:]
-            
-            if has_key:
-                indicator.setStyleSheet("color: #4caf50;")  # Green
-                indicator.setText(f"✓ {text}")
-            else:
-                indicator.setStyleSheet("color: #f44336;")  # Red
-                indicator.setText(f"✗ {text}")
-    
     def _browse_output_dir(self):
         """Browse for output directory."""
-        current = self.output_dir_edit.text() or str(Path.home() / "Documents")
+        # Start from Documents folder
+        start_dir = str(Path.home() / "Documents")
         
-        dir_path = QFileDialog.getExistingDirectory(
+        directory = QFileDialog.getExistingDirectory(
             self,
             "Select Output Directory",
-            current,
+            start_dir,
             QFileDialog.ShowDirsOnly
         )
         
-        if dir_path:
-            self.output_dir_edit.setText(dir_path)
+        if directory:
+            self.output_dir_edit.setText(directory)
     
-    def _on_configure_api_keys(self):
-        """Open API key configuration dialog."""
-        from src.new.widgets import APIKeyDialog
+    def _open_settings(self):
+        """Open the settings dialog."""
+        from src.new.dialogs import SettingsDialog
         
-        # Get settings from parent window
-        main_window = self.window()
-        if hasattr(main_window, 'settings'):
-            if APIKeyDialog.configure_api_keys(main_window.settings, self):
-                # After configuration, update status
-                self._update_api_status()
-        else:
-            QMessageBox.warning(
-                self,
-                "Configuration Error",
-                "Unable to access application settings."
-            )
+        dialog = SettingsDialog(self)
+        if dialog.exec():
+            # Refresh evaluator name after settings change
+            evaluator_name = self.settings.get_setting("evaluator_name", "")
+            if evaluator_name:
+                self.evaluator_edit.setText(evaluator_name)
+                self.evaluator_edit.setReadOnly(True)
+                self.evaluator_edit.setStyleSheet("QLineEdit { background-color: #f5f5f5; }")
+                self.evaluator_edit.setToolTip("Evaluator name is set in application settings")
+                
+                # Hide the warning and settings button
+                self.setup_ui()  # Refresh the UI
+                self._validate()  # Re-validate
     
-    def _on_cancel(self):
-        """Handle cancel button."""
-        reply = QMessageBox.question(
-            self,
-            "Cancel Project Setup",
-            "Are you sure you want to cancel? No project will be created.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            # TODO: Signal to main window to go back to welcome screen
-            pass
-    
-    def _on_create_project(self):
-        """Handle create/save project."""
-        # Validate first
-        is_valid, message = self.validate()
-        if not is_valid:
-            QMessageBox.warning(self, "Validation Error", message)
-            return
-        
-        # Show progress dialog
-        progress = QProgressDialog(
-            "Creating project...",
-            None,  # No cancel button
-            0, 0,  # Indeterminate progress
-            self
-        )
-        progress.setWindowTitle("Creating Project")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(0)  # Show immediately
-        progress.show()
-        
-        # Process events to ensure dialog shows
-        from PySide6.QtCore import QCoreApplication
-        QCoreApplication.processEvents()
-        
-        # Collect metadata
-        metadata = ProjectMetadata(
-            case_name=self.case_name_edit.text().strip(),
-            case_number=self.case_number_edit.text().strip(),
-            subject_name=self.subject_name_edit.text().strip(),
-            date_of_birth=self.dob_edit.date().toString("yyyy-MM-dd"),
-            evaluation_date=self.eval_date_edit.date().toString("yyyy-MM-dd"),
-            evaluator=self.evaluator_edit.text().strip(),
-            case_description=self.description_edit.toPlainText().strip()
-        )
-        
-        # Prepare results
-        results = {
-            "metadata": metadata,
-            "output_directory": self.output_dir_edit.text(),
-            "template": self.template_combo.currentText()
-        }
-        
-        # Save state
-        self.save_state()
-        
-        # Close progress dialog
-        progress.close()
-        
-        # Emit completion signal
-        self.completed.emit(results)
-    
-    def validate(self) -> Tuple[bool, str]:
-        """Validate the form data."""
+    def validate(self) -> tuple[bool, str]:
+        """Check if stage can proceed."""
         # Check required fields
         if not self.case_name_edit.text().strip():
-            return False, "Case name is required"
+            return False, "Please enter a case name"
         
         if not self.subject_name_edit.text().strip():
-            return False, "Subject name is required"
+            return False, "Please enter the subject's name"
         
         if not self.output_dir_edit.text().strip():
-            return False, "Output directory is required"
+            return False, "Please select an output directory"
         
-        # Check if output directory exists
-        output_path = Path(self.output_dir_edit.text())
-        if not output_path.exists():
-            return False, "Output directory does not exist"
+        # Check if directory exists
+        output_dir = Path(self.output_dir_edit.text())
+        if not output_dir.exists():
+            return False, "Selected output directory does not exist"
         
-        if not output_path.is_dir():
-            return False, "Output path must be a directory"
-        
-        # Check if we can write to the directory
-        try:
-            test_file = output_path / ".test_write"
-            test_file.touch()
-            test_file.unlink()
-        except:
-            return False, "Cannot write to output directory"
-        
-        # Check for at least one API key
-        # TODO: Implement actual API key checking
-        # For now, just warn
+        # Check evaluator name
+        evaluator = self.evaluator_edit.text().strip()
+        if not evaluator:
+            return False, "Please set your evaluator name in application settings"
         
         return True, ""
-    
-    def _validate(self):
-        """Internal validation that updates UI."""
-        is_valid, message = self.validate()
-        
-        self.validation_label.setText(message)
-        self.create_btn.setEnabled(is_valid)
-        
-        # Emit validation signal
-        self.validation_changed.emit(is_valid)
     
     def save_state(self):
         """Save current state to project."""
         if not self.project:
             return
         
-        state = {
-            "case_name": self.case_name_edit.text(),
-            "case_number": self.case_number_edit.text(),
-            "evaluator": self.evaluator_edit.text(),
-            "subject_name": self.subject_name_edit.text(),
-            "date_of_birth": self.dob_edit.date().toString("yyyy-MM-dd"),
-            "evaluation_date": self.eval_date_edit.date().toString("yyyy-MM-dd"),
-            "case_description": self.description_edit.toPlainText(),
-            "output_directory": self.output_dir_edit.text(),
-            "template": self.template_combo.currentText()
-        }
+        # Get evaluator name from settings or form
+        evaluator_name = self.settings.get_setting("evaluator_name", "")
+        if not evaluator_name:
+            evaluator_name = self.evaluator_edit.text().strip()
         
-        self.project.save_stage_data("setup", state)
+        # Collect all the form data
+        metadata = ProjectMetadata(
+            case_name=self.case_name_edit.text().strip(),
+            case_number=self.case_number_edit.text().strip(),
+            subject_name=self.subject_name_edit.text().strip(),
+            date_of_birth=self.dob_edit.date().toString("yyyy-MM-dd"),
+            evaluation_date=self.eval_date_edit.date().toString("yyyy-MM-dd"),
+            evaluator=evaluator_name,
+            case_description=self.description_edit.toPlainText().strip()
+        )
+        
+        # Save the data
+        self.project.update_metadata(metadata)
+        self.project.update_settings(
+            template=self.template_combo.currentText(),
+            output_directory=self.output_dir_edit.text()
+        )
     
     def load_state(self):
         """Load state from project."""
-        if not self.project:
-            # Set defaults for new project
-            self.output_dir_edit.setText(str(Path.home() / "Documents" / "ForensicReports"))
+        if not self.project or self.is_new_project:
+            # Set default output directory for new projects
+            default_dir = str(Path.home() / "Documents" / "Forensic Reports")
+            self.output_dir_edit.setText(default_dir)
             return
         
-        state = self.project.get_stage_data("setup")
-        if not state:
-            return
+        # Load metadata
+        metadata = self.project.project_data.get('metadata', {})
+        self.case_name_edit.setText(metadata.get('case_name', ''))
+        self.case_number_edit.setText(metadata.get('case_number', ''))
+        self.subject_name_edit.setText(metadata.get('subject_name', ''))
         
-        # Restore form data
-        self.case_name_edit.setText(state.get("case_name", ""))
-        self.case_number_edit.setText(state.get("case_number", ""))
-        self.evaluator_edit.setText(state.get("evaluator", ""))
-        self.subject_name_edit.setText(state.get("subject_name", ""))
+        # Load dates
+        if 'date_of_birth' in metadata:
+            dob = QDate.fromString(metadata['date_of_birth'], "yyyy-MM-dd")
+            if dob.isValid():
+                self.dob_edit.setDate(dob)
         
-        if "date_of_birth" in state:
-            self.dob_edit.setDate(QDate.fromString(state["date_of_birth"], "yyyy-MM-dd"))
+        if 'evaluation_date' in metadata:
+            eval_date = QDate.fromString(metadata['evaluation_date'], "yyyy-MM-dd")
+            if eval_date.isValid():
+                self.eval_date_edit.setDate(eval_date)
         
-        if "evaluation_date" in state:
-            self.eval_date_edit.setDate(QDate.fromString(state["evaluation_date"], "yyyy-MM-dd"))
+        # Load evaluator
+        if 'evaluator' in metadata:
+            self.evaluator_edit.setText(metadata['evaluator'])
         
-        self.description_edit.setPlainText(state.get("case_description", ""))
-        self.output_dir_edit.setText(state.get("output_directory", ""))
+        # Load description
+        self.description_edit.setPlainText(metadata.get('case_description', ''))
         
-        if "template" in state:
-            index = self.template_combo.findText(state["template"])
+        # Load settings
+        settings = self.project.project_data.get('settings', {})
+        if 'template' in settings:
+            index = self.template_combo.findText(settings['template'])
             if index >= 0:
                 self.template_combo.setCurrentIndex(index)
+        
+        if 'output_directory' in settings:
+            self.output_dir_edit.setText(settings['output_directory'])
+    
+    def get_form_data(self) -> Dict[str, Any]:
+        """Get all form data for project creation."""
+        # Get evaluator name from settings or form
+        evaluator_name = self.settings.get_setting("evaluator_name", "")
+        if not evaluator_name:
+            evaluator_name = self.evaluator_edit.text().strip()
+        
+        metadata = ProjectMetadata(
+            case_name=self.case_name_edit.text().strip(),
+            case_number=self.case_number_edit.text().strip(),
+            subject_name=self.subject_name_edit.text().strip(),
+            date_of_birth=self.dob_edit.date().toString("yyyy-MM-dd"),
+            evaluation_date=self.eval_date_edit.date().toString("yyyy-MM-dd"),
+            evaluator=evaluator_name,
+            case_description=self.description_edit.toPlainText().strip()
+        )
+        
+        return {
+            'metadata': metadata,
+            'output_directory': self.output_dir_edit.text(),
+            'template': self.template_combo.currentText()
+        }

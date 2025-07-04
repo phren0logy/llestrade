@@ -241,15 +241,15 @@ class WelcomeStage(BaseStage):
         return group
         
     def _create_api_status_widget(self) -> QWidget:
-        """Create API key status section."""
-        group = QGroupBox("API Key Status")
+        """Create settings status section."""
+        group = QGroupBox("Settings")
         self.api_layout = QVBoxLayout(group)
         
         # Will be populated by _update_api_status
         self._update_api_status()
         
         # Configure button
-        config_btn = QPushButton("Configure API Keys")
+        config_btn = QPushButton("Open Settings")
         config_btn.clicked.connect(self._on_configure_api_keys)
         self.api_layout.addWidget(config_btn)
         
@@ -261,7 +261,7 @@ class WelcomeStage(BaseStage):
         layout = QVBoxLayout(group)
         
         steps = [
-            "1. Configure your API keys",
+            "1. Configure your settings and API keys",
             "2. Create a new project or open existing",
             "3. Import documents (PDF, Word, text)",
             "4. Process and analyze content",
@@ -277,13 +277,33 @@ class WelcomeStage(BaseStage):
         return group
         
     def _update_api_status(self):
-        """Update API key status display."""
+        """Update settings status display."""
         # Clear existing status items (except configure button)
         while self.api_layout.count() > 1:
             item = self.api_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
         
+        # Check evaluator name
+        evaluator_name = self.settings.get_setting("evaluator_name", "")
+        evaluator_layout = QHBoxLayout()
+        evaluator_label = QLabel("👤 Evaluator Name")
+        evaluator_layout.addWidget(evaluator_label)
+        evaluator_status = QLabel("✓ Configured" if evaluator_name else "✗ Not configured")
+        evaluator_status.setStyleSheet(
+            "color: #4caf50;" if evaluator_name else "color: #f44336;"
+        )
+        evaluator_layout.addStretch()
+        evaluator_layout.addWidget(evaluator_status)
+        self.api_layout.insertLayout(self.api_layout.count() - 1, evaluator_layout)
+        
+        # Add separator
+        separator = QFrame()
+        separator.setFrameStyle(QFrame.HLine | QFrame.Sunken)
+        separator.setStyleSheet("margin: 5px 0;")
+        self.api_layout.insertWidget(self.api_layout.count() - 1, separator)
+        
+        # API providers
         providers = [
             ('anthropic', 'Anthropic (Claude)', '🤖'),
             ('gemini', 'Google Gemini', '✨'),
@@ -310,7 +330,9 @@ class WelcomeStage(BaseStage):
     
     def _on_new_project(self):
         """Handle new project request."""
+        self.logger.debug("New project button clicked")
         self.new_project_requested.emit()
+        self.logger.debug("new_project_requested signal emitted")
         
     def _on_open_project(self):
         """Handle open project request."""
@@ -340,9 +362,9 @@ class WelcomeStage(BaseStage):
         self.project_opened.emit(project_path)
         
     def _on_configure_api_keys(self):
-        """Open API key configuration dialog."""
-        from src.new.widgets import APIKeyDialog
-        dialog = APIKeyDialog(self.settings, self)
+        """Open settings dialog."""
+        from src.new.dialogs import SettingsDialog
+        dialog = SettingsDialog(self)
         if dialog.exec():
             # Update status after configuration
             self._update_api_status()

@@ -111,9 +111,13 @@ class StageManager(QObject):
             
             self.logger.info(f"Loaded stage: {stage_name}")
             
+            # Return the stage so it can be connected
+            return self.current_stage
+            
         except Exception as e:
             self.logger.error(f"Failed to load stage {stage_name}: {e}")
             # TODO: Show error dialog
+            return None
     
     def _try_load_stage_class(self, stage_name: str):
         """Try to dynamically load a stage class."""

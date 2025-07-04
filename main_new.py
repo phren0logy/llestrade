@@ -145,42 +145,59 @@ class SimplifiedMainWindow(QMainWindow):
         """Set the current stage widget."""
         # Remove existing widget from content area
         if self.content_area.layout():
+            # Clear the layout
             old_layout = self.content_area.layout()
             while old_layout.count():
                 item = old_layout.takeAt(0)
                 if item.widget():
                     item.widget().deleteLater()
+            # Delete the old layout
+            QApplication.processEvents()  # Process deletions
+            self.content_area.setLayout(None)  # Clear layout reference
             old_layout.deleteLater()
         
+        # Process events to ensure cleanup is complete
+        QApplication.processEvents()
+        
         # Add new widget to content area
-        layout = QHBoxLayout(self.content_area)
+        layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(widget)
+        self.content_area.setLayout(layout)
     
     def _show_welcome(self):
         """Show the welcome screen."""
         self.logger.info("Showing welcome screen")
-        # Hide navigation buttons on welcome screen
-        self.back_action.setVisible(False)
-        self.next_action.setVisible(False)
-        # Load welcome stage
-        stage = self.stage_manager.load_stage('welcome')
-        if stage:
-            # Connect welcome stage signals
-            stage.new_project_requested.connect(self._new_project)
-            stage.project_opened.connect(self._load_project)
-        # Hide sidebar on welcome screen
-        self.workflow_sidebar.setVisible(False)
+        try:
+            # Hide navigation buttons on welcome screen
+            self.back_action.setVisible(False)
+            self.next_action.setVisible(False)
+            # Load welcome stage
+            stage = self.stage_manager.load_stage('welcome')
+            if stage:
+                self.logger.debug(f"Welcome stage loaded: {stage}")
+                # Connect welcome stage signals
+                stage.new_project_requested.connect(self._new_project)
+                stage.project_opened.connect(self._load_project)
+                self.logger.debug("Welcome stage signals connected")
+            else:
+                self.logger.error("Failed to load welcome stage")
+            # Hide sidebar on welcome screen
+            self.workflow_sidebar.setVisible(False)
+        except Exception as e:
+            self.logger.error(f"Error in _show_welcome: {e}", exc_info=True)
     
     def _new_project(self):
         """Start a new project."""
         self.logger.info("Starting new project")
+        self.logger.debug("_new_project method called")
         # Show navigation buttons
         self.back_action.setVisible(True)
         self.next_action.setVisible(True)
         # Show sidebar
         self.workflow_sidebar.setVisible(True)
         # Load the setup stage
+        self.logger.debug("Loading setup stage")
         self.stage_manager.load_stage('setup')
         # Update sidebar
         self._update_sidebar_progress('setup')
@@ -236,8 +253,18 @@ class SimplifiedMainWindow(QMainWindow):
     
     def _open_settings(self):
         """Open settings dialog."""
-        # TODO: Implement settings dialog
-        self.logger.info("Settings - not yet implemented")
+        from src.new.dialogs import SettingsDialog
+        
+        dialog = SettingsDialog(self)
+        dialog.settings_changed.connect(self._on_settings_changed)
+        dialog.exec()
+    
+    def _on_settings_changed(self):
+        """Handle settings changes."""
+        self.logger.info("Settings updated")
+        # If we're on the setup stage, refresh it to show new evaluator name
+        if self.stage_manager.current_stage_name == 'setup':
+            self.stage_manager.load_stage('setup')
     
     def _show_about(self):
         """Show about dialog."""

@@ -188,6 +188,14 @@ class SecureSettings(QObject):
         self._settings[key] = value
         self._save_settings()
     
+    def get_setting(self, key: str, default: Any = None) -> Any:
+        """Get a setting value (alias for get)."""
+        return self.get(key, default)
+    
+    def set_setting(self, key: str, value: Any):
+        """Set a setting value (alias for set)."""
+        self.set(key, value)
+    
     def get_all(self) -> Dict[str, Any]:
         """Get all settings (excluding sensitive data)."""
         settings_copy = self._settings.copy()

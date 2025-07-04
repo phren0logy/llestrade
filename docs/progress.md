@@ -2,14 +2,35 @@
 
 This document tracks completed work on the Forensic Psych Report Drafter.
 
+## 2025-07-04 - Welcome Screen Settings Consolidation
+- Renamed "API Key Status" section to "Settings" on welcome screen
+- Changed "Configure API Keys" button to "Open Settings"
+- Added evaluator name configuration status to settings display
+- Updated quick start guide to mention settings configuration
+- Improved project setup stage to open settings dialog directly
+- Consolidated all app-level settings (user info, defaults, API keys) in one dialog
+- Fixed APIKeyDialog integration in settings dialog (passed correct settings object)
+- Properly embedded API key configuration as a tab within the settings dialog
+- Simplified settings dialog: removed User tab, kept only evaluator name in Defaults tab
+- Removed unnecessary fields (title, license number, email) for cleaner single-user experience
+
 ## 2025-07-04 - Report Generation Stage Implementation
 - Implemented ReportGenerationStage for the new UI (stage 6 of 7)
 - Created ReportGenerationThread worker for async report creation
 - Added support for both integrated analysis and template-based reports
 - Integrated with existing LLM providers (Anthropic, Gemini, Azure OpenAI)
 - Updated StageManager to properly load the new stage
+- Fixed "New Project" button issue in welcome stage (removed incompatible debug code)
 - Updated documentation to reflect 6/7 stages now complete
 - Only Refinement stage remains to complete the new UI
+
+## 2025-07-04 - Project Setup Page Improvements
+- Removed API key indicators from project setup (moved to app-level settings)
+- Added automatic evaluator name population from application settings
+- Created comprehensive Settings dialog with user info, defaults, and API keys
+- Fixed DocumentImportStage initialization order bug causing attribute errors
+- Fixed QLayout warning by properly clearing layouts before adding new ones
+- Evaluator name is now a single-user app setting, not project-specific
 
 ## 2025-07-04 - Documentation Consolidation
 - Consolidated 6 overlapping documentation files into 4 focused documents

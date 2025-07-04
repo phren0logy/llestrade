@@ -27,10 +27,10 @@ class DocumentImportStage(BaseStage):
     import_progress = Signal(int, int)  # current, total
     
     def __init__(self, project=None):
-        super().__init__(project)
-        self.logger = logging.getLogger(__name__)
         self.imported_files: List[Path] = []
         self.pending_files: List[Path] = []
+        self.logger = logging.getLogger(__name__)
+        super().__init__(project)
         
     def setup_ui(self):
         """Create the UI for document import."""
