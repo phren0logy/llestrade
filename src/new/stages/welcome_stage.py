@@ -283,6 +283,17 @@ class WelcomeStage(BaseStage):
             item = self.api_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+            elif item.layout():
+                # Properly delete sub-layouts
+                while item.layout().count():
+                    sub_item = item.layout().takeAt(0)
+                    if sub_item.widget():
+                        sub_item.widget().deleteLater()
+                item.layout().deleteLater()
+        
+        # Process pending deletions
+        from PySide6.QtWidgets import QApplication
+        QApplication.processEvents()
         
         # Check evaluator name
         evaluator_name = self.settings.get_setting("evaluator_name", "")

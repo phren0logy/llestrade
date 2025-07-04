@@ -2,6 +2,37 @@
 
 This document tracks completed work on the Forensic Psych Report Drafter.
 
+## 2025-07-04 - QStackedWidget UI Simplification
+- Replaced complex dynamic widget replacement system with QStackedWidget
+- Pre-create all stage widgets at startup for predictable memory usage
+- Simplified StageManager to remove dynamic widget creation/deletion
+- Added reset() method to BaseStage for clearing state when revisiting
+- Fixed stage initialization errors in AnalysisStage and ReportGenerationStage
+- Updated both stages to work with get_available_providers_and_models() return format
+- Added PySide6 UI best practices section to CLAUDE.md
+- Resolved blank screen issue when creating new project
+- Follows Qt/PySide best practices for simpler, more maintainable code
+
+## 2025-07-04 - Project Setup Stage Architecture Improvements
+- Fixed stage initialization order to prevent accessing project_data before initialization
+- Refactored BaseStage to not auto-call load_state in constructor
+- Stage manager now calls load_state and _validate after stage creation
+- Added proper error handling with user-friendly error dialogs
+- Added detailed logging to navigation updates for debugging
+- Fixed load_state to properly handle None project for new projects
+- Registered missing ReportGenerationStage in startup
+- Added project assignment after project creation in stage manager
+- Improved error messages and logging throughout stage loading process
+
+## 2025-07-04 - Project Setup Stage Fixes
+- Fixed blank screen when creating new project (removed incorrect project manager assignment)
+- Removed evaluation date field from project setup form
+- Fixed output directory to use app settings default with case name as subfolder
+- Added automatic output directory update when case name changes
+- Enabled advancing from project setup by implementing complete_setup method
+- Modified stage manager to handle project creation before advancing to import stage
+- Output directory now creates case-specific folder with sanitized name
+
 ## 2025-07-04 - Welcome Screen Settings Consolidation
 - Renamed "API Key Status" section to "Settings" on welcome screen
 - Changed "Configure API Keys" button to "Open Settings"
@@ -13,6 +44,7 @@ This document tracks completed work on the Forensic Psych Report Drafter.
 - Properly embedded API key configuration as a tab within the settings dialog
 - Simplified settings dialog: removed User tab, kept only evaluator name in Defaults tab
 - Removed unnecessary fields (title, license number, email) for cleaner single-user experience
+- Fixed visual glitches in welcome screen settings display (proper layout cleanup)
 
 ## 2025-07-04 - Report Generation Stage Implementation
 - Implemented ReportGenerationStage for the new UI (stage 6 of 7)

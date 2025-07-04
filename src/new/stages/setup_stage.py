@@ -17,19 +17,20 @@ from PySide6.QtCore import Qt, QDate, Signal
 from PySide6.QtGui import QIcon, QPalette
 
 from src.new.core import BaseStage, ProjectMetadata, SecureSettings
+from src.new.core.project_manager import ProjectManager
 
 
 class ProjectSetupStage(BaseStage):
     """Initial project setup and metadata collection."""
     
     def __init__(self, project=None):
-        # Track if this is a new project or editing existing
+        # Set attributes before calling parent init
         self.is_new_project = project is None
         self.settings = SecureSettings()
-        
-        # Call parent init after setting our attributes
-        super().__init__(project)
         self.logger = logging.getLogger(__name__)
+        
+        # Call parent init last
+        super().__init__(project)
         
     def setup_ui(self):
         """Create the UI for project setup."""
@@ -70,6 +71,7 @@ class ProjectSetupStage(BaseStage):
         self.case_name_edit = QLineEdit()
         self.case_name_edit.setPlaceholderText("e.g., Smith v. Jones")
         self.case_name_edit.textChanged.connect(self._validate)
+        self.case_name_edit.textChanged.connect(self._update_output_directory)
         case_layout.addRow("Case Name:*", self.case_name_edit)
         
         self.case_number_edit = QLineEdit()
@@ -110,12 +112,6 @@ class ProjectSetupStage(BaseStage):
         self.dob_edit.setDate(QDate.currentDate().addYears(-30))
         self.dob_edit.setDisplayFormat("MM/dd/yyyy")
         subject_layout.addRow("Date of Birth:", self.dob_edit)
-        
-        self.eval_date_edit = QDateEdit()
-        self.eval_date_edit.setCalendarPopup(True)
-        self.eval_date_edit.setDate(QDate.currentDate())
-        self.eval_date_edit.setDisplayFormat("MM/dd/yyyy")
-        subject_layout.addRow("Evaluation Date:", self.eval_date_edit)
         
         layout.addWidget(subject_group)
         
@@ -201,6 +197,26 @@ class ProjectSetupStage(BaseStage):
         if directory:
             self.output_dir_edit.setText(directory)
     
+    def _update_output_directory(self):
+        """Update output directory based on case name."""
+        case_name = self.case_name_edit.text().strip()
+        if not case_name:
+            return
+        
+        # Get default directory from settings
+        default_dir = self.settings.get_setting("default_output_directory", "")
+        if not default_dir:
+            default_dir = str(Path.home() / "Documents" / "Forensic Reports")
+        
+        # Sanitize case name for folder
+        import re
+        folder_name = re.sub(r'[<>:"/\\|?*]', '_', case_name)
+        folder_name = folder_name.strip()
+        
+        # Create full path
+        full_path = str(Path(default_dir) / folder_name)
+        self.output_dir_edit.setText(full_path)
+    
     def _open_settings(self):
         """Open the settings dialog."""
         from src.new.dialogs import SettingsDialog
@@ -259,7 +275,6 @@ class ProjectSetupStage(BaseStage):
             case_number=self.case_number_edit.text().strip(),
             subject_name=self.subject_name_edit.text().strip(),
             date_of_birth=self.dob_edit.date().toString("yyyy-MM-dd"),
-            evaluation_date=self.eval_date_edit.date().toString("yyyy-MM-dd"),
             evaluator=evaluator_name,
             case_description=self.description_edit.toPlainText().strip()
         )
@@ -273,12 +288,21 @@ class ProjectSetupStage(BaseStage):
     
     def load_state(self):
         """Load state from project."""
-        if not self.project or self.is_new_project:
+        # For new projects, just set defaults
+        if self.is_new_project or not self.project:
             # Set default output directory for new projects
-            default_dir = str(Path.home() / "Documents" / "Forensic Reports")
+            default_dir = self.settings.get_setting("default_output_directory", "")
+            if not default_dir:
+                default_dir = str(Path.home() / "Documents" / "Forensic Reports")
             self.output_dir_edit.setText(default_dir)
+            self.logger.debug("New project - using default output directory")
             return
         
+        # For existing projects, check if project has the expected data
+        if not hasattr(self.project, 'project_data'):
+            self.logger.warning("Project object missing project_data attribute")
+            return
+            
         # Load metadata
         metadata = self.project.project_data.get('metadata', {})
         self.case_name_edit.setText(metadata.get('case_name', ''))
@@ -290,11 +314,6 @@ class ProjectSetupStage(BaseStage):
             dob = QDate.fromString(metadata['date_of_birth'], "yyyy-MM-dd")
             if dob.isValid():
                 self.dob_edit.setDate(dob)
-        
-        if 'evaluation_date' in metadata:
-            eval_date = QDate.fromString(metadata['evaluation_date'], "yyyy-MM-dd")
-            if eval_date.isValid():
-                self.eval_date_edit.setDate(eval_date)
         
         # Load evaluator
         if 'evaluator' in metadata:
@@ -325,7 +344,6 @@ class ProjectSetupStage(BaseStage):
             case_number=self.case_number_edit.text().strip(),
             subject_name=self.subject_name_edit.text().strip(),
             date_of_birth=self.dob_edit.date().toString("yyyy-MM-dd"),
-            evaluation_date=self.eval_date_edit.date().toString("yyyy-MM-dd"),
             evaluator=evaluator_name,
             case_description=self.description_edit.toPlainText().strip()
         )
@@ -335,3 +353,70 @@ class ProjectSetupStage(BaseStage):
             'output_directory': self.output_dir_edit.text(),
             'template': self.template_combo.currentText()
         }
+    
+    def complete_setup(self):
+        """Complete the setup stage and emit results."""
+        # Validate one more time
+        is_valid, error_msg = self.validate()
+        if not is_valid:
+            QMessageBox.warning(self, "Validation Error", error_msg)
+            return
+        
+        # Get form data
+        form_data = self.get_form_data()
+        
+        # Create output directory if it doesn't exist
+        output_dir = Path(form_data['output_directory'])
+        if not output_dir.exists():
+            try:
+                output_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Directory Creation Failed",
+                    f"Failed to create output directory:\n{str(e)}"
+                )
+                return
+        
+        # Save state before completing
+        self.save_state()
+        
+        # Emit completed signal with form data
+        self.completed.emit(form_data)
+    
+    def reset(self):
+        """Reset the form for a new project."""
+        self.logger.debug("Resetting project setup form")
+        self.is_new_project = True
+        self.project = None
+        
+        # Clear form fields
+        self.case_name_edit.clear()
+        self.case_number_edit.clear()
+        self.subject_name_edit.clear()
+        self.dob_edit.setDate(QDate.currentDate().addYears(-30))
+        self.description_edit.clear()
+        self.template_combo.setCurrentIndex(0)
+        
+        # Reset evaluator name from settings
+        evaluator_name = self.settings.get_setting("evaluator_name", "")
+        if evaluator_name:
+            self.evaluator_edit.setText(evaluator_name)
+            self.evaluator_edit.setReadOnly(True)
+            self.evaluator_edit.setStyleSheet("QLineEdit { background-color: #f5f5f5; }")
+        else:
+            self.evaluator_edit.clear()
+            self.evaluator_edit.setReadOnly(False)
+            self.evaluator_edit.setStyleSheet("")
+        
+        # Reset output directory to default
+        default_dir = self.settings.get_setting("default_output_directory", "")
+        if not default_dir:
+            default_dir = str(Path.home() / "Documents" / "Forensic Reports")
+        self.output_dir_edit.setText(default_dir)
+        
+        # Clear validation message
+        self.validation_label.clear()
+        
+        # Re-validate
+        self._validate()

@@ -459,14 +459,14 @@ class AnalysisStage(BaseStage):
             
             # Add providers
             for provider_info in providers_and_models:
-                provider_id = provider_info["provider_id"]
-                provider_label = provider_info["provider_label"]
-                models = provider_info["models"]
+                provider_id = provider_info["id"]
+                provider_label = provider_info["label"]
+                model = provider_info["model"]
                 
-                # Store models with provider
-                self.provider_combo.addItem(provider_label, {
+                # Store provider info
+                self.provider_combo.addItem(provider_info["display_name"], {
                     "provider_id": provider_id,
-                    "models": models
+                    "model": model
                 })
             
             # Select first provider if available
@@ -476,7 +476,6 @@ class AnalysisStage(BaseStage):
                 
         except Exception as e:
             self.logger.error(f"Failed to load LLM options: {e}")
-            self._add_log(f"Failed to load LLM options: {e}", "error")
             
     def _on_provider_changed(self, provider_label: str):
         """Handle provider selection change."""
@@ -488,14 +487,11 @@ class AnalysisStage(BaseStage):
         if not provider_data:
             return
             
-        # Update model dropdown
+        # Since we're using single model per provider from settings,
+        # just update the model combo with the one model
         self.model_combo.clear()
-        for model in provider_data["models"]:
-            self.model_combo.addItem(model["model_label"], model["model_name"])
-            
-        # Select first model
-        if self.model_combo.count() > 0:
-            self.model_combo.setCurrentIndex(0)
+        self.model_combo.addItem(provider_data["model"], provider_data["model"])
+        self.model_combo.setCurrentIndex(0)
             
     def load_state(self):
         """Load processed documents from previous stage."""

@@ -42,26 +42,17 @@ class StageManager(QObject):
         self.current_stage_name: str = ""
         self.current_stage_index: int = -1
         
-        # Stage classes (will be populated dynamically)
-        self.stage_classes: Dict[str, Type['BaseStage']] = {}
+        # Stage widgets (will be populated by register_stages)
+        self.stage_widgets: Dict[str, QWidget] = {}
         
         # Validation state
         self._can_proceed = False
         self._can_go_back = False
-        
-        # Initialize stages
-        self._initialize_stages()
     
-    def _initialize_stages(self):
-        """Import and register all stage classes."""
-        # Import stage classes when they're created
-        # For now, we'll use a placeholder
-        self.logger.info("Stage manager initialized")
-    
-    def register_stage(self, name: str, stage_class: Type['BaseStage']):
-        """Register a stage class."""
-        self.stage_classes[name] = stage_class
-        self.logger.debug(f"Registered stage: {name}")
+    def register_stages(self, stage_widgets: Dict[str, QWidget]):
+        """Register all pre-created stage widgets."""
+        self.stage_widgets = stage_widgets
+        self.logger.info(f"Registered {len(stage_widgets)} stage widgets")
     
     def set_project(self, project):
         """Set the current project."""
@@ -69,120 +60,71 @@ class StageManager(QObject):
         if self.current_stage:
             self.current_stage.project = project
     
-    def load_stage(self, stage_name: str):
-        """Load a new stage with proper cleanup."""
-        if stage_name not in self.stage_classes:
-            # Try to load the stage class dynamically
-            self._try_load_stage_class(stage_name)
-            
-        if stage_name not in self.stage_classes:
+    def set_current_stage(self, stage_name: str):
+        """Set the current stage and update navigation."""
+        if stage_name not in self.stage_widgets:
             self.logger.error(f"Unknown stage: {stage_name}")
             return
         
         self.stage_loading.emit(stage_name)
         
-        # Cleanup current stage
+        # Disconnect signals from previous stage
         if self.current_stage:
-            self.cleanup_current_stage()
+            try:
+                self.current_stage.completed.disconnect(self._on_stage_completed)
+                self.current_stage.validation_changed.disconnect(self._on_validation_changed)
+                self.current_stage.error.disconnect(self._on_stage_error)
+            except:
+                pass
         
-        # Force event processing to ensure cleanup completes
-        QApplication.processEvents()
+        # Get the stage widget
+        self.current_stage = self.stage_widgets[stage_name]
+        self.current_stage_name = stage_name
+        self.current_stage_index = self.STAGE_ORDER.index(stage_name) if stage_name in self.STAGE_ORDER else -1
         
-        # Create new stage
+        # Update project reference
+        if hasattr(self.current_stage, 'project'):
+            self.current_stage.project = self.project
+        
+        # Connect signals
+        self.current_stage.completed.connect(self._on_stage_completed)
+        self.current_stage.validation_changed.connect(self._on_validation_changed)
+        self.current_stage.error.connect(self._on_stage_error)
+        
+        # Load state and validate
         try:
-            stage_class = self.stage_classes[stage_name]
-            self.current_stage = stage_class(self.project)
-            self.current_stage_name = stage_name
-            self.current_stage_index = self.STAGE_ORDER.index(stage_name) if stage_name in self.STAGE_ORDER else -1
-            
-            # Connect signals
-            self.current_stage.completed.connect(self._on_stage_completed)
-            self.current_stage.validation_changed.connect(self._on_validation_changed)
-            self.current_stage.error.connect(self._on_stage_error)
-            
-            # Add to main window
-            self.main_window.set_stage_widget(self.current_stage)
-            
-            # Update navigation state
-            self._update_navigation()
-            
-            # Emit stage changed
-            self.stage_changed.emit(stage_name)
-            
-            self.logger.info(f"Loaded stage: {stage_name}")
-            
-            # Return the stage so it can be connected
-            return self.current_stage
-            
+            if hasattr(self.current_stage, 'load_state'):
+                self.current_stage.load_state()
+            if hasattr(self.current_stage, '_validate'):
+                self.current_stage._validate()
         except Exception as e:
-            self.logger.error(f"Failed to load stage {stage_name}: {e}")
-            # TODO: Show error dialog
-            return None
+            self.logger.warning(f"Error loading state for {stage_name}: {e}")
+        
+        # Update navigation state
+        self._update_navigation()
+        
+        # Emit stage changed
+        self.stage_changed.emit(stage_name)
+        
+        self.logger.info(f"Set current stage: {stage_name}")
     
-    def _try_load_stage_class(self, stage_name: str):
-        """Try to dynamically load a stage class."""
-        try:
-            # Map stage names to class names
-            class_map = {
-                'setup': 'ProjectSetupStage',
-                'import': 'DocumentImportStage',
-                'process': 'DocumentProcessingStage',
-                'analyze': 'AnalysisStage',
-                'generate': 'ReportGenerationStage',
-                'refine': 'RefinementStage'
-            }
-            
-            class_name = class_map.get(stage_name)
-            if not class_name:
-                return
-            
-            # Try to import from stages module
-            # Special case for 'generate' which maps to 'report_stage'
-            module_name = 'report_stage' if stage_name == 'generate' else f'{stage_name}_stage'
-            module = __import__(f'src.new.stages.{module_name}', fromlist=[class_name])
-            stage_class = getattr(module, class_name, None)
-            
-            if stage_class:
-                self.register_stage(stage_name, stage_class)
-                
-        except ImportError as e:
-            self.logger.debug(f"Stage class not yet implemented: {stage_name} - {e}")
-    
-    def cleanup_current_stage(self):
-        """Clean up the current stage."""
-        if not self.current_stage:
-            return
-        
-        self.logger.debug(f"Cleaning up stage: {self.current_stage_name}")
-        
-        # Disconnect signals
-        try:
-            self.current_stage.completed.disconnect()
-            self.current_stage.validation_changed.disconnect()
-            self.current_stage.error.disconnect()
-        except:
-            pass
-        
-        # Call stage cleanup
-        self.current_stage.cleanup()
-        
-        # Schedule for deletion
-        self.current_stage.deleteLater()
-        self.current_stage = None
-        
-        # Force garbage collection
-        import gc
-        gc.collect()
     
     def next_stage(self):
         """Move to the next stage in workflow."""
         if not self.can_proceed():
             return
         
+        # Special handling for setup stage - need to create project first
+        if self.current_stage_name == 'setup' and hasattr(self.current_stage, 'complete_setup'):
+            self.current_stage.complete_setup()
+            # The stage will emit completed signal which will auto-advance
+            return
+        
         current_index = self.current_stage_index
         if current_index < len(self.STAGE_ORDER) - 1:
             next_stage = self.STAGE_ORDER[current_index + 1]
-            self.load_stage(next_stage)
+            self.main_window.set_stage_widget(next_stage)
+            self.set_current_stage(next_stage)
     
     def previous_stage(self):
         """Move to the previous stage in workflow."""
@@ -192,7 +134,8 @@ class StageManager(QObject):
         current_index = self.current_stage_index
         if current_index > 0:
             prev_stage = self.STAGE_ORDER[current_index - 1]
-            self.load_stage(prev_stage)
+            self.main_window.set_stage_widget(prev_stage)
+            self.set_current_stage(prev_stage)
     
     def can_proceed(self) -> bool:
         """Check if can proceed to next stage."""
@@ -209,10 +152,18 @@ class StageManager(QObject):
         
         # Can proceed if current stage is valid and not last stage
         if self.current_stage:
-            is_valid, _ = self.current_stage.validate()
-            self._can_proceed = is_valid and self.current_stage_index < len(self.STAGE_ORDER) - 1
+            is_valid, message = self.current_stage.validate()
+            is_not_last = self.current_stage_index < len(self.STAGE_ORDER) - 1
+            self._can_proceed = is_valid and is_not_last
+            
+            self.logger.debug(
+                f"Navigation update for {self.current_stage_name}: "
+                f"valid={is_valid}, not_last={is_not_last}, "
+                f"can_proceed={self._can_proceed}, message='{message}'"
+            )
         else:
             self._can_proceed = False
+            self.logger.debug("Navigation update: No current stage")
         
         self.can_go_back_changed.emit(self._can_go_back)
         self.can_proceed_changed.emit(self._can_proceed)
@@ -222,7 +173,7 @@ class StageManager(QObject):
         self.logger.info(f"Stage {self.current_stage_name} completed")
         
         # Special handling for setup stage - create the project
-        if self.current_stage_name == 'setup' and not self.project:
+        if self.current_stage_name == 'setup':
             self._create_project_from_setup(results)
         
         # Save stage data to project
@@ -255,14 +206,15 @@ class StageManager(QObject):
             base_path = Path(output_dir)
             project_path = self.main_window.project_manager.create_project(base_path, metadata)
             
-            # Load the project (returns boolean, project manager keeps the project)
-            success = self.main_window.project_manager.load_project(project_path)
-            if success:
-                self.project = self.main_window.project_manager
-                
+            # Load the project
+            self.project = self.main_window.project_manager.load_project(project_path)
+            if self.project:
                 # Store template preference
                 if template:
                     self.project.update_settings(template=template)
+                # Update the current stage with the new project
+                if self.current_stage:
+                    self.current_stage.project = self.project
             
             self.logger.info(f"Created new project at: {project_path}")
             
@@ -313,7 +265,8 @@ class StageManager(QObject):
                     self.logger.warning(f"Cannot jump to {stage_name} - {required_stage} not completed")
                     return
         
-        self.load_stage(stage_name)
+        self.main_window.set_stage_widget(stage_name)
+        self.set_current_stage(stage_name)
 
 
 # Base class for stages (to be moved to separate file)
@@ -332,12 +285,8 @@ class BaseStage(QWidget):
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self._is_valid = False
         
-        # Setup UI and load state
+        # Setup UI (load_state and validate will be called by stage manager)
         self.setup_ui()
-        self.load_state()
-        
-        # Validate initial state
-        self._validate()
     
     def setup_ui(self):
         """Create the UI for this stage."""
@@ -367,3 +316,13 @@ class BaseStage(QWidget):
         """Clean up resources when leaving stage."""
         self.save_state()
         self.logger.debug(f"Cleaned up {self.__class__.__name__}")
+    
+    def reset(self):
+        """Reset the stage to initial state. Override in subclasses if needed."""
+        self.logger.debug(f"Resetting {self.__class__.__name__}")
+        # Default implementation just reloads state
+        try:
+            self.load_state()
+            self._validate()
+        except Exception as e:
+            self.logger.warning(f"Error resetting stage: {e}")

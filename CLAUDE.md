@@ -338,6 +338,60 @@ uv run main.py --new-ui
 
 The new UI is functional through the Report Generation stage (6 of 7 stages complete). Users can create projects, import documents, process them, generate summaries, and create integrated reports. Only the Refinement stage remains to be implemented.
 
+## PySide6 UI Best Practices
+
+### UI Patterns to Avoid
+1. **Dynamic widget replacement**: Don't repeatedly create/destroy widgets. Use QStackedWidget instead.
+2. **Manual layout cleanup**: Avoid complex layout deletion logic with processEvents().
+3. **Direct widget reparenting**: Let Qt manage parent-child relationships.
+4. **Excessive deleteLater() calls**: Can lead to memory management issues.
+5. **Complex initialization chains**: Keep widget initialization simple and predictable.
+
+### Recommended Patterns
+1. **QStackedWidget**: For switching between different views/stages
+2. **Pre-create widgets**: Create all widgets at startup, switch visibility
+3. **Signal/slot connections**: Use Qt's built-in patterns for communication
+4. **Parent widget management**: Set parent in constructor, let Qt handle cleanup
+5. **Simple state management**: Use reset() methods instead of recreating widgets
+
+### Example: Stage-based UI with QStackedWidget
+```python
+# Good pattern - pre-create widgets and switch between them
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.stage_stack = QStackedWidget()
+        self.setCentralWidget(self.stage_stack)
+        
+        # Pre-create all stages
+        self.stages = {
+            'welcome': WelcomeStage(),
+            'setup': SetupStage(),
+            'process': ProcessStage()
+        }
+        
+        # Add all stages to stack
+        for stage in self.stages.values():
+            self.stage_stack.addWidget(stage)
+    
+    def switch_stage(self, stage_name):
+        if stage_name in self.stages:
+            self.stage_stack.setCurrentWidget(self.stages[stage_name])
+
+# Bad pattern - dynamic widget replacement
+# DON'T DO THIS:
+def set_stage_widget(self, widget):
+    if self.content_area.layout():
+        # Complex cleanup logic
+        old_layout = self.content_area.layout()
+        while old_layout.count():
+            item = old_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        QApplication.processEvents()  # Force deletion
+        old_layout.deleteLater()
+```
+
 ## Documentation
 
 ### Documentation Structure

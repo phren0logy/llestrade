@@ -301,21 +301,27 @@ class ReportGenerationStage(BaseStage):
     def _load_providers(self):
         """Load available LLM providers."""
         try:
-            self.available_providers = get_available_providers_and_models()
+            providers_and_models = get_available_providers_and_models()
             
             # Clear and populate provider combo
             self.provider_combo.clear()
-            for provider_id, provider_info in self.available_providers.items():
-                if provider_info.get("available", False):
-                    display_name = provider_info.get("display_name", provider_id)
-                    self.provider_combo.addItem(display_name, provider_id)
+            self.model_combo.clear()
             
-            # Set default provider if available
-            if self.project and hasattr(self.project, 'settings'):
-                default_provider = self.project.settings.get('llm_provider', 'anthropic')
-                index = self.provider_combo.findData(default_provider)
-                if index >= 0:
-                    self.provider_combo.setCurrentIndex(index)
+            for provider_info in providers_and_models:
+                display_name = provider_info["display_name"]
+                provider_id = provider_info["id"]
+                model = provider_info["model"]
+                
+                # Add to combo with provider info as data
+                self.provider_combo.addItem(display_name, {
+                    "provider_id": provider_id,
+                    "model": model
+                })
+            
+            # Select first provider if available
+            if self.provider_combo.count() > 0:
+                self.provider_combo.setCurrentIndex(0)
+                self._on_provider_changed(self.provider_combo.currentText())
                     
         except Exception as e:
             self.logger.error(f"Failed to load providers: {e}")
@@ -325,23 +331,16 @@ class ReportGenerationStage(BaseStage):
         if not provider_name:
             return
             
-        # Get provider ID from data
-        provider_id = self.provider_combo.currentData()
-        if not provider_id or provider_id not in self.available_providers:
+        # Get provider data from current selection
+        provider_data = self.provider_combo.currentData()
+        if not provider_data:
             return
             
-        # Update model combo
+        # Update model combo with the single model from settings
         self.model_combo.clear()
-        models = self.available_providers[provider_id].get("models", [])
-        for model in models:
-            self.model_combo.addItem(model)
-            
-        # Set default model if available
-        if self.project and hasattr(self.project, 'settings'):
-            default_model = self.project.settings.get('llm_model', '')
-            index = self.model_combo.findText(default_model)
-            if index >= 0:
-                self.model_combo.setCurrentIndex(index)
+        model = provider_data["model"]
+        self.model_combo.addItem(model, model)
+        self.model_combo.setCurrentIndex(0)
                 
         self._validate()
         
@@ -350,9 +349,19 @@ class ReportGenerationStage(BaseStage):
         if self.worker and self.worker.isRunning():
             return
             
+        # Check if project exists
+        if not self.project:
+            QMessageBox.warning(self, "No Project", "Please create or load a project first.")
+            return
+            
         # Get configuration
-        provider_id = self.provider_combo.currentData()
-        model_name = self.model_combo.currentText()
+        provider_data = self.provider_combo.currentData()
+        if not provider_data:
+            QMessageBox.warning(self, "No Provider", "Please select an LLM provider.")
+            return
+            
+        provider_id = provider_data["provider_id"]
+        model_name = provider_data["model"]
         report_type = "integrated_analysis" if self.integrated_radio.isChecked() else "standard"
         
         # Get paths
@@ -440,6 +449,10 @@ class ReportGenerationStage(BaseStage):
         
     def validate(self) -> tuple[bool, str]:
         """Check if stage can proceed."""
+        # Check if project exists
+        if not self.project:
+            return False, "No project loaded"
+            
         # Check if summaries exist
         project_dir = Path(self.project.project_data['paths']['base'])
         summaries_dir = project_dir / "summaries"

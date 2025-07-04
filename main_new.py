@@ -7,7 +7,7 @@ import sys
 import logging
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget, QHBoxLayout, QFileDialog
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget, QHBoxLayout, QFileDialog, QStackedWidget
 from PySide6.QtCore import Qt, QTimer
 
 # Add src to path for imports
@@ -30,6 +30,9 @@ class SimplifiedMainWindow(QMainWindow):
         self.settings = SecureSettings()
         self.project_manager = None
         self.stage_manager = StageManager(self)
+        
+        # Stage widgets dictionary
+        self.stage_widgets = {}
         
         # Setup UI
         self.setWindowTitle("Forensic Report Drafter")
@@ -68,10 +71,10 @@ class SimplifiedMainWindow(QMainWindow):
         self.workflow_sidebar.stage_clicked.connect(self._on_sidebar_stage_clicked)
         main_layout.addWidget(self.workflow_sidebar)
         
-        # Create content area (will be replaced by stages)
-        self.content_area = QWidget()
-        self.content_area.setStyleSheet("background-color: white;")
-        main_layout.addWidget(self.content_area, 1)  # Stretch factor 1
+        # Create stacked widget for stages
+        self.stage_stack = QStackedWidget()
+        self.stage_stack.setStyleSheet("background-color: white;")
+        main_layout.addWidget(self.stage_stack, 1)  # Stretch factor 1
         
         # Add status bar with cost widget placeholder
         self.statusBar().showMessage("Ready")
@@ -113,14 +116,41 @@ class SimplifiedMainWindow(QMainWindow):
     
     def _startup(self):
         """Handle application startup."""
-        # Register stages
+        # Import all stage classes
         from src.new.stages import WelcomeStage, ProjectSetupStage, DocumentImportStage, DocumentProcessStage
         from src.new.stages.analysis_stage import AnalysisStage
-        self.stage_manager.register_stage('welcome', WelcomeStage)
-        self.stage_manager.register_stage('setup', ProjectSetupStage)
-        self.stage_manager.register_stage('import', DocumentImportStage)
-        self.stage_manager.register_stage('process', DocumentProcessStage)
-        self.stage_manager.register_stage('analysis', AnalysisStage)
+        from src.new.stages.report_stage import ReportGenerationStage
+        
+        # Pre-create all stage widgets
+        self.logger.info("Creating stage widgets...")
+        
+        # Welcome stage (special case - no project)
+        welcome_stage = WelcomeStage()
+        welcome_stage.new_project_requested.connect(self._new_project)
+        welcome_stage.project_opened.connect(self._load_project)
+        self.stage_widgets['welcome'] = welcome_stage
+        self.stage_stack.addWidget(welcome_stage)
+        
+        # Create project-based stages (with None project initially)
+        stage_classes = {
+            'setup': ProjectSetupStage,
+            'import': DocumentImportStage,
+            'process': DocumentProcessStage,
+            'analysis': AnalysisStage,
+            'generate': ReportGenerationStage
+        }
+        
+        for stage_name, stage_class in stage_classes.items():
+            try:
+                stage = stage_class(None)
+                self.stage_widgets[stage_name] = stage
+                self.stage_stack.addWidget(stage)
+                self.logger.debug(f"Created stage widget: {stage_name}")
+            except Exception as e:
+                self.logger.error(f"Failed to create stage {stage_name}: {e}")
+        
+        # Register stages with manager
+        self.stage_manager.register_stages(self.stage_widgets)
         
         # Connect stage manager signals
         self.stage_manager.can_go_back_changed.connect(
@@ -141,29 +171,12 @@ class SimplifiedMainWindow(QMainWindow):
         # Start with welcome screen
         self._show_welcome()
     
-    def set_stage_widget(self, widget):
-        """Set the current stage widget."""
-        # Remove existing widget from content area
-        if self.content_area.layout():
-            # Clear the layout
-            old_layout = self.content_area.layout()
-            while old_layout.count():
-                item = old_layout.takeAt(0)
-                if item.widget():
-                    item.widget().deleteLater()
-            # Delete the old layout
-            QApplication.processEvents()  # Process deletions
-            self.content_area.setLayout(None)  # Clear layout reference
-            old_layout.deleteLater()
-        
-        # Process events to ensure cleanup is complete
-        QApplication.processEvents()
-        
-        # Add new widget to content area
-        layout = QHBoxLayout()
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(widget)
-        self.content_area.setLayout(layout)
+    def set_stage_widget(self, stage_name: str):
+        """Set the current stage widget by name."""
+        if stage_name in self.stage_widgets:
+            widget = self.stage_widgets[stage_name]
+            self.stage_stack.setCurrentWidget(widget)
+            self.logger.debug(f"Switched to stage widget: {stage_name}")
     
     def _show_welcome(self):
         """Show the welcome screen."""
@@ -172,18 +185,14 @@ class SimplifiedMainWindow(QMainWindow):
             # Hide navigation buttons on welcome screen
             self.back_action.setVisible(False)
             self.next_action.setVisible(False)
-            # Load welcome stage
-            stage = self.stage_manager.load_stage('welcome')
-            if stage:
-                self.logger.debug(f"Welcome stage loaded: {stage}")
-                # Connect welcome stage signals
-                stage.new_project_requested.connect(self._new_project)
-                stage.project_opened.connect(self._load_project)
-                self.logger.debug("Welcome stage signals connected")
-            else:
-                self.logger.error("Failed to load welcome stage")
+            
             # Hide sidebar on welcome screen
             self.workflow_sidebar.setVisible(False)
+            
+            # Switch to welcome stage
+            self.set_stage_widget('welcome')
+            self.stage_manager.set_current_stage('welcome')
+            
         except Exception as e:
             self.logger.error(f"Error in _show_welcome: {e}", exc_info=True)
     
@@ -191,14 +200,26 @@ class SimplifiedMainWindow(QMainWindow):
         """Start a new project."""
         self.logger.info("Starting new project")
         self.logger.debug("_new_project method called")
+        
+        # Create project manager if needed
+        if not self.project_manager:
+            self.project_manager = ProjectManager()
+        
         # Show navigation buttons
         self.back_action.setVisible(True)
         self.next_action.setVisible(True)
         # Show sidebar
         self.workflow_sidebar.setVisible(True)
-        # Load the setup stage
-        self.logger.debug("Loading setup stage")
-        self.stage_manager.load_stage('setup')
+        
+        # Reset setup stage for new project
+        setup_stage = self.stage_widgets.get('setup')
+        if setup_stage and hasattr(setup_stage, 'reset'):
+            setup_stage.reset()
+        
+        # Switch to setup stage
+        self.set_stage_widget('setup')
+        self.stage_manager.set_current_stage('setup')
+        
         # Update sidebar
         self._update_sidebar_progress('setup')
     
@@ -226,6 +247,17 @@ class SimplifiedMainWindow(QMainWindow):
         try:
             # Load the project
             project = self.project_manager.load_project(project_path)
+            self.stage_manager.set_project(project)
+            
+            # Update all stage widgets with the project
+            for stage_widget in self.stage_widgets.values():
+                if hasattr(stage_widget, 'project'):
+                    stage_widget.project = project
+                if hasattr(stage_widget, 'load_state'):
+                    try:
+                        stage_widget.load_state()
+                    except Exception as e:
+                        self.logger.warning(f"Failed to load state for stage: {e}")
             
             # Show navigation and sidebar
             self.back_action.setVisible(True)
@@ -233,14 +265,12 @@ class SimplifiedMainWindow(QMainWindow):
             self.workflow_sidebar.setVisible(True)
             
             # Determine which stage to show based on project state
-            if project.state.current_stage:
-                self.stage_manager.load_stage(project.state.current_stage)
-            else:
-                # Project exists but no progress, start at import
-                self.stage_manager.load_stage('import')
+            current_stage = project.workflow_state.current_stage or 'import'
+            self.set_stage_widget(current_stage)
+            self.stage_manager.set_current_stage(current_stage)
             
             # Update UI
-            self._update_sidebar_progress(project.state.current_stage or 'import')
+            self._update_sidebar_progress(current_stage)
             self.statusBar().showMessage(f"Loaded project: {project.metadata.case_name}")
             
         except Exception as e:
@@ -309,9 +339,6 @@ class SimplifiedMainWindow(QMainWindow):
         # Close project if open
         if self.project_manager:
             self.project_manager.close_project()
-        
-        # Cleanup stage manager
-        self.stage_manager.cleanup_current_stage()
         
         event.accept()
 
