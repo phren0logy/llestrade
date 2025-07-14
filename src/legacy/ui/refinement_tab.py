@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
 from src.core.file_utils import read_file_content, read_file_preview, write_file_content
-from llm import create_provider
+from src.common.llm.factory import create_provider
 from src.core.prompt_manager import PromptManager
 from ui.base_tab import BaseTab
 from ui.components.file_selector import FileSelector
@@ -81,15 +81,17 @@ class RefinementThread(QThread):
                 transcript_content = read_file_content(self.transcript_path)
                 self.update_signal.emit("Transcript loaded successfully")
 
-            # Create LLM client using factory
-            self.update_signal.emit("Initializing LLM client...")
-            llm_client = LLMClientFactory.create_client(
-                provider="auto",
-                timeout=DEFAULT_TIMEOUT
-                * 10,  # Increased timeout for refinement (5 minutes)
+            # Create LLM provider using factory
+            self.update_signal.emit("Initializing LLM provider...")
+            llm_provider = create_provider(
+                provider="anthropic",  # Force Anthropic for Claude 4 Sonnet with reasoning
+                timeout=DEFAULT_TIMEOUT * 10,  # Increased timeout for refinement (5 minutes)
                 max_retries=3,
-                thinking_budget_tokens=32000,  # Allocate generous thinking budget
+                debug=True
             )
+
+            if not llm_provider or not llm_provider.initialized:
+                raise Exception("Failed to initialize Anthropic provider. Please check your ANTHROPIC_API_KEY.")
 
             # Build the refinement prompt using the prompt manager
             if hasattr(self, 'prompt_manager') and self.prompt_manager is not None:
@@ -108,14 +110,15 @@ class RefinementThread(QThread):
                 prompt = self._build_fallback_prompt(report_content, template_content, transcript_content)
 
             # Generate response with thinking
-            self.update_signal.emit("Sending report to Claude for refinement...")
+            self.update_signal.emit("Sending report to Claude 4 Sonnet for refinement...")
 
-            # Use the generate_response_with_extended_thinking method
-            response = llm_client.generate_response_with_extended_thinking(
-                prompt_text=prompt,
-                model="claude-3-7-sonnet-20250219",
+            # Use the generate_with_thinking method
+            response = llm_provider.generate_with_thinking(
+                prompt=prompt,
+                model="claude-sonnet-4-20250514",  # Updated to Claude 4 Sonnet
                 max_tokens=64000,
-                thinking_budget_tokens=32000,
+                temperature=1.0,  # Required for thinking mode
+                thinking_budget=32000,
             )
 
             # Check if the response was successful

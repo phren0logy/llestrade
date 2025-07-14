@@ -447,3 +447,113 @@ class AnthropicProvider(BaseLLMProvider):
                 "error": f"Error with thinking: {str(e)}",
                 "provider": self.provider_name,
             }
+    
+    def generate_with_pdf_and_thinking(
+        self,
+        prompt: str,
+        pdf_file_path: str,
+        model: Optional[str] = None,
+        max_tokens: int = 32000,
+        temperature: float = 1.0,
+        system_prompt: Optional[str] = None,
+        thinking_budget_tokens: int = 16000,
+    ) -> Dict[str, Any]:
+        """Generate a response for a PDF file with extended thinking mode."""
+        if not self.initialized:
+            return {
+                "success": False,
+                "error": "Anthropic client not initialized",
+            }
+        
+        try:
+            # Verify PDF exists
+            if not os.path.exists(pdf_file_path):
+                raise FileNotFoundError(f"PDF file not found: {pdf_file_path}")
+            
+            # Read PDF file
+            with open(pdf_file_path, "rb") as f:
+                pdf_data = f.read()
+            
+            # Use default model if not specified
+            if not model:
+                model = self.default_model
+            
+            # Use default system prompt if not provided
+            if not system_prompt:
+                system_prompt = self.default_system_prompt
+            
+            # Ensure thinking budget is less than max_tokens
+            if thinking_budget_tokens >= max_tokens:
+                thinking_budget_tokens = max_tokens - 1000
+            
+            # Prepare message with PDF and thinking enabled
+            message_params = {
+                "model": model,
+                "max_tokens": max_tokens,
+                "temperature": 1.0,  # Required for thinking mode
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": thinking_budget_tokens,
+                },
+                "system": system_prompt,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "document",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "application/pdf",
+                                    "data": base64.b64encode(pdf_data).decode("utf-8"),
+                                },
+                            },
+                        ],
+                    }
+                ],
+            }
+            
+            self.emit_progress(10, "Processing PDF with extended thinking...")
+            
+            # Create message
+            response = self.client.messages.create(**message_params)
+            
+            # Extract content and thinking
+            content = ""
+            thinking = ""
+            
+            for block in response.content:
+                if block.type == "text" and hasattr(block, "text"):
+                    content += block.text
+                elif block.type == "thinking" and hasattr(block, "thinking"):
+                    thinking += block.thinking
+            
+            # Get usage
+            usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            }
+            
+            self.emit_progress(100, "PDF processing with thinking complete")
+            
+            result = {
+                "success": True,
+                "content": content,
+                "thinking": thinking,
+                "usage": usage,
+                "model": model,
+                "provider": self.provider_name,
+            }
+            
+            self.emit_response(result)
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error with PDF and thinking: {str(e)}")
+            self.emit_error(f"PDF and thinking error: {str(e)}")
+            return {
+                "success": False,
+                "error": f"Error with PDF and thinking: {str(e)}",
+                "provider": self.provider_name,
+            }
