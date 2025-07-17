@@ -83,4 +83,4 @@ Please create a comprehensive integrated analysis that:
    - Note areas requiring further assessment or clarification
    - Highlight factors relevant to forensic evaluation
 
-Format all sections with clear headers and maintain a professional, objective tone throughout. Use markdown formatting for clarity and organization.
+Format all sections with clear headers and maintain a professional, objective tone throughout. Use markdown formatting for clarity and organization. Include the page number for all extracted items. Create a markdown link to [filename.pdf: Page x](./pdfs/<filename.pdf>#page=<page_number>) for each page number referenced. When a range of pages is referenced, link the first page but include the range in the text.
