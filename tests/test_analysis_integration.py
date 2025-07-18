@@ -127,7 +127,7 @@ def test_integrated_analysis_thread_success(
 
     # Verify that the correct signals were emitted
     thread.finished_signal.emit.assert_called_once_with(
-        True, "Integrated analysis generated successfully.", str(expected_output_path)
+        True, "Integrated analysis generated successfully.", str(expected_output_path), thread_dependencies["progress_dialog"]
     )
     thread.error_signal.emit.assert_not_called()
 
@@ -195,8 +195,8 @@ def test_integrated_analysis_thread_llm_failure(
     # Verify signals for failure
     error_message = "API call failed after 3 retries: Simulated LLM Error"
     thread.error_signal.emit.assert_called_once_with(
-        f"Error during integrated analysis: {error_message}"
+        f"Error during integrated analysis: {error_message}", thread_dependencies["progress_dialog"]
     )
     thread.finished_signal.emit.assert_called_once_with(
-        False, f"Error during integrated analysis: {error_message}", ""
+        False, f"Error during integrated analysis: {error_message}", "", thread_dependencies["progress_dialog"]
     ) 

@@ -9,24 +9,25 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QObject, Qt, QThread, Signal
 
-from src.config.app_config import get_configured_llm_provider
-from .base_worker_thread import BaseWorkerThread
-from PySide6.QtCore import Qt
-from src.common.llm.providers import AnthropicProvider, GeminiProvider
 from src.common.llm.base import BaseLLMProvider
-from src.common.llm.factory import create_provider
-from src.common.llm.tokens import count_tokens_cached, TokenCounter
 from src.common.llm.chunking import ChunkingStrategy
+from src.common.llm.factory import create_provider
+from src.common.llm.providers import AnthropicProvider, GeminiProvider
+from src.common.llm.tokens import TokenCounter, count_tokens_cached
+from src.config.app_config import get_configured_llm_provider
 from src.core.prompt_manager import PromptManager
+
+from .base_worker_thread import BaseWorkerThread
 
 
 class IntegratedAnalysisThread(BaseWorkerThread):
     """Worker thread for generating an integrated analysis with LLM providers."""
 
     # Additional signals specific to this worker
-    finished_signal = Signal(bool, str, str)  # success, message, file_path
+    finished_signal = Signal(bool, str, str, object)  # success, message, file_path, progress_dialog
+    error_signal = Signal(str, object)  # error_message, progress_dialog
 
     def __init__(self, 
                  parent, 
@@ -89,19 +90,19 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                     error_msg = f"LLM provider for {provider_info.get('provider_label', self.llm_provider_id)} could not be initialized (initialized flag is false)."
                     self._safe_emit_status(error_msg, "error")
                     logging.error(error_msg)
-                    self.error_signal.emit(error_msg)
+                    self.error_signal.emit(error_msg, self.progress_dialog)
                     return False
             else:
                 error_msg = f"Failed to get configured LLM provider for Provider: {self.llm_provider_id}, Model: {self.llm_model_name}. Review app_config logs and settings."
                 self._safe_emit_status(error_msg, "error")
                 logging.error(error_msg)
-                self.error_signal.emit(error_msg)
+                self.error_signal.emit(error_msg, self.progress_dialog)
                 return False
         except Exception as e:
             error_msg = f"Exception initializing LLM provider ({self.llm_provider_id}/{self.llm_model_name}) for integrated analysis: {str(e)}"
             self._safe_emit_status(error_msg, "error")
             logging.exception(error_msg)
-            self.error_signal.emit(error_msg)
+            self.error_signal.emit(error_msg, self.progress_dialog)
             return False
 
     def process_api_response(self, prompt: str, system_prompt: str) -> Optional[Dict[str, Any]]:
@@ -283,18 +284,18 @@ class IntegratedAnalysisThread(BaseWorkerThread):
                 
                 self._safe_emit_status(f"Integrated analysis saved to: {output_path}")
                 self.progress_signal.emit(100, "Integrated analysis complete.")
-                self.finished_signal.emit(True, "Integrated analysis generated successfully.", str(output_path))
+                self.finished_signal.emit(True, "Integrated analysis generated successfully.", str(output_path), self.progress_dialog)
             else:
                 error_msg = response.get("error", "Integrated analysis failed. No content generated or API error.") if response else "Integrated analysis failed due to API communication issue."
                 self._safe_emit_status(f"Failed to generate integrated analysis: {error_msg}")
-                self.finished_signal.emit(False, error_msg, "")
+                self.finished_signal.emit(False, error_msg, "", self.progress_dialog)
 
         except Exception as e:
             error_msg = f"Error during integrated analysis: {str(e)}"
             logging.exception(error_msg)
             self._safe_emit_status(error_msg, "error")
-            self.error_signal.emit(error_msg)
-            self.finished_signal.emit(False, error_msg, "")
+            self.error_signal.emit(error_msg, self.progress_dialog)
+            self.finished_signal.emit(False, error_msg, "", self.progress_dialog)
 
     def create_integrated_prompt(self, combined_content: str, original_docs_content: str) -> Tuple[str, str]:
         """Create the prompt for the integrated analysis."""
