@@ -11,8 +11,8 @@ from pathlib import Path
 
 import fitz  # PyMuPDF
 from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import (AnalyzeResult,
-                                                  DocumentContentFormat)
+from azure.ai.documentintelligence.models import AnalyzeResult, DocumentContentFormat
+
 # Azure Document Intelligence imports
 from azure.core.credentials import AzureKeyCredential
 
@@ -365,7 +365,7 @@ def process_pdf_with_azure(
                     
                     # Get the markdown results with timeout handling
                     print(f"Waiting for Azure Document Intelligence Markdown results...")
-                    markdown_result = markdown_poller.result(timeout=300)  # 5 minute timeout
+                    markdown_result = markdown_poller.result(timeout=1800)  # 30 minute timeout
                     print(f"Received Azure Document Intelligence Markdown results")
                     break  # Success, exit the retry loop
                 except Exception as e:
@@ -395,7 +395,7 @@ def process_pdf_with_azure(
                     
                     # Get the JSON results with timeout handling
                     print(f"Waiting for Azure Document Intelligence JSON results...")
-                    json_result = json_poller.result(timeout=300)  # 5 minute timeout
+                    json_result = json_poller.result(timeout=1800)  # 30 minute timeout
                     print(f"Received Azure Document Intelligence JSON results")
                     break  # Success, exit the retry loop
                 except Exception as e:
