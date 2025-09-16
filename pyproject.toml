@@ -25,6 +25,9 @@ dev = [
     "pytest>=8.4.1",
     "pytest-cov>=5.0.0",
     "pytest-qt>=4.4.0",
-    "langfuse>=2.0.0",
+    "arize-phoenix>=5.0.0",
+    "openinference-instrumentation>=0.1.12",
+    "openinference-instrumentation-openai>=0.1.12",
+    "openinference-instrumentation-anthropic>=0.1.0",
     "rich>=13.0.0",
 ]

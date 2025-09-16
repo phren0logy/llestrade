@@ -3,6 +3,7 @@
 Main entry point for the new simplified UI.
 """
 
+import os
 import sys
 import logging
 from pathlib import Path
@@ -15,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config.logging_config import setup_logging
 from src.config.startup_config import configure_startup_logging
+from src.config.observability import setup_observability
 from src.new.core import SecureSettings, ProjectManager, StageManager
 from src.new.widgets import WorkflowSidebar
 
@@ -30,6 +32,25 @@ class SimplifiedMainWindow(QMainWindow):
         self.settings = SecureSettings()
         self.project_manager = None
         self.stage_manager = StageManager(self)
+        
+        # Initialize Phoenix observability if configured in settings or environment
+        phoenix_settings = self.settings.get("phoenix_settings", {})
+        phoenix_enabled = (
+            phoenix_settings.get("enabled", False) or 
+            os.getenv("PHOENIX_ENABLED", "false").lower() == "true"
+        )
+        
+        if phoenix_enabled:
+            self.logger.info("Initializing Phoenix observability")
+            # Merge environment variables with settings
+            if os.getenv("PHOENIX_ENABLED"):
+                phoenix_settings["enabled"] = True
+            if os.getenv("PHOENIX_PORT"):
+                phoenix_settings["port"] = int(os.getenv("PHOENIX_PORT"))
+            if os.getenv("PHOENIX_PROJECT"):
+                phoenix_settings["project"] = os.getenv("PHOENIX_PROJECT")
+            
+            setup_observability({"phoenix_settings": phoenix_settings})
         
         # Stage widgets dictionary
         self.stage_widgets = {}

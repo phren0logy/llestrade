@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject
 
 from ..base import BaseLLMProvider
 from ..tokens import TokenCounter
+from src.config.observability import trace_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,15 @@ class AnthropicProvider(BaseLLMProvider):
         
         self.client = None
         self._init_client(api_key)
+        
+        # Auto-instrument Anthropic calls with Phoenix if enabled
+        if os.getenv("PHOENIX_ENABLED", "false").lower() == "true":
+            try:
+                from openinference.instrumentation.anthropic import AnthropicInstrumentor
+                AnthropicInstrumentor().instrument()
+                logger.info("Phoenix Anthropic instrumentation enabled")
+            except Exception as e:
+                logger.warning(f"Could not enable Phoenix instrumentation: {e}")
     
     def _init_client(self, api_key: Optional[str] = None):
         """Initialize the Anthropic client."""
@@ -124,6 +134,7 @@ class AnthropicProvider(BaseLLMProvider):
         """Return the default model."""
         return "claude-sonnet-4-20250514"
     
+    @trace_llm_call()
     def generate(
         self,
         prompt: str,

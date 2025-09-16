@@ -12,6 +12,7 @@ from PySide6.QtCore import QObject
 
 from ..base import BaseLLMProvider
 from ..tokens import TokenCounter
+from src.config.observability import trace_llm_call
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,15 @@ class AzureOpenAIProvider(BaseLLMProvider):
         
         self.client = None
         self._init_client(api_key, azure_endpoint, api_version)
+        
+        # Auto-instrument OpenAI calls with Phoenix if enabled
+        if os.getenv("PHOENIX_ENABLED", "false").lower() == "true":
+            try:
+                from openinference.instrumentation.openai import OpenAIInstrumentor
+                OpenAIInstrumentor().instrument()
+                logger.info("Phoenix OpenAI instrumentation enabled")
+            except Exception as e:
+                logger.warning(f"Could not enable Phoenix instrumentation: {e}")
     
     def _init_client(
         self,
@@ -148,6 +158,7 @@ class AzureOpenAIProvider(BaseLLMProvider):
         # Get from environment variable
         return os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME", "gpt-4.1")
     
+    @trace_llm_call()
     def generate(
         self,
         prompt: str,

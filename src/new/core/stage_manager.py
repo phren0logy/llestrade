@@ -114,17 +114,20 @@ class StageManager(QObject):
         if not self.can_proceed():
             return
         
-        # Special handling for setup stage - need to create project first
-        if self.current_stage_name == 'setup' and hasattr(self.current_stage, 'complete_setup'):
-            self.current_stage.complete_setup()
-            # The stage will emit completed signal which will auto-advance
-            return
+        # Call complete() on current stage if it has one
+        if self.current_stage and hasattr(self.current_stage, 'complete'):
+            try:
+                self.current_stage.complete()
+                # Don't advance here - let the completed signal handler do it
+                # This prevents double advancement
+                return
+            except Exception as e:
+                self.logger.error(f"Error completing stage {self.current_stage_name}: {e}")
+                self.error.emit(f"Failed to complete stage: {str(e)}")
+                return
         
-        current_index = self.current_stage_index
-        if current_index < len(self.STAGE_ORDER) - 1:
-            next_stage = self.STAGE_ORDER[current_index + 1]
-            self.main_window.set_stage_widget(next_stage)
-            self.set_current_stage(next_stage)
+        # If there's no complete() method, advance directly
+        self._advance_to_next_stage()
     
     def previous_stage(self):
         """Move to the previous stage in workflow."""
@@ -168,6 +171,14 @@ class StageManager(QObject):
         self.can_go_back_changed.emit(self._can_go_back)
         self.can_proceed_changed.emit(self._can_proceed)
     
+    def _advance_to_next_stage(self):
+        """Actually advance to the next stage."""
+        current_index = self.current_stage_index
+        if current_index < len(self.STAGE_ORDER) - 1:
+            next_stage = self.STAGE_ORDER[current_index + 1]
+            self.main_window.set_stage_widget(next_stage)
+            self.set_current_stage(next_stage)
+    
     def _on_stage_completed(self, results: Dict):
         """Handle stage completion."""
         self.logger.info(f"Stage {self.current_stage_name} completed")
@@ -182,7 +193,7 @@ class StageManager(QObject):
             self.project.complete_stage(self.current_stage_name)
         
         # Auto-advance to next stage after a short delay
-        QTimer.singleShot(500, self.next_stage)
+        QTimer.singleShot(500, self._advance_to_next_stage)
     
     def _create_project_from_setup(self, results: Dict):
         """Create a new project from setup stage results."""
@@ -313,6 +324,13 @@ class BaseStage(QWidget):
     def load_state(self):
         """Load state from project."""
         raise NotImplementedError("Subclasses must implement load_state")
+    
+    def complete(self):
+        """Complete this stage and prepare to move to next.
+        Override in subclasses to perform completion actions.
+        Default implementation just emits completed signal with empty dict.
+        """
+        self.completed.emit({})
     
     def _validate(self):
         """Internal validation that emits signal."""

@@ -9,9 +9,11 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QLabel, QGroupBox,
     QDialogButtonBox, QMessageBox, QScrollArea,
-    QWidget, QTabWidget
+    QWidget, QTabWidget, QCheckBox
 )
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QUrl
 
 
 class APIKeyDialog(QDialog):
@@ -56,9 +58,9 @@ class APIKeyDialog(QDialog):
         azure_tab = self._create_azure_tab()
         tabs.addTab(azure_tab, "Azure Services")
         
-        # Langfuse tab
-        langfuse_tab = self._create_langfuse_tab()
-        tabs.addTab(langfuse_tab, "Langfuse (Observability)")
+        # Phoenix Observability tab
+        phoenix_tab = self._create_phoenix_tab()
+        tabs.addTab(phoenix_tab, "Phoenix (Observability)")
         
         # Buttons
         buttons = QDialogButtonBox(
@@ -198,68 +200,77 @@ class APIKeyDialog(QDialog):
         layout.addStretch()
         return widget
     
-    def _create_langfuse_tab(self) -> QWidget:
-        """Create the Langfuse tab."""
+    def _open_phoenix_ui(self):
+        """Open Phoenix UI in browser."""
+        port = self.phoenix_port.text() or "6006"
+        QDesktopServices.openUrl(QUrl(f"http://localhost:{port}"))
+    
+    def _create_phoenix_tab(self) -> QWidget:
+        """Create the Phoenix observability tab."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        # Langfuse info
+        # Phoenix info
         info = QLabel(
-            "Langfuse provides observability and cost tracking for LLM applications. "
-            "Optional but recommended for monitoring usage and costs."
+            "Arize Phoenix provides local LLM observability and debugging. "
+            "Enable Phoenix to trace LLM calls, capture costs, and debug issues. "
+            "Phoenix runs locally on your machine for complete data privacy."
         )
         info.setWordWrap(True)
         layout.addWidget(info)
         
-        # Langfuse Settings
-        langfuse_group = QGroupBox("Langfuse Configuration")
-        langfuse_layout = QVBoxLayout(langfuse_group)
+        # Phoenix Settings
+        phoenix_group = QGroupBox("Phoenix Configuration")
+        phoenix_layout = QVBoxLayout(phoenix_group)
         
-        # Public key
-        public_layout = QHBoxLayout()
-        self.langfuse_public_key = QLineEdit()
-        self.langfuse_public_key.setPlaceholderText("Enter Langfuse public key...")
-        self.config_fields["langfuse_public_key"] = self.langfuse_public_key
-        public_layout.addWidget(QLabel("Public Key:"))
-        public_layout.addWidget(self.langfuse_public_key)
-        langfuse_layout.addLayout(public_layout)
-        
-        # Private key
-        private_layout = QHBoxLayout()
-        self.langfuse_private_key = QLineEdit()
-        self.langfuse_private_key.setEchoMode(QLineEdit.Password)
-        self.langfuse_private_key.setPlaceholderText("Enter Langfuse private key...")
-        self.api_fields["langfuse_private"] = self.langfuse_private_key
-        private_layout.addWidget(QLabel("Private Key:"))
-        private_layout.addWidget(self.langfuse_private_key)
-        
-        # Show/hide button for private key
-        show_btn = QPushButton("Show")
-        show_btn.setCheckable(True)
-        show_btn.setMaximumWidth(60)
-        show_btn.toggled.connect(
-            lambda checked: self.langfuse_private_key.setEchoMode(
-                QLineEdit.Normal if checked else QLineEdit.Password
-            )
+        # Enable/Disable Phoenix
+        self.phoenix_enabled = QCheckBox("Enable Phoenix Observability")
+        self.phoenix_enabled.setToolTip(
+            "When enabled, Phoenix will trace all LLM calls locally"
         )
-        private_layout.addWidget(show_btn)
-        langfuse_layout.addLayout(private_layout)
+        phoenix_layout.addWidget(self.phoenix_enabled)
         
-        # URL
-        url_layout = QFormLayout()
-        self.langfuse_url = QLineEdit()
-        self.langfuse_url.setPlaceholderText("https://cloud.langfuse.com or self-hosted URL")
-        url_layout.addRow("URL:", self.langfuse_url)
-        self.config_fields["langfuse_url"] = self.langfuse_url
-        langfuse_layout.addLayout(url_layout)
+        # Phoenix Port
+        port_layout = QFormLayout()
+        self.phoenix_port = QLineEdit()
+        self.phoenix_port.setText("6006")  # Default port
+        self.phoenix_port.setPlaceholderText("Default: 6006")
+        port_layout.addRow("Local Port:", self.phoenix_port)
+        phoenix_layout.addLayout(port_layout)
+        
+        # Project Name
+        project_layout = QFormLayout()
+        self.phoenix_project = QLineEdit()
+        self.phoenix_project.setText("forensic-report-drafter")
+        self.phoenix_project.setPlaceholderText("Project name for organizing traces")
+        project_layout.addRow("Project Name:", self.phoenix_project)
+        phoenix_layout.addLayout(project_layout)
+        
+        # Export Fixtures Option
+        self.phoenix_export_fixtures = QCheckBox("Export traces as test fixtures")
+        self.phoenix_export_fixtures.setToolTip(
+            "Automatically save LLM responses as test fixtures for mocking"
+        )
+        phoenix_layout.addWidget(self.phoenix_export_fixtures)
+        
+        # Store config fields
+        self.config_fields["phoenix_enabled"] = self.phoenix_enabled
+        self.config_fields["phoenix_port"] = self.phoenix_port
+        self.config_fields["phoenix_project"] = self.phoenix_project
+        self.config_fields["phoenix_export_fixtures"] = self.phoenix_export_fixtures
         
         # Help text
-        help_text = QLabel('<a href="https://langfuse.com/">Learn more about Langfuse →</a>')
+        help_text = QLabel('<a href="https://phoenix.arize.com/">Learn more about Phoenix →</a>')
         help_text.setOpenExternalLinks(True)
         help_text.setStyleSheet("color: #1976d2;")
-        langfuse_layout.addWidget(help_text)
+        phoenix_layout.addWidget(help_text)
         
-        layout.addWidget(langfuse_group)
+        # View Phoenix UI Button
+        view_button = QPushButton("Open Phoenix UI")
+        view_button.clicked.connect(self._open_phoenix_ui)
+        phoenix_layout.addWidget(view_button)
+        
+        layout.addWidget(phoenix_group)
         
         layout.addStretch()
         return widget
@@ -290,12 +301,16 @@ class APIKeyDialog(QDialog):
         if "endpoint" in azure_di_settings:
             self.azure_di_endpoint.setText(azure_di_settings["endpoint"])
         
-        # Load Langfuse settings
-        langfuse_settings = self.settings.get("langfuse_settings", {})
-        if "public_key" in langfuse_settings:
-            self.langfuse_public_key.setText(langfuse_settings["public_key"])
-        if "url" in langfuse_settings:
-            self.langfuse_url.setText(langfuse_settings["url"])
+        # Load Phoenix settings
+        phoenix_settings = self.settings.get("phoenix_settings", {})
+        self.phoenix_enabled.setChecked(phoenix_settings.get("enabled", False))
+        if "port" in phoenix_settings:
+            self.phoenix_port.setText(str(phoenix_settings["port"]))
+        if "project" in phoenix_settings:
+            self.phoenix_project.setText(phoenix_settings["project"])
+        self.phoenix_export_fixtures.setChecked(
+            phoenix_settings.get("export_fixtures", False)
+        )
     
     def save_keys(self):
         """Save API keys and settings to secure storage."""
@@ -344,17 +359,14 @@ class APIKeyDialog(QDialog):
             azure_di_settings = {"endpoint": azure_di_endpoint}
             self.settings.set("azure_di_settings", azure_di_settings)
         
-        # Save Langfuse settings
-        langfuse_public = self.langfuse_public_key.text().strip()
-        langfuse_url = self.langfuse_url.text().strip()
-        
-        if any([langfuse_public, langfuse_url]):
-            langfuse_settings = {}
-            if langfuse_public:
-                langfuse_settings["public_key"] = langfuse_public
-            if langfuse_url:
-                langfuse_settings["url"] = langfuse_url
-            self.settings.set("langfuse_settings", langfuse_settings)
+        # Save Phoenix settings
+        phoenix_settings = {
+            "enabled": self.phoenix_enabled.isChecked(),
+            "port": int(self.phoenix_port.text() or 6006),
+            "project": self.phoenix_project.text().strip() or "forensic-report-drafter",
+            "export_fixtures": self.phoenix_export_fixtures.isChecked()
+        }
+        self.settings.set("phoenix_settings", phoenix_settings)
         
         # Show result
         if errors:

@@ -1,5 +1,34 @@
 # Forensic Report Drafter - Consolidated Work Plan
 
+## Priority 0: Systematic Testing & New UI Completion (IMMEDIATE)
+
+### 0.1 Complete Refinement Stage (Day 1)
+- [x] Replace Langfuse with Arize Phoenix for observability
+- [ ] Create minimal `src/new/stages/refinement_stage.py`
+- [ ] Implement basic text editor with save functionality  
+- [ ] Reuse RefinementThread from legacy UI
+- [ ] Register in stage manager and main_new.py
+
+### 0.2 Systematic Testing Infrastructure (Days 2-3)
+- [ ] Create `tests/test_new/` directory structure
+- [ ] Write project creation and management tests (TOP PRIORITY)
+- [ ] Write PDF conversion tests (SECOND PRIORITY)
+- [ ] Create Phoenix-based test fixtures from live API calls
+- [ ] Implement both mocked and live API test suites
+
+### 0.3 Fix GUI Blocking Issues (Days 3-4)
+- [ ] Test and document all GUI issues preventing project creation
+- [ ] Fix form validation errors
+- [ ] Fix state persistence between stages
+- [ ] Ensure navigation works correctly
+- [ ] Add proper error dialogs
+
+### Success Criteria
+- [ ] Can complete full workflow from project creation to report export
+- [ ] 60% test coverage for new UI
+- [ ] All critical path tests passing
+- [ ] Phoenix tracing working for debugging
+
 ## Current Project Status
 
 ### Application Architecture

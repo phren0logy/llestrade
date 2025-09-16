@@ -701,7 +701,7 @@ class AnalysisStage(BaseStage):
         
         # Update project costs
         if self.project and self.selected_provider:
-            # Note: Actual cost tracking will be implemented with Langfuse
+            # Note: Actual cost tracking will be implemented with Phoenix observability
             # For now, just track that we used this provider
             if hasattr(self.project, 'costs'):
                 if self.selected_provider not in self.project.costs.by_provider:

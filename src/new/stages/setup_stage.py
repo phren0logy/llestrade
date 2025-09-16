@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTextEdit, QFileDialog, QMessageBox, QComboBox,
     QWidget, QSizePolicy, QProgressDialog
 )
-from PySide6.QtCore import Qt, QDate, Signal
+from PySide6.QtCore import Qt, QDate, Signal, QTimer
 from PySide6.QtGui import QIcon, QPalette
 
 from src.new.core import BaseStage, ProjectMetadata, SecureSettings
@@ -28,6 +28,8 @@ class ProjectSetupStage(BaseStage):
         self.is_new_project = project is None
         self.settings = SecureSettings()
         self.logger = logging.getLogger(__name__)
+        self._is_completing = False  # Flag to prevent re-entry
+        self._manual_output_dir = False  # Track if user manually selected output dir
         
         # Call parent init last
         super().__init__(project)
@@ -195,10 +197,15 @@ class ProjectSetupStage(BaseStage):
         )
         
         if directory:
+            self._manual_output_dir = True  # Mark as manually selected
             self.output_dir_edit.setText(directory)
     
     def _update_output_directory(self):
         """Update output directory based on case name."""
+        # Only auto-update if user hasn't manually selected a directory
+        if self._manual_output_dir:
+            return
+            
         case_name = self.case_name_edit.text().strip()
         if not case_name:
             return
@@ -231,8 +238,7 @@ class ProjectSetupStage(BaseStage):
                 self.evaluator_edit.setStyleSheet("QLineEdit { background-color: #f5f5f5; }")
                 self.evaluator_edit.setToolTip("Evaluator name is set in application settings")
                 
-                # Hide the warning and settings button
-                self.setup_ui()  # Refresh the UI
+                # Just re-validate without recreating the UI
                 self._validate()  # Re-validate
     
     def validate(self) -> tuple[bool, str]:
@@ -247,10 +253,25 @@ class ProjectSetupStage(BaseStage):
         if not self.output_dir_edit.text().strip():
             return False, "Please select an output directory"
         
-        # Check if directory exists
+        # Check if we can create the directory
         output_dir = Path(self.output_dir_edit.text())
-        if not output_dir.exists():
-            return False, "Selected output directory does not exist"
+        # If the directory already exists, that's fine
+        if output_dir.exists():
+            if not output_dir.is_dir():
+                return False, "Path exists but is not a directory"
+        else:
+            # Check if we can create it (parent must exist or be creatable)
+            try:
+                # Find the first existing parent
+                parent = output_dir.parent
+                while parent != parent.parent:  # Not root
+                    if parent.exists():
+                        break
+                    parent = parent.parent
+                if not parent.exists():
+                    return False, "Cannot create directory at this location"
+            except Exception:
+                return False, "Invalid directory path"
         
         # Check evaluator name
         evaluator = self.evaluator_edit.text().strip()
@@ -354,41 +375,55 @@ class ProjectSetupStage(BaseStage):
             'template': self.template_combo.currentText()
         }
     
-    def complete_setup(self):
+    def complete(self):
         """Complete the setup stage and emit results."""
-        # Validate one more time
-        is_valid, error_msg = self.validate()
-        if not is_valid:
-            QMessageBox.warning(self, "Validation Error", error_msg)
+        # Prevent re-entry
+        if self._is_completing:
+            self.logger.debug("Already completing setup stage, skipping")
             return
         
-        # Get form data
-        form_data = self.get_form_data()
+        self._is_completing = True
         
-        # Create output directory if it doesn't exist
-        output_dir = Path(form_data['output_directory'])
-        if not output_dir.exists():
-            try:
-                output_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                QMessageBox.critical(
-                    self,
-                    "Directory Creation Failed",
-                    f"Failed to create output directory:\n{str(e)}"
-                )
+        try:
+            # Validate one more time
+            is_valid, error_msg = self.validate()
+            if not is_valid:
+                QMessageBox.warning(self, "Validation Error", error_msg)
+                self._is_completing = False
                 return
-        
-        # Save state before completing
-        self.save_state()
-        
-        # Emit completed signal with form data
-        self.completed.emit(form_data)
+            
+            # Get form data
+            form_data = self.get_form_data()
+            
+            # Create output directory if it doesn't exist
+            output_dir = Path(form_data['output_directory'])
+            if not output_dir.exists():
+                try:
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Directory Creation Failed",
+                        f"Failed to create output directory:\n{str(e)}"
+                    )
+                    self._is_completing = False
+                    return
+            
+            # Save state before completing
+            self.save_state()
+            
+            # Emit completed signal with form data
+            self.completed.emit(form_data)
+        finally:
+            # Reset flag after a delay to allow for new project creation
+            QTimer.singleShot(1000, lambda: setattr(self, '_is_completing', False))
     
     def reset(self):
         """Reset the form for a new project."""
         self.logger.debug("Resetting project setup form")
         self.is_new_project = True
         self.project = None
+        self._manual_output_dir = False  # Reset manual selection flag
         
         # Clear form fields
         self.case_name_edit.clear()
