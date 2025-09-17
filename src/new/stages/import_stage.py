@@ -11,8 +11,9 @@ from typing import List, Dict, Any, Optional
 from PySide6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QFileDialog, QMessageBox,
-    QGroupBox, QProgressBar, QWidget, QSplitter,
-    QTextEdit, QCheckBox
+    QGroupBox, QProgressBar, QWidget, QCheckBox, QTreeWidget,
+    QTreeWidgetItem, QDialog, QDialogButtonBox, QSplitter,
+    QTextEdit
 )
 from PySide6.QtCore import Qt, Signal, QMimeData, QTimer, QSize
 from PySide6.QtGui import QDragEnterEvent, QDropEvent, QIcon
@@ -29,6 +30,10 @@ class DocumentImportStage(BaseStage):
     def __init__(self, project=None):
         self.imported_files: List[Path] = []
         self.pending_files: List[Path] = []
+        self.all_discovered_files: List[Path] = []  # All files found before exclusions
+        self.excluded_paths: set = set()  # Files/folders to exclude
+        self.excluded_patterns: List[str] = []  # Patterns to exclude (e.g., *.tmp)
+        self.base_folder: Optional[Path] = None  # Track base folder for relative paths
         self.logger = logging.getLogger(__name__)
         super().__init__(project)
         
@@ -43,26 +48,14 @@ class DocumentImportStage(BaseStage):
         layout.addWidget(title)
         
         # Description
-        desc = QLabel("Import PDF, Word documents, or text files for analysis.")
+        desc = QLabel("Select a folder to import all PDF, Word documents, and text files recursively.")
         desc.setWordWrap(True)
         desc.setStyleSheet("color: #666;")
         layout.addWidget(desc)
         
-        # Main content area with splitter
-        splitter = QSplitter(Qt.Horizontal)
-        
-        # Left side - file import area
+        # Main import area
         import_widget = self._create_import_widget()
-        splitter.addWidget(import_widget)
-        
-        # Right side - preview area
-        preview_widget = self._create_preview_widget()
-        splitter.addWidget(preview_widget)
-        
-        # Set initial splitter sizes (60/40)
-        splitter.setSizes([600, 400])
-        
-        layout.addWidget(splitter)
+        layout.addWidget(import_widget)
         
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -79,7 +72,7 @@ class DocumentImportStage(BaseStage):
         layout = QVBoxLayout(widget)
         
         # Drop zone
-        drop_group = QGroupBox("Drop Files Here")
+        drop_group = QGroupBox("Select Documents Folder")
         drop_layout = QVBoxLayout(drop_group)
         
         self.drop_zone = DropZone()
@@ -90,16 +83,16 @@ class DocumentImportStage(BaseStage):
         # Browse button
         browse_layout = QHBoxLayout()
         browse_layout.addStretch()
-        browse_btn = QPushButton("Browse Files...")
-        browse_btn.clicked.connect(self._browse_files)
-        browse_layout.addWidget(browse_btn)
+        browse_folder_btn = QPushButton("Browse Folder...")
+        browse_folder_btn.clicked.connect(self._browse_folder)
+        browse_layout.addWidget(browse_folder_btn)
         browse_layout.addStretch()
         drop_layout.addLayout(browse_layout)
         
         layout.addWidget(drop_group)
         
         # File list
-        list_group = QGroupBox("Selected Files")
+        list_group = QGroupBox("Discovered Documents")
         list_layout = QVBoxLayout(list_group)
         
         self.file_list = QListWidget()
@@ -123,30 +116,21 @@ class DocumentImportStage(BaseStage):
         controls_layout.addWidget(self.clear_btn)
         
         list_layout.addLayout(controls_layout)
+        
+        # Exclusions controls
+        exclusion_layout = QHBoxLayout()
+        self.configure_exclusions_btn = QPushButton("Configure Exclusions...")
+        self.configure_exclusions_btn.setEnabled(False)
+        self.configure_exclusions_btn.clicked.connect(self._show_exclusion_dialog)
+        exclusion_layout.addWidget(self.configure_exclusions_btn)
+        
+        self.exclusion_label = QLabel("No exclusions")
+        self.exclusion_label.setStyleSheet("color: #666;")
+        exclusion_layout.addWidget(self.exclusion_label)
+        exclusion_layout.addStretch()
+        
+        list_layout.addLayout(exclusion_layout)
         layout.addWidget(list_group)
-        
-        return widget
-    
-    def _create_preview_widget(self) -> QWidget:
-        """Create the file preview widget."""
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        
-        preview_group = QGroupBox("Preview")
-        preview_layout = QVBoxLayout(preview_group)
-        
-        # File info
-        self.file_info_label = QLabel("Select a file to preview")
-        self.file_info_label.setStyleSheet("color: #666; padding: 10px;")
-        preview_layout.addWidget(self.file_info_label)
-        
-        # Preview text
-        self.preview_text = QTextEdit()
-        self.preview_text.setReadOnly(True)
-        self.preview_text.setPlaceholderText("File preview will appear here...")
-        preview_layout.addWidget(self.preview_text)
-        
-        layout.addWidget(preview_group)
         
         # Import options
         options_group = QGroupBox("Import Options")
@@ -156,13 +140,10 @@ class DocumentImportStage(BaseStage):
         self.convert_pdf_check.setChecked(True)
         options_layout.addWidget(self.convert_pdf_check)
         
-        self.preserve_structure_check = QCheckBox("Preserve document structure")
-        self.preserve_structure_check.setChecked(True)
-        options_layout.addWidget(self.preserve_structure_check)
-        
         layout.addWidget(options_group)
         
         return widget
+    
     
     def _create_button_widget(self) -> QWidget:
         """Create the action buttons."""
@@ -201,21 +182,94 @@ class DocumentImportStage(BaseStage):
         
         return widget
     
-    def _browse_files(self):
-        """Browse for files to import."""
-        files, _ = QFileDialog.getOpenFileNames(
+    def _browse_folder(self):
+        """Browse for a folder to import all documents from recursively."""
+        folder = QFileDialog.getExistingDirectory(
             self,
-            "Select Documents to Import",
+            "Select Documents Folder",
             str(Path.home() / "Documents"),
-            "Documents (*.pdf *.doc *.docx *.txt *.md);;All Files (*.*)"
+            QFileDialog.ShowDirsOnly
         )
         
-        if files:
-            self._add_files([Path(f) for f in files])
+        if folder:
+            self._scan_and_add_folder(Path(folder))
+    
+    
+    def _scan_and_add_folder(self, folder_path: Path):
+        """Recursively scan folder for valid documents."""
+        # Set base folder for relative path display
+        self.base_folder = folder_path
+        
+        # Valid extensions to look for
+        valid_extensions = {'.pdf', '.doc', '.docx', '.txt', '.md'}
+        
+        # Find all files recursively
+        found_files = []
+        try:
+            for file_path in folder_path.rglob('*'):
+                # Skip hidden files and directories
+                if any(part.startswith('.') for part in file_path.parts):
+                    continue
+                
+                # Check if it's a file with valid extension
+                if file_path.is_file() and file_path.suffix.lower() in valid_extensions:
+                    found_files.append(file_path)
+            
+            # Sort files by path for consistent ordering
+            found_files.sort()
+            
+            if found_files:
+                # Store all discovered files
+                self.all_discovered_files = found_files.copy()
+                
+                # Show summary message
+                QMessageBox.information(
+                    self,
+                    "Files Found",
+                    f"Found {len(found_files)} document(s) in {folder_path.name}"
+                )
+                
+                # Enable exclusions button
+                self.configure_exclusions_btn.setEnabled(True)
+                
+                # Add all found files
+                self._add_files(found_files)
+            else:
+                QMessageBox.information(
+                    self,
+                    "No Files Found",
+                    f"No valid documents found in {folder_path.name}\n\n"
+                    f"Looking for: PDF, Word, Text, and Markdown files"
+                )
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Scan Error",
+                f"Error scanning folder: {str(e)}"
+            )
+        # Note: Don't clear base_folder here as we need it for exclusions
     
     def _handle_dropped_files(self, files: List[str]):
-        """Handle files dropped on the drop zone."""
-        self._add_files([Path(f) for f in files])
+        """Handle files or folders dropped on the drop zone."""
+        paths = [Path(f) for f in files]
+        
+        # Separate files and folders
+        file_paths = []
+        folder_paths = []
+        
+        for path in paths:
+            if path.is_dir():
+                folder_paths.append(path)
+            elif path.is_file():
+                file_paths.append(path)
+        
+        # Process folders first (recursive scan)
+        for folder in folder_paths:
+            self._scan_and_add_folder(folder)
+        
+        # Then add individual files
+        if file_paths:
+            self._add_files(file_paths)
     
     def _add_files(self, files: List[Path]):
         """Add files to the import list."""
@@ -242,14 +296,19 @@ class DocumentImportStage(BaseStage):
                 if file_path.suffix.lower() not in ['.txt', '.md', '.pdf', '.doc', '.docx']:
                     continue
             
-            # Add to list
-            item = QListWidgetItem(file_path.name)
-            item.setData(Qt.UserRole, str(file_path))
-            item.setToolTip(str(file_path))
+            # Determine display name (use relative path if from folder scan)
+            if self.base_folder and file_path.is_relative_to(self.base_folder):
+                display_name = str(file_path.relative_to(self.base_folder))
+            else:
+                display_name = file_path.name
             
             # Add file size
             size_mb = file_path.stat().st_size / (1024 * 1024)
-            item.setText(f"{file_path.name} ({size_mb:.1f} MB)")
+            
+            # Create list item
+            item = QListWidgetItem(f"{display_name} ({size_mb:.1f} MB)")
+            item.setData(Qt.UserRole, str(file_path))
+            item.setToolTip(str(file_path))
             
             self.file_list.addItem(item)
             added_count += 1
@@ -267,60 +326,87 @@ class DocumentImportStage(BaseStage):
     def _clear_all(self):
         """Clear all files from the list."""
         self.file_list.clear()
+        self.all_discovered_files.clear()
+        self.excluded_paths.clear()
+        self.excluded_patterns.clear()
+        self.base_folder = None
+        self.configure_exclusions_btn.setEnabled(False)
+        self.exclusion_label.setText("No exclusions")
+        self._update_ui_state()
+    
+    def _show_exclusion_dialog(self):
+        """Show the exclusion configuration dialog."""
+        if not self.base_folder or not self.all_discovered_files:
+            return
+        
+        dialog = ExclusionDialog(
+            self.base_folder,
+            self.all_discovered_files,
+            self.excluded_paths,
+            self
+        )
+        
+        if dialog.exec() == QDialog.Accepted:
+            # Update excluded paths
+            self.excluded_paths = dialog.excluded_paths
+            self.excluded_patterns = dialog.get_patterns()
+            
+            # Apply exclusions
+            self._apply_exclusions()
+    
+    def _apply_exclusions(self):
+        """Apply exclusions to the file list."""
+        if not self.all_discovered_files:
+            return
+        
+        # Clear current list
+        self.file_list.clear()
+        
+        # Filter files based on exclusions
+        filtered_files = []
+        for file_path in self.all_discovered_files:
+            # Check if file or any parent folder is excluded
+            is_excluded = False
+            
+            # Check path exclusions
+            current = file_path
+            while current != self.base_folder.parent:
+                if current in self.excluded_paths:
+                    is_excluded = True
+                    break
+                current = current.parent
+            
+            # Check pattern exclusions
+            if not is_excluded and self.excluded_patterns:
+                import fnmatch
+                file_name = file_path.name
+                for pattern in self.excluded_patterns:
+                    if fnmatch.fnmatch(file_name, pattern):
+                        is_excluded = True
+                        break
+            
+            if not is_excluded:
+                filtered_files.append(file_path)
+        
+        # Re-add filtered files
+        if filtered_files:
+            self._add_files(filtered_files)
+        
+        # Update exclusion label
+        excluded_count = len(self.all_discovered_files) - len(filtered_files)
+        if excluded_count > 0:
+            self.exclusion_label.setText(f"{excluded_count} files excluded")
+            self.exclusion_label.setStyleSheet("color: #ff9800;")
+        else:
+            self.exclusion_label.setText("No exclusions")
+            self.exclusion_label.setStyleSheet("color: #666;")
+        
         self._update_ui_state()
     
     def _on_selection_changed(self):
         """Handle file selection change."""
         selected = self.file_list.selectedItems()
         self.remove_btn.setEnabled(len(selected) > 0)
-        
-        # Show preview of first selected file
-        if selected:
-            file_path = Path(selected[0].data(Qt.UserRole))
-            self._show_preview(file_path)
-        else:
-            self._clear_preview()
-    
-    def _show_preview(self, file_path: Path):
-        """Show preview of a file."""
-        # Update file info
-        stat = file_path.stat()
-        size_mb = stat.st_size / (1024 * 1024)
-        self.file_info_label.setText(
-            f"<b>{file_path.name}</b><br>"
-            f"Size: {size_mb:.1f} MB<br>"
-            f"Type: {file_path.suffix.upper()[1:] if file_path.suffix else 'Unknown'}"
-        )
-        
-        # Show preview based on file type
-        if file_path.suffix.lower() in ['.txt', '.md']:
-            try:
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read(5000)  # First 5KB
-                    if len(content) == 5000:
-                        content += "\n\n... (preview truncated)"
-                    self.preview_text.setPlainText(content)
-            except Exception as e:
-                self.preview_text.setPlainText(f"Error reading file: {str(e)}")
-        elif file_path.suffix.lower() == '.pdf':
-            self.preview_text.setPlainText(
-                "PDF Document\n\n"
-                "PDF files will be converted to text during import using Azure Document Intelligence.\n\n"
-                "Note: Large PDFs may take several minutes to process."
-            )
-        elif file_path.suffix.lower() in ['.doc', '.docx']:
-            self.preview_text.setPlainText(
-                "Word Document\n\n"
-                "Word documents will be converted to text during import.\n\n"
-                "Formatting and tables will be preserved where possible."
-            )
-        else:
-            self.preview_text.setPlainText("Preview not available for this file type.")
-    
-    def _clear_preview(self):
-        """Clear the preview area."""
-        self.file_info_label.setText("Select a file to preview")
-        self.preview_text.clear()
     
     def _update_ui_state(self):
         """Update UI state based on file list."""
@@ -432,8 +518,7 @@ class DocumentImportStage(BaseStage):
             # Save import data
             results = {
                 "imported_files": [str(f) for f in self.imported_files],
-                "convert_pdf": self.convert_pdf_check.isChecked(),
-                "preserve_structure": self.preserve_structure_check.isChecked()
+                "convert_pdf": self.convert_pdf_check.isChecked()
             }
             
             # Save state and emit completion
@@ -456,8 +541,7 @@ class DocumentImportStage(BaseStage):
         state = {
             "imported_files": [str(f) for f in self.imported_files],
             "pending_files": [str(f) for f in self.pending_files],
-            "convert_pdf": self.convert_pdf_check.isChecked(),
-            "preserve_structure": self.preserve_structure_check.isChecked()
+            "convert_pdf": self.convert_pdf_check.isChecked()
         }
         
         self.project.save_stage_data("import", state)
@@ -476,7 +560,6 @@ class DocumentImportStage(BaseStage):
         
         # Restore options
         self.convert_pdf_check.setChecked(state.get("convert_pdf", True))
-        self.preserve_structure_check.setChecked(state.get("preserve_structure", True))
         
         # Update UI
         self._update_ui_state()
@@ -507,7 +590,7 @@ class DropZone(QLabel):
                 background-color: #e3f2fd;
             }
         """)
-        self.setText("Drag and drop files here\nor click Browse Files")
+        self.setText("Drag and drop a folder or files here\nor click Browse Folder")
     
     def dragEnterEvent(self, event: QDragEnterEvent):
         """Handle drag enter event."""
@@ -549,3 +632,207 @@ class DropZone(QLabel):
         
         # Reset style
         self.dragLeaveEvent(None)
+
+
+class ExclusionDialog(QDialog):
+    """Dialog for configuring file and folder exclusions."""
+    
+    def __init__(self, base_folder: Path, all_files: List[Path], excluded_paths: set, parent=None):
+        super().__init__(parent)
+        self.base_folder = base_folder
+        self.all_files = all_files
+        self.excluded_paths = excluded_paths.copy()  # Make a copy to work with
+        
+        self.setWindowTitle("Configure Exclusions")
+        self.setModal(True)
+        self.resize(800, 600)
+        
+        self.setup_ui()
+        self.populate_tree()
+    
+    def setup_ui(self):
+        """Create the dialog UI."""
+        layout = QVBoxLayout(self)
+        
+        # Description
+        desc = QLabel(
+            "Select files or folders to exclude from import. "
+            "Unchecked items will be excluded."
+        )
+        desc.setWordWrap(True)
+        layout.addWidget(desc)
+        
+        # Splitter for tree and preview
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Tree widget
+        tree_widget = QWidget()
+        tree_layout = QVBoxLayout(tree_widget)
+        
+        # Tree controls
+        controls = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self.select_all)
+        controls.addWidget(select_all_btn)
+        
+        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn.clicked.connect(self.deselect_all)
+        controls.addWidget(deselect_all_btn)
+        
+        controls.addStretch()
+        tree_layout.addLayout(controls)
+        
+        # Tree
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabel("Files and Folders")
+        self.tree.itemChanged.connect(self.on_item_changed)
+        tree_layout.addWidget(self.tree)
+        
+        # Summary label
+        self.summary_label = QLabel()
+        tree_layout.addWidget(self.summary_label)
+        
+        splitter.addWidget(tree_widget)
+        
+        # Preview pane
+        preview_widget = QWidget()
+        preview_layout = QVBoxLayout(preview_widget)
+        
+        preview_title = QLabel("Excluded Patterns")
+        preview_title.setStyleSheet("font-weight: bold;")
+        preview_layout.addWidget(preview_title)
+        
+        self.patterns_edit = QTextEdit()
+        self.patterns_edit.setPlaceholderText(
+            "Enter patterns to exclude (one per line):\n"
+            "Examples:\n"
+            "*.tmp - exclude all .tmp files\n"
+            "__pycache__ - exclude folders named __pycache__\n"
+            "test_* - exclude files starting with test_"
+        )
+        preview_layout.addWidget(self.patterns_edit)
+        
+        splitter.addWidget(preview_widget)
+        splitter.setStretchFactor(0, 2)  # Tree gets more space
+        splitter.setStretchFactor(1, 1)
+        
+        layout.addWidget(splitter)
+        
+        # Buttons
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+    
+    def populate_tree(self):
+        """Populate the tree with files and folders."""
+        # Build folder structure
+        folder_items = {}
+        
+        for file_path in self.all_files:
+            # Get relative path
+            rel_path = file_path.relative_to(self.base_folder)
+            parts = rel_path.parts
+            
+            # Create folder hierarchy
+            parent_item = None
+            current_path = self.base_folder
+            
+            for i, part in enumerate(parts[:-1]):  # All but the last (file name)
+                current_path = current_path / part
+                
+                if current_path not in folder_items:
+                    # Create folder item
+                    if parent_item is None:
+                        folder_item = QTreeWidgetItem(self.tree)
+                    else:
+                        folder_item = QTreeWidgetItem(parent_item)
+                    
+                    folder_item.setText(0, part)
+                    folder_item.setData(0, Qt.UserRole, str(current_path))
+                    folder_item.setCheckState(0, Qt.Checked if current_path not in self.excluded_paths else Qt.Unchecked)
+                    folder_item.setFlags(folder_item.flags() | Qt.ItemIsTristate | Qt.ItemIsUserCheckable)
+                    folder_items[current_path] = folder_item
+                    parent_item = folder_item
+                else:
+                    parent_item = folder_items[current_path]
+            
+            # Add file item
+            if parent_item is None:
+                file_item = QTreeWidgetItem(self.tree)
+            else:
+                file_item = QTreeWidgetItem(parent_item)
+            
+            file_item.setText(0, parts[-1])
+            file_item.setData(0, Qt.UserRole, str(file_path))
+            file_item.setCheckState(0, Qt.Checked if file_path not in self.excluded_paths else Qt.Unchecked)
+            file_item.setFlags(file_item.flags() | Qt.ItemIsUserCheckable)
+        
+        # Expand all
+        self.tree.expandAll()
+        self.update_summary()
+    
+    def on_item_changed(self, item: QTreeWidgetItem, column: int):
+        """Handle item check state change."""
+        if column != 0:
+            return
+        
+        path = Path(item.data(0, Qt.UserRole))
+        
+        if item.checkState(0) == Qt.Unchecked:
+            self.excluded_paths.add(path)
+        else:
+            self.excluded_paths.discard(path)
+        
+        self.update_summary()
+    
+    def select_all(self):
+        """Select all items."""
+        self.set_all_check_state(Qt.Checked)
+    
+    def deselect_all(self):
+        """Deselect all items."""
+        self.set_all_check_state(Qt.Unchecked)
+    
+    def set_all_check_state(self, state: Qt.CheckState):
+        """Set check state for all items."""
+        def set_state_recursive(item):
+            item.setCheckState(0, state)
+            for i in range(item.childCount()):
+                set_state_recursive(item.child(i))
+        
+        for i in range(self.tree.topLevelItemCount()):
+            set_state_recursive(self.tree.topLevelItem(i))
+    
+    def update_summary(self):
+        """Update the summary label."""
+        # Count included files
+        included_count = 0
+        for file_path in self.all_files:
+            # Check if file or any parent folder is excluded
+            is_excluded = False
+            current = file_path
+            while current != self.base_folder.parent:
+                if current in self.excluded_paths:
+                    is_excluded = True
+                    break
+                current = current.parent
+            
+            if not is_excluded:
+                included_count += 1
+        
+        total = len(self.all_files)
+        excluded = total - included_count
+        
+        self.summary_label.setText(
+            f"Including {included_count} of {total} files ({excluded} excluded)"
+        )
+    
+    def get_patterns(self) -> List[str]:
+        """Get exclusion patterns from the text edit."""
+        text = self.patterns_edit.toPlainText().strip()
+        if not text:
+            return []
+        return [line.strip() for line in text.split('\n') if line.strip()]
