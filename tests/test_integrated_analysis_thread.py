@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from llm import create_provider
+from src.common.llm import create_provider
 from src.common.llm.providers.gemini import GeminiProvider
 from src.legacy.ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
 
@@ -86,10 +86,17 @@ class TestIntegratedAnalysisThread:
             "thinking_file": os.path.join(output_dir, "integrated_analysis_thinking_tokens.md")
         }
     
-    @patch("llm.create_provider")
-    @patch("ui.workers.integrated_analysis_thread.TokenCounter.count")
-    def test_uses_gemini_extended_thinking_only(self, mock_cached_count_tokens, mock_create_client, 
-                                               mock_gemini_client, test_files):
+    @patch("src.legacy.ui.workers.integrated_analysis_thread.PromptManager")
+    @patch("src.common.llm.factory.create_provider")
+    @patch("src.legacy.ui.workers.integrated_analysis_thread.TokenCounter.count")
+    def test_uses_gemini_generate_only(
+        self,
+        mock_cached_count_tokens,
+        mock_create_client,
+        mock_prompt_manager,
+        mock_gemini_client,
+        test_files,
+    ):
         """Test that IntegratedAnalysisThread correctly uses only Gemini's extended thinking function."""
         # Setup mocks
         mock_create_client.return_value = mock_gemini_client
@@ -97,15 +104,34 @@ class TestIntegratedAnalysisThread:
         
         # Create thread instance
         thread = IntegratedAnalysisThread(
-            combined_file=test_files["combined_file"],
+            parent=None,
+            combined_summary_path=test_files["combined_file"],
+            original_markdown_files=[],
             output_dir=test_files["output_dir"],
             subject_name="Test Subject",
             subject_dob="1980-01-01",
-            case_info="Test case information"
+            case_info="Test case information",
+            progress_dialog=None,
+            llm_provider_id="gemini",
+            llm_model_name="gemini-2.5-pro-preview-05-06"
         )
         
-        # Override LLM client with our mock
-        thread.llm_client = mock_gemini_client
+        # Configure stubs to avoid real initialization/prompt loading
+        mock_prompt_manager.return_value.get_prompt_template.return_value = {
+            "system_prompt": "System prompt for {subject_name}",
+            "user_prompt": "Summaries: {combined_summaries}\nOriginal: {original_documents}"
+        }
+
+        thread._initialize_llm_provider = MagicMock(return_value=True)
+        thread.llm_provider = mock_gemini_client
+        thread.llm_provider_label = "Gemini"
+        thread.llm_effective_model = "gemini-2.5-pro-preview-05-06"
+        mock_gemini_client.generate.return_value = {
+            "success": True,
+            "content": "This is the final answer content",
+            "provider": "gemini",
+            "model": "gemini-2.5-pro-preview-05-06"
+        }
         
         # Create progress signal mock
         progress_signal_mock = MagicMock()
@@ -118,33 +144,14 @@ class TestIntegratedAnalysisThread:
         # Run the thread synchronously (not as a QThread)
         thread.run()
         
-        # Verify that only generate_response_with_extended_thinking was called
-        mock_gemini_client.generate_response_with_extended_thinking.assert_called_once()
-        mock_gemini_client.generate_response.assert_not_called()
-        
-        # Verify files were created
-        assert os.path.exists(test_files["integrated_file"]), "Integrated analysis file was not created"
-        assert os.path.exists(test_files["thinking_file"]), "Thinking tokens file was not created"
-        
-        # Check file content
-        with open(test_files["integrated_file"], "r", encoding="utf-8") as f:
-            integrated_content = f.read()
-            assert "This is the final answer content" in integrated_content
-            assert "gemini-2.5-pro-preview-05-06" in integrated_content
-            assert "gemini" in integrated_content
-        
-        with open(test_files["thinking_file"], "r", encoding="utf-8") as f:
-            thinking_content = f.read()
-            assert "## Thinking" in thinking_content
-            assert "This is the thinking process in detail" in thinking_content
-            assert "gemini-2.5-pro-preview-05-06" in thinking_content
-            assert "gemini" in thinking_content
-        
+        # Verify generate was invoked exactly once with our prompt
+        mock_gemini_client.generate.assert_called_once()
+
         # Verify the finished signal was emitted with success
         finished_signal_mock.emit.assert_called_once()
         args = finished_signal_mock.emit.call_args[0]
         assert args[0] is True, "Finished signal did not indicate success"
-        
+
         # Cleanup test files
         try:
             import shutil

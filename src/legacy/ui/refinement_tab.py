@@ -24,11 +24,11 @@ from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TI
 from src.core.file_utils import read_file_content, read_file_preview, write_file_content
 from src.common.llm.factory import create_provider
 from src.core.prompt_manager import PromptManager
-from ui.base_tab import BaseTab
-from ui.components.file_selector import FileSelector
-from ui.components.results_viewer import ResultsViewer
-from ui.components.status_panel import StatusPanel
-from ui.components.workflow_indicator import WorkflowIndicator
+from .base_tab import BaseTab
+from .components.file_selector import FileSelector
+from .components.results_viewer import ResultsViewer
+from .components.status_panel import StatusPanel
+from .components.workflow_indicator import WorkflowIndicator
 
 
 class RefinementThread(QThread):

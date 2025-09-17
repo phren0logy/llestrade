@@ -22,15 +22,15 @@ from PySide6.QtWidgets import (
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
 from src.core.file_utils import read_file_content, read_file_preview, write_file_content
 from src.core.ingest_markdown import generate_template_fragments, ingest_and_split_markdown
-from llm import create_provider
+from src.common.llm import create_provider
 from src.core.prompt_manager import combine_transcript_with_fragments
-from ui.base_tab import BaseTab
-from ui.components.file_selector import FileSelector
-from ui.components.progress_dialog import ProgressDialog
-from ui.components.results_viewer import ResultsViewer
-from ui.components.status_panel import StatusPanel
-from ui.components.workflow_indicator import WorkflowIndicator
-from ui.workers.prompt_runner_thread import PromptRunnerThread
+from .base_tab import BaseTab
+from .components.file_selector import FileSelector
+from .components.progress_dialog import ProgressDialog
+from .components.results_viewer import ResultsViewer
+from .components.status_panel import StatusPanel
+from .components.workflow_indicator import WorkflowIndicator
+from .workers.prompt_runner_thread import PromptRunnerThread
 
 
 class PromptsTab(BaseTab):

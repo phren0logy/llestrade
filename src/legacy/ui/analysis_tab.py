@@ -29,15 +29,15 @@ from PySide6.QtWidgets import (
 
 from src.config.app_config import get_available_providers_and_models, get_configured_llm_client
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
-from llm import create_provider
+from src.common.llm import create_provider
 from src.common.llm.tokens import TokenCounter
-from ui.base_tab import BaseTab
-from ui.components.file_selector import FileSelector
-from ui.components.status_panel import StatusPanel
-from ui.components.workflow_indicator import WorkflowIndicator, WorkflowStep
-from ui.workers.directory_scanner_thread import DirectoryScannerThread
-from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
-from ui.workers.llm_summary_thread import LLMSummaryThread
+from .base_tab import BaseTab
+from .components.file_selector import FileSelector
+from .components.status_panel import StatusPanel
+from .components.workflow_indicator import WorkflowIndicator, WorkflowStep
+from .workers.directory_scanner_thread import DirectoryScannerThread
+from .workers.integrated_analysis_thread import IntegratedAnalysisThread
+from .workers.llm_summary_thread import LLMSummaryThread
 
 # Constants for directory and file names
 SUMMARIES_SUBDIR = "summaries"

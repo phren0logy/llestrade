@@ -123,11 +123,11 @@ class TestMainWindow(QMainWindow):
         logger.error("This is an ERROR message")
         
         # Test different loggers
-        llm_logger = logging.getLogger("llm.providers")
+        llm_logger = logging.getLogger("src.common.llm.providers")
         llm_logger.info("LLM provider initialized")
         llm_logger.debug("LLM debug information")
         
-        worker_logger = logging.getLogger("ui.workers")
+        worker_logger = logging.getLogger("src.legacy.ui.workers")
         worker_logger.info("Worker thread started")
         worker_logger.warning("Worker thread warning")
         

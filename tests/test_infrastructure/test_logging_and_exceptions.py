@@ -107,7 +107,7 @@ def test_logging_without_gui():
     logger.info("Starting non-GUI tests")
     
     # Test module-specific logging
-    llm_logger = logging.getLogger("llm.providers")
+    llm_logger = logging.getLogger("src.common.llm.providers")
     llm_logger.debug("Testing LLM provider debug logging")
     llm_logger.info("Testing LLM provider info logging")
     

@@ -4,7 +4,7 @@ from pathlib import Path
 # Ensure we can import from the parent directory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm import count_tokens_cached
+from src.common.llm import count_tokens_cached
 
 
 def test_count_tokens_cached():
@@ -25,4 +25,3 @@ def test_count_tokens_cached():
     # Different text should return different result (using longer text to ensure different token count)
     result3 = count_tokens_cached(provider, text="this is a much longer different text string")
     assert result1 != result3
-

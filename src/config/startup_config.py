@@ -14,11 +14,11 @@ def configure_startup_logging():
     
     # Set specific loggers to appropriate levels
     # Reduce noise from LLM factory
-    logging.getLogger('llm.factory').setLevel(logging.WARNING)
-    logging.getLogger('llm.providers').setLevel(logging.WARNING)
-    logging.getLogger('llm.providers.anthropic').setLevel(logging.WARNING)
-    logging.getLogger('llm.providers.gemini').setLevel(logging.WARNING)
-    logging.getLogger('llm.providers.azure_openai').setLevel(logging.WARNING)
+    logging.getLogger('src.common.llm.factory').setLevel(logging.WARNING)
+    logging.getLogger('src.common.llm.providers').setLevel(logging.WARNING)
+    logging.getLogger('src.common.llm.providers.anthropic').setLevel(logging.WARNING)
+    logging.getLogger('src.common.llm.providers.gemini').setLevel(logging.WARNING)
+    logging.getLogger('src.common.llm.providers.azure_openai').setLevel(logging.WARNING)
     
     # Keep app-level logging at INFO
     logging.getLogger('root').setLevel(logging.INFO)
@@ -28,8 +28,8 @@ def configure_startup_logging():
     if os.environ.get('DEBUG_LLM', '').lower() == 'true':
         # Enable debug logging for LLM modules
         logging.getLogger('llm').setLevel(logging.DEBUG)
-        logging.getLogger('llm.factory').setLevel(logging.DEBUG)
-        logging.getLogger('llm.providers').setLevel(logging.DEBUG)
+        logging.getLogger('src.common.llm.factory').setLevel(logging.DEBUG)
+        logging.getLogger('src.common.llm.providers').setLevel(logging.DEBUG)
 
 
 def suppress_startup_warnings():

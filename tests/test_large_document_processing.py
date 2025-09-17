@@ -17,7 +17,7 @@ import psutil
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm import create_provider
+from src.common.llm import create_provider
 from src.common.llm.chunking import ChunkingStrategy
 from src.common.llm.tokens import TokenCounter
 
@@ -190,7 +190,7 @@ def test_retry_logic_simulation():
     """Test retry logic with simulated failures."""
     logger.info("\n=== Testing Retry Logic Simulation ===")
     
-    with patch("llm.providers.azure_openai.AzureOpenAIProvider") as MockProvider:
+    with patch("src.common.llm.providers.azure_openai.AzureOpenAIProvider") as MockProvider:
         # Create mock provider
         mock_provider = MagicMock()
         mock_provider.initialized = True

@@ -93,12 +93,12 @@ mocked_modules_dict = {
         LLMClientFactory=MagicMock(),
         cached_count_tokens=MagicMock(return_value=10)
     ),
-    'ui.base_tab': MagicMock(BaseTab=mock_qwidget),
-    'ui.components.file_selector': MagicMock(FileSelector=MagicMock()),
-    'ui.components.status_panel': MagicMock(StatusPanel=MagicMock()),
-    'ui.components.workflow_indicator': MagicMock(WorkflowIndicator=MagicMock(), WorkflowStep=MagicMock()),
-    'ui.workers.llm_summary_thread': MagicMock(),
-    'ui.workers.integrated_analysis_thread': MagicMock(),
+    'src.legacy.ui.base_tab': MagicMock(BaseTab=mock_qwidget),
+    'src.legacy.ui.components.file_selector': MagicMock(FileSelector=MagicMock()),
+    'src.legacy.ui.components.status_panel': MagicMock(StatusPanel=MagicMock()),
+    'src.legacy.ui.components.workflow_indicator': MagicMock(WorkflowIndicator=MagicMock(), WorkflowStep=MagicMock()),
+    'src.legacy.ui.workers.llm_summary_thread': MagicMock(),
+    'src.legacy.ui.workers.integrated_analysis_thread': MagicMock(),
 }
 
 # 4. Apply all mocks to sys.modules
@@ -122,7 +122,7 @@ class TestAnalysisTabFileOperations(unittest.TestCase):
     @patch('os.listdir')
     @patch('os.makedirs')
     @patch('builtins.open', new_callable=mock_open)
-    @patch('ui.analysis_tab.LLMSummaryThread')
+    @patch('src.legacy.ui.analysis_tab.LLMSummaryThread')
     # No longer patch QTimer via decorator here, rely on sys.modules mock
     def setUp(self, MockLLMSummaryThreadFromDecorator, mock_open_func, mock_makedirs, mock_listdir, mock_path_exists):
         
@@ -138,7 +138,7 @@ class TestAnalysisTabFileOperations(unittest.TestCase):
         # Reset mocks for other UI components if they are stateful and defined globally
         # For now, assuming FileSelector(), StatusPanel(), WorkflowIndicator() return fresh MagicMocks
         # from the sys.modules setup, so their internal state shouldn't leak unless their class mocks
-        # (e.g. mocked_modules_dict['ui.components.file_selector'].FileSelector) are modified.
+        # (e.g. mocked_modules_dict['src.legacy.ui.components.file_selector'].FileSelector) are modified.
 
         self.mock_parent = mock_qt_widgets.QWidget() # Use the QWidget mock from PySide6.QtWidgets mock
         self.mock_status_bar = MagicMock()
@@ -347,7 +347,7 @@ class TestAnalysisTabFileOperations(unittest.TestCase):
         timer_callback = args[0]
         self.assertEqual(timer_callback, mock_progress_dialog_instance.close)
 
-    @patch('ui.analysis_tab.IntegratedAnalysisThread') 
+    @patch('src.legacy.ui.analysis_tab.IntegratedAnalysisThread') 
     def test_generate_integrated_analysis_reads_combined_from_summaries_subdir(self, MockIntegratedAnalysisThread):
         # Determine the expected path for the combined summary file, which is now in the SUMMARIES_SUBDIR
         subject_name = self.tab.subject_input.text() # Mocked to "John Doe"

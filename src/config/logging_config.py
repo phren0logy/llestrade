@@ -66,9 +66,9 @@ class ApplicationLogger:
     def _configure_module_loggers(self, debug):
         """Configure logging levels for specific modules."""
         module_configs = {
-            'llm': logging.DEBUG if debug else logging.INFO,
-            'llm.providers': logging.DEBUG if debug else logging.INFO,
-            'ui.workers': logging.DEBUG if debug else logging.INFO,
+            'src.common.llm': logging.DEBUG if debug else logging.INFO,
+            'src.common.llm.providers': logging.DEBUG if debug else logging.INFO,
+            'src.legacy.ui.workers': logging.DEBUG if debug else logging.INFO,
             'app_config': logging.INFO,
             'prompt_manager': logging.INFO,
         }

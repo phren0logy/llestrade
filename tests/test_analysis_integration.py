@@ -38,10 +38,10 @@ def thread_dependencies(tmp_path: Path) -> dict:
     }
 
 
-@patch("ui.workers.integrated_analysis_thread.PromptManager")
-@patch("ui.workers.integrated_analysis_thread.get_configured_llm_client")
+@patch("src.legacy.ui.workers.integrated_analysis_thread.PromptManager")
+@patch("src.legacy.ui.workers.integrated_analysis_thread.get_configured_llm_client")
 @patch("builtins.open", new_callable=mock_open)
-@patch("ui.workers.integrated_analysis_thread.time.strftime")
+@patch("src.legacy.ui.workers.integrated_analysis_thread.time.strftime")
 def test_integrated_analysis_thread_success(
     mock_strftime: MagicMock,
     mock_open_func: MagicMock,
@@ -135,8 +135,8 @@ def test_integrated_analysis_thread_success(
     thread.progress_signal.emit.assert_any_call(100, "Integrated analysis complete.")
 
 
-@patch("ui.workers.integrated_analysis_thread.PromptManager")
-@patch("ui.workers.integrated_analysis_thread.get_configured_llm_client")
+@patch("src.legacy.ui.workers.integrated_analysis_thread.PromptManager")
+@patch("src.legacy.ui.workers.integrated_analysis_thread.get_configured_llm_client")
 def test_integrated_analysis_thread_llm_failure(
     mock_get_client: MagicMock,
     mock_prompt_manager: MagicMock,

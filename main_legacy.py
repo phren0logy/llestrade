@@ -99,7 +99,7 @@ if (
 from src.config.config import APP_TITLE, APP_VERSION, setup_environment_variables
 
 # Import utility modules
-from llm import create_provider
+from src.common.llm import create_provider
 from src.common.llm.tokens import TokenCounter
 from src.legacy.ui.analysis_tab import AnalysisTab
 from src.legacy.ui.pdf_processing_tab import PDFProcessingTab

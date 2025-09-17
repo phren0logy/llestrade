@@ -88,9 +88,9 @@ class TestIntegratedAnalysisThread:
             "thinking_file": os.path.join(output_dir, "integrated_analysis_thinking_tokens.md")
         }
     
-    @patch("ui.workers.integrated_analysis_thread.PromptManager")
-    @patch("ui.workers.integrated_analysis_thread.get_configured_llm_provider")
-    @patch("ui.workers.integrated_analysis_thread.count_tokens_cached")
+    @patch("src.legacy.ui.workers.integrated_analysis_thread.PromptManager")
+    @patch("src.legacy.ui.workers.integrated_analysis_thread.get_configured_llm_provider")
+    @patch("src.legacy.ui.workers.integrated_analysis_thread.count_tokens_cached")
     def test_uses_gemini_standard_generate(self, mock_count_tokens_cached, mock_get_configured_llm_provider, mock_prompt_manager, 
                                                mock_gemini_provider, test_files):
         """Test that IntegratedAnalysisThread correctly uses Gemini's standard generate function."""

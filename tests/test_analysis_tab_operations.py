@@ -108,13 +108,13 @@ mocked_modules_dict = {
         LLMClientFactory=MagicMock(),
         cached_count_tokens=MagicMock(return_value=10)
     ),
-    'ui.base_tab': MagicMock(BaseTab=mock_qwidget),
-    'ui.components.file_selector': MagicMock(FileSelector=MagicMock()),
-    'ui.components.status_panel': MagicMock(StatusPanel=MagicMock()),
-    'ui.components.workflow_indicator': MagicMock(WorkflowIndicator=MagicMock(), WorkflowStep=MagicMock()),
-    'ui.workers.llm_summary_thread': MagicMock(),
-    'ui.workers.integrated_analysis_thread': MagicMock(),
-    'ui.workers.directory_scanner_thread': MagicMock(DirectoryScannerThread=MagicMock()),
+    'src.legacy.ui.base_tab': MagicMock(BaseTab=mock_qwidget),
+    'src.legacy.ui.components.file_selector': MagicMock(FileSelector=MagicMock()),
+    'src.legacy.ui.components.status_panel': MagicMock(StatusPanel=MagicMock()),
+    'src.legacy.ui.components.workflow_indicator': MagicMock(WorkflowIndicator=MagicMock(), WorkflowStep=MagicMock()),
+    'src.legacy.ui.workers.llm_summary_thread': MagicMock(),
+    'src.legacy.ui.workers.integrated_analysis_thread': MagicMock(),
+    'src.legacy.ui.workers.directory_scanner_thread': MagicMock(DirectoryScannerThread=MagicMock()),
 }
 
 # 4. Apply all mocks to sys.modules
@@ -138,7 +138,7 @@ class TestAnalysisTabFileOperations(unittest.TestCase):
     @patch('os.listdir')
     @patch('os.makedirs')
     @patch('builtins.open', new_callable=mock_open)
-    @patch('ui.analysis_tab.LLMSummaryThread')
+    @patch('src.legacy.ui.analysis_tab.LLMSummaryThread')
     def setUp(self, MockLLMSummaryThreadFromDecorator, mock_open_func, mock_makedirs, mock_listdir, mock_path_exists):
         
         # Reset side_effect for all shared Qt class mocks to prevent state leakage
@@ -365,7 +365,7 @@ class TestAnalysisTabFileOperations(unittest.TestCase):
         timer_callback = args[0]
         self.assertEqual(timer_callback, mock_progress_dialog_instance.close)
 
-    @patch('ui.analysis_tab.IntegratedAnalysisThread') 
+    @patch('src.legacy.ui.analysis_tab.IntegratedAnalysisThread') 
     def test_generate_integrated_analysis_reads_combined_from_summaries_subdir(self, MockIntegratedAnalysisThread):
         # Determine the expected path for the combined summary file, which is now in the SUMMARIES_SUBDIR
         subject_name = self.tab.subject_input.text() # Mocked to "John Doe"

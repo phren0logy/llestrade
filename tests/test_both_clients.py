@@ -7,7 +7,7 @@ import logging
 import os
 import sys
 
-from llm import create_provider
+from src.common.llm import create_provider
 from src.common.llm.providers.anthropic import AnthropicProvider
 from src.common.llm.providers.gemini import GeminiProvider
 

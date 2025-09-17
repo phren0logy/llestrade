@@ -19,11 +19,11 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from ui.base_tab import BaseTab
-from ui.components.workflow_indicator import WorkflowIndicator
-from ui.components.content_viewer import ContentViewer
-from ui.components.file_selector import FileSelector
-from ui.workers import PDFPromptThread
+from .base_tab import BaseTab
+from .components.workflow_indicator import WorkflowIndicator
+from .components.content_viewer import ContentViewer
+from .components.file_selector import FileSelector
+from .workers import PDFPromptThread
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
 from src.core.file_utils import read_file_content, read_file_preview
 

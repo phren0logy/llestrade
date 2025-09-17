@@ -21,9 +21,9 @@ from PySide6.QtGui import QFont, QTextCursor
 from src.new.core.stage_manager import BaseStage
 from src.config.app_config import get_available_providers_and_models, get_configured_llm_provider
 from src.core.prompt_manager import PromptManager
-from llm import create_provider
-from llm.tokens import TokenCounter
-from llm.chunking import ChunkingStrategy
+from src.common.llm import create_provider
+from src.common.llm.tokens import TokenCounter
+from src.common.llm.chunking import ChunkingStrategy
 
 
 class DocumentSummaryThread(QThread):

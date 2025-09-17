@@ -246,7 +246,7 @@ Logs and crash reports are in `~/.forensic_report_drafter/`
 
 ```python
 # Create a provider
-from llm import create_provider
+from src.common.llm import create_provider
 provider = create_provider("anthropic")  # or "gemini", "azure_openai", "auto"
 
 # Generate a response
@@ -257,11 +257,11 @@ response = provider.generate(
 )
 
 # Count tokens
-from llm.tokens import TokenCounter
+from src.common.llm.tokens import TokenCounter
 result = TokenCounter.count(text="Hello world", provider="anthropic")
 
 # Markdown-aware chunking
-from llm.chunking import ChunkingStrategy
+from src.common.llm.chunking import ChunkingStrategy
 chunks = ChunkingStrategy.markdown_headers(text, max_tokens=100000, overlap_tokens=2000)
 
 # Combine transcript with fragments (utility function)

@@ -163,7 +163,7 @@ def test_api_connectivity():
     # Try to import and initialize the LLM client
     try:
         try:
-            from llm import create_provider
+            from src.common.llm import create_provider
 
             print("✅ Successfully imported create_provider")
         except ImportError as e:
@@ -244,7 +244,7 @@ John Doe is a 35-year-old individual born on 1988-01-15.
     # Now try summarizing it directly
     try:
         print("Creating LLM client...")
-        from llm import create_provider
+        from src.common.llm import create_provider
 
         provider = create_provider(provider="auto")
 

@@ -11,7 +11,7 @@ from pathlib import Path
 # Ensure we can import from the parent directory
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from llm import create_provider
+from src.common.llm import create_provider
 from src.common.llm.providers import GeminiProvider
 
 # Configure logging

@@ -32,12 +32,12 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE
-from ui.base_tab import BaseTab
-from ui.components.file_selector import FileSelector
-from ui.components.status_panel import StatusPanel
-from ui.components.workflow_indicator import WorkflowIndicator, WorkflowStep
-from ui.workers.azure_processing_thread import AzureProcessingThread
-from ui.workers.pdf_processing_thread import PDFProcessingThread
+from .base_tab import BaseTab
+from .components.file_selector import FileSelector
+from .components.status_panel import StatusPanel
+from .components.workflow_indicator import WorkflowIndicator, WorkflowStep
+from .workers.azure_processing_thread import AzureProcessingThread
+from .workers.pdf_processing_thread import PDFProcessingThread
 
 
 class PDFProcessingTab(BaseTab):

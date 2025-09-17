@@ -113,8 +113,8 @@ Minor vehicle accident reported. No injuries sustained.
         status_panel.append_warning = MagicMock()
         return status_panel
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
-    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    @patch("src.legacy.ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("src.legacy.ui.workers.llm_summary_thread.count_tokens_cached")
     def test_successful_summarization_with_status_panel(self, mock_count_tokens_cached, 
                                                        mock_get_provider, mock_llm_client, 
                                                        test_files, mock_status_panel):
@@ -188,8 +188,8 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
-    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    @patch("src.legacy.ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("src.legacy.ui.workers.llm_summary_thread.count_tokens_cached")
     def test_successful_summarization_without_status_panel(self, mock_count_tokens_cached, 
                                                           mock_get_provider, mock_llm_client, 
                                                           test_files):
@@ -237,7 +237,7 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("src.legacy.ui.workers.llm_summary_thread.get_configured_llm_provider")
     def test_llm_client_initialization_failure(self, mock_get_provider, test_files, mock_status_panel):
         """Test behavior when LLM client initialization fails."""
         # Setup mock to return None (initialization failure)
@@ -281,8 +281,8 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
-    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    @patch("src.legacy.ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("src.legacy.ui.workers.llm_summary_thread.count_tokens_cached")
     def test_skip_existing_files(self, mock_count_tokens_cached, mock_get_provider, 
                                 mock_llm_client, test_files, mock_status_panel):
         """Test that existing summary files are skipped."""
@@ -332,8 +332,8 @@ Minor vehicle accident reported. No injuries sustained.
         # Cleanup
         self._cleanup_test_files(test_files["test_dir"])
     
-    @patch("ui.workers.llm_summary_thread.get_configured_llm_provider")
-    @patch("ui.workers.llm_summary_thread.count_tokens_cached")
+    @patch("src.legacy.ui.workers.llm_summary_thread.get_configured_llm_provider")
+    @patch("src.legacy.ui.workers.llm_summary_thread.count_tokens_cached")
     def test_llm_api_error_handling(self, mock_count_tokens_cached, mock_get_provider, 
                                    test_files, mock_status_panel):
         """Test handling of LLM API errors."""

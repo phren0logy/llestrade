@@ -39,15 +39,15 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.config import DEFAULT_FONT_FAMILY, DEFAULT_FONT_SIZE, DEFAULT_TIMEOUT
-from ui.base_tab import BaseTab
-from ui.components.file_selector import FileSelector
-from ui.components.results_viewer import ResultsViewer
-from ui.components.status_panel import StatusPanel
-from ui.components.workflow_indicator import WorkflowIndicator, WorkflowStep
-from ui.workers.azure_processing_thread import AzureProcessingThread
-from ui.workers.integrated_analysis_thread import IntegratedAnalysisThread
-from ui.workers.llm_summary_thread import LLMSummaryThread
-from ui.workers.pdf_processing_thread import PDFProcessingThread
+from .base_tab import BaseTab
+from .components.file_selector import FileSelector
+from .components.results_viewer import ResultsViewer
+from .components.status_panel import StatusPanel
+from .components.workflow_indicator import WorkflowIndicator, WorkflowStep
+from .workers.azure_processing_thread import AzureProcessingThread
+from .workers.integrated_analysis_thread import IntegratedAnalysisThread
+from .workers.llm_summary_thread import LLMSummaryThread
+from .workers.pdf_processing_thread import PDFProcessingThread
 
 
 class RecordReviewTab(BaseTab):
@@ -974,7 +974,7 @@ class RecordReviewTab(BaseTab):
 
             # Create Azure thread class only if it exists
             if not hasattr(self, "AzureProcessingThread"):
-                from ui.workers.azure_processing_thread import AzureProcessingThread
+                from .workers.azure_processing_thread import AzureProcessingThread
 
             # Create and start the Azure processing thread
             self.azure_thread = AzureProcessingThread(
