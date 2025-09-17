@@ -215,7 +215,8 @@ class ProjectWorkspace(QWidget):
         name_item.setToolTip(description)
         self._summary_table.setItem(row, 0, name_item)
 
-        files_count = len(group.files)
+        resolved_files = self._resolve_group_files(group)
+        files_count = len(resolved_files)
         total = total_docs if total_docs else max(files_count, 1)
         files_item = QTableWidgetItem(f"{files_count} of {total}")
         files_item.setTextAlignment(Qt.AlignCenter)
@@ -240,6 +241,18 @@ class ProjectWorkspace(QWidget):
         action_layout.addWidget(delete_button)
 
         self._summary_table.setCellWidget(row, 3, action_widget)
+
+        tooltip_parts = []
+        if description:
+            tooltip_parts.append(description)
+        if group.directories:
+            tooltip_parts.append("Directories: " + ", ".join(group.directories))
+        extra_files = sorted(set(group.files))
+        if extra_files:
+            tooltip_parts.append("Files: " + ", ".join(extra_files))
+        if tooltip_parts:
+            name_item.setToolTip("\n".join(tooltip_parts))
+            files_item.setToolTip("\n".join(tooltip_parts))
 
     def _show_create_group_dialog(self) -> None:
         if not self._project_manager or not self._project_manager.project_dir:
@@ -280,3 +293,21 @@ class ProjectWorkspace(QWidget):
         folder = self._project_manager.project_dir / "summaries" / group.folder_name
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _resolve_group_files(self, group: SummaryGroup) -> set[str]:
+        processed = set()
+        if self._latest_snapshot:
+            processed = set(self._latest_snapshot.files.get("processed", []))
+
+        selected = {path for path in group.files if path in processed or not processed}
+
+        for directory in group.directories:
+            normalised = directory.strip("/")
+            if not normalised:
+                selected.update(processed)
+                continue
+            prefix = normalised + "/"
+            for path in processed:
+                if path == normalised or path.startswith(prefix):
+                    selected.add(path)
+        return selected

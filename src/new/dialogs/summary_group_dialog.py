@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -18,10 +19,13 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QComboBox,
+    QTreeWidget,
+    QTreeWidgetItem,
 )
 
 from src.config.app_config import get_available_providers_and_models
 from src.new.core.summary_groups import SummaryGroup
+from src.new.core.file_tracker import FileTracker
 
 
 class SummaryGroupDialog(QDialog):
@@ -34,6 +38,7 @@ class SummaryGroupDialog(QDialog):
         self.setWindowTitle("Create Summary Group")
         self.setModal(True)
         self._build_ui()
+        self._populate_file_tree()
 
     # ------------------------------------------------------------------
     # Public API
@@ -59,10 +64,17 @@ class SummaryGroupDialog(QDialog):
         self.description_edit.setFixedHeight(60)
         form.addRow("Description", self.description_edit)
 
-        self.files_edit = QPlainTextEdit()
-        self.files_edit.setPlaceholderText("Enter relative paths, one per line (e.g., medical/doc1.md)")
-        self.files_edit.setMinimumHeight(100)
-        form.addRow("Files", self.files_edit)
+        self.file_tree = QTreeWidget()
+        self.file_tree.setHeaderHidden(True)
+        self.file_tree.setUniformRowHeights(True)
+        self.file_tree.itemChanged.connect(self._on_tree_item_changed)
+        self._block_tree_signal = False
+        form.addRow("Documents", self.file_tree)
+
+        self.manual_files_edit = QPlainTextEdit()
+        self.manual_files_edit.setPlaceholderText("Additional files (one per line, optional)")
+        self.manual_files_edit.setMinimumHeight(60)
+        form.addRow("Extra Files", self.manual_files_edit)
 
         self.system_prompt_edit = QLineEdit()
         self.system_prompt_button = QPushButton("Browse…")
@@ -121,7 +133,13 @@ class SummaryGroupDialog(QDialog):
             QMessageBox.warning(self, "Missing Name", "Please provide a name for the summary group.")
             return
 
-        files = [line.strip() for line in self.files_edit.toPlainText().splitlines() if line.strip()]
+        tree_files, directories = self._collect_selection()
+        manual_files = [self._normalise_text(line.strip()) for line in self.manual_files_edit.toPlainText().splitlines() if line.strip()]
+        files_set = {self._normalise_text(path) for path in tree_files if path}
+        files_set.update(manual_files)
+        files = sorted(files_set)
+
+        directories = sorted({self._normalise_directory(path) for path in directories if path})
 
         provider_id, model = self.model_combo.currentData()
         description = self.description_edit.toPlainText().strip()
@@ -132,6 +150,7 @@ class SummaryGroupDialog(QDialog):
             name=name,
             description=description,
             files=files,
+            directories=directories,
             provider_id=provider_id,
             model=model,
             system_prompt_path=system_prompt,
@@ -142,6 +161,105 @@ class SummaryGroupDialog(QDialog):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _populate_file_tree(self) -> None:
+        self.file_tree.clear()
+        self._processed_files: List[str] = []
+        if not self._project_dir:
+            notice = QTreeWidgetItem(["No project directory available."])
+            notice.setFlags(Qt.NoItemFlags)
+            self.file_tree.addTopLevelItem(notice)
+            return
+
+        try:
+            tracker = FileTracker(self._project_dir)
+            snapshot = tracker.scan()
+            self._processed_files = snapshot.files.get("processed", [])
+        except Exception as exc:  # pragma: no cover - UI feedback only
+            notice = QTreeWidgetItem([f"Scan failed: {exc}"])
+            notice.setFlags(Qt.NoItemFlags)
+            self.file_tree.addTopLevelItem(notice)
+            return
+
+        if not self._processed_files:
+            notice = QTreeWidgetItem(["No processed documents found. Add files to processed_documents/ first."])
+            notice.setFlags(Qt.NoItemFlags)
+            self.file_tree.addTopLevelItem(notice)
+            return
+
+        self._tree_nodes = {}
+        self._block_tree_signal = True
+        for path in sorted(self._processed_files):
+            self._add_path_to_tree(path)
+        self.file_tree.expandAll()
+        self._block_tree_signal = False
+
+    def _add_path_to_tree(self, relative_path: str) -> None:
+        parts = relative_path.split("/")
+        current_path = ""
+        parent_item = self.file_tree.invisibleRootItem()
+
+        for index, part in enumerate(parts):
+            current_path = f"{current_path}/{part}" if current_path else part
+            is_file = index == len(parts) - 1
+            key = (current_path, is_file)
+
+            existing = self._tree_nodes.get(key)
+            if existing:
+                parent_item = existing
+                continue
+
+            item = QTreeWidgetItem(parent_item, [part])
+            item.setData(0, Qt.UserRole, ("file" if is_file else "dir", current_path))
+            flags = item.flags() | Qt.ItemIsUserCheckable
+            if not is_file:
+                flags |= Qt.ItemIsTristate
+            item.setFlags(flags)
+            item.setCheckState(0, Qt.Unchecked)
+
+            if not is_file:
+                self._tree_nodes[(current_path, False)] = item
+            else:
+                self._tree_nodes[(current_path, True)] = item
+
+            parent_item = item
+
+    def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if self._block_tree_signal:
+            return
+        node_type, _ = item.data(0, Qt.UserRole) or (None, None)
+        if node_type != "dir":
+            return
+        state = item.checkState(0)
+        self._block_tree_signal = True
+        for index in range(item.childCount()):
+            child = item.child(index)
+            child.setCheckState(0, state)
+        self._block_tree_signal = False
+
+    def _collect_selection(self) -> tuple[List[str], List[str]]:
+        files: List[str] = []
+        directories: List[str] = []
+        root = self.file_tree.invisibleRootItem()
+        for index in range(root.childCount()):
+            self._collect_from_item(root.child(index), files, directories)
+        return files, directories
+
+    def _collect_from_item(self, item: QTreeWidgetItem, files: List[str], directories: List[str]) -> None:
+        data = item.data(0, Qt.UserRole)
+        if not data:
+            return
+        node_type, path = data
+        state = item.checkState(0)
+
+        if node_type == "dir":
+            if state == Qt.Checked:
+                directories.append(path)
+                return
+        elif node_type == "file" and state == Qt.Checked:
+            files.append(path)
+
+        for index in range(item.childCount()):
+            self._collect_from_item(item.child(index), files, directories)
     def _normalise_text(self, text: str) -> str:
         if not text:
             return ""
@@ -161,3 +279,7 @@ class SummaryGroupDialog(QDialog):
             except Exception:
                 pass
         return str(path)
+
+    def _normalise_directory(self, path: str) -> str:
+        normalised = self._normalise_text(path)
+        return normalised.strip("/")

@@ -17,7 +17,8 @@ def project_manager(tmp_path: Path) -> ProjectManager:
 def test_summary_group_save_and_load(project_manager: ProjectManager):
     group = SummaryGroup.create(
         name="Clinical Records",
-        files=["medical/doc1.md", "medical/doc2.md"],
+        files=["medical/doc1.md"],
+        directories=["medical"],
         provider_id="anthropic",
         model="claude-3-sonnet",
         system_prompt_path="prompt_templates/system.md",
@@ -31,15 +32,16 @@ def test_summary_group_save_and_load(project_manager: ProjectManager):
     assert len(reloaded) == 1
     loaded_group = reloaded[0]
     assert loaded_group.slug == saved.slug
-    assert loaded_group.files == ["medical/doc1.md", "medical/doc2.md"]
+    assert loaded_group.files == ["medical/doc1.md"]
+    assert loaded_group.directories == ["medical"]
     assert loaded_group.system_prompt_path == "prompt_templates/system.md"
     assert loaded_group.user_prompt_path == "prompt_templates/user.md"
     assert loaded_group.provider_id == "anthropic"
 
 
 def test_summary_group_slug_uniqueness(project_manager: ProjectManager):
-    g1 = project_manager.save_summary_group(SummaryGroup.create(name="Legal Docs"))
-    g2 = project_manager.save_summary_group(SummaryGroup.create(name="Legal Docs"))
+    g1 = project_manager.save_summary_group(SummaryGroup.create(name="Legal Docs", directories=["legal"]))
+    g2 = project_manager.save_summary_group(SummaryGroup.create(name="Legal Docs", directories=["legal/case"]))
 
     assert g1.slug != g2.slug
     assert g2.slug.startswith(g1.slug.split("-")[0])

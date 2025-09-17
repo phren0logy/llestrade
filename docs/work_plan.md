@@ -2,7 +2,7 @@
 
 ## Priority 0: Dashboard UI Refactoring (IMMEDIATE)
 
-Transform the current wizard-style UI into a dashboard-based workflow that supports long-running operations, multiple summary groups, and intelligent file existence checking for resume functionality.
+Transform the current wizard-style UI into a dashboard-based workflow that supports long-running operations, multiple bulk analysis groups, and intelligent file existence checking for resume functionality.
 
 ### Design Principles
 
@@ -18,7 +18,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 - [x] Identify unused/abandoned modules and move them into `src/archive/`
 - [x] Remove obsolete wiring from `main_new.py` and stage imports that will be replaced
-- [ ] Capture retained legacy behavior in notes/TODOs before deletion
+- [x] Capture retained legacy behavior in notes/TODOs before deletion *(see "Legacy UI Reference" summary below)*
 
 #### Step 0 - Decommission Wizard Flow
 
@@ -31,6 +31,14 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [ ] Add temporary feature flag handling so current flows continue to launch
 - [x] Stub out `src/new/stages/project_workspace.py` with placeholder tabs to unblock downstream work
 
+#### Legacy UI Reference (Captured 2025-03-11)
+
+- StageManager’s linear gating is intentionally replaced by a scan-driven workflow after project setup
+- Project setup keeps evaluator/output guardrails, auto-sanitizes folder name (spaces → dashes), and informs users about folder creation
+- Source management pivots to folder-level include/exclude (tree checkboxes) with relative paths; root-level files trigger warnings instead of silent skips
+- Conversion helpers remain responsible for PDFs/complex formats; simple text/markdown bypass conversion and duplicates are prevented via in-memory tracking
+- Bulk analysis reuses legacy chunking/logging patterns but surface streamlined logs; reports move to a placeholder tab until redesigned
+
 #### Step 1 - Core Infrastructure
 
 - [x] Create FileTracker class (`src/new/core/file_tracker.py`)
@@ -39,12 +47,12 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Write pytest tests for critical methods
   - [x] Limit initial scope to counts, last-run timestamps, and deterministic reconciliation
 - [ ] Update ProjectManager (`src/new/core/project_manager.py`)
-  - [ ] Bump project format to v2 and emit migration metadata
-  - [ ] Rename on-disk folders to `imported_documents/`, `processed_documents/`, and `summaries/`
-  - [ ] Add summary-group aware schema (groups array + config pointers)
-  - [ ] Replace `WorkflowState` with dashboard/tab state primitives
-  - [ ] Provide upgrade path or conversion script for v1 projects
-- [x] Create SummaryGroup system (`src/new/core/summary_groups.py`)
+  - [ ] Persist new project layout (create `<parent>/<project-name>/` folder, sanitize name, keep readable)
+  - [ ] Store source folder configuration as relative paths with include/exclude tree state
+  - [ ] Record selected conversion helper and per-project conversion preferences
+  - [ ] Expose lightweight dashboard state (last opened tab, pending job descriptors) instead of `WorkflowState`
+  - [ ] Surface FileTracker statistics and bulk-analysis metadata for the workspace views
+- [x] Create bulk analysis group system (`src/new/core/summary_groups.py` → to be renamed if needed)
   - [x] Implement SummaryGroup dataclass
   - [x] Add config.json serialization for groups
   - [x] Create folder structure management
@@ -63,50 +71,65 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
     - [ ] Add "Open Folder" action
     - [ ] Test with existing projects (breaking changes OK)
 - [ ] Simplify project creation
-  - [ ] Single-screen setup (name, description, output folder)
-  - [ ] Remove multi-stage wizard flow
-  - [ ] Initial file import optional (can add later in workspace)
+  - [ ] Single-screen setup (name, description, source + output folders, conversion helper)
+  - [ ] Create `<selected folder>/<project-name>/` (spaces → dashes) and call out folder creation to the user
+  - [ ] Remove multi-stage wizard flow; initial import deferred to Documents tab
 
 #### Step 3 - Project Workspace
 
 - [ ] Create tabbed workspace (`src/new/stages/project_workspace.py`)
   - [ ] Replace linear stages with QTabWidget
-  - [ ] Create Documents, Summary Groups, Progress tabs
-  - [ ] Default to Summary Groups tab on open
+  - [ ] Create Documents, Bulk Analysis, Progress tabs
+  - [ ] Default to Bulk Analysis tab on open once setup is complete
 - [ ] Documents Tab
-  - [ ] Import files/folders with folder structure preservation
-  - [ ] Smart auto-conversion (skip existing markdown files)
-  - [ ] Show numeric status (12/45 converted) not progress bars
-  - [ ] Non-blocking batch operations
+  - [ ] Source folder picker with tree view checkboxes (folder-level only, default to all selected)
+  - [ ] Store selections as relative paths and surface manual "Re-scan for new files" action with last-scan timestamp
+  - [ ] Warn when files exist in the source root but no folders are selected (conversion requires subfolders)
+  - [ ] Display `X of Y` counts from FileTracker for files converted vs. pending
+  - [ ] Keep batch operations non-blocking and track in-flight conversions to avoid duplicate submissions
+- [ ] Bulk Analysis Tab
+  - [ ] List bulk analysis groups with `X of Y` document coverage using FileTracker data
+  - [ ] Reuse folder tree with greyed-out (tooltip: "Enable in Documents → Sources") entries for folders not selected for conversion
+  - [ ] Offer system/user prompt file pickers per group (stored as relative paths)
+  - [ ] Provide run/stop controls that enqueue work on the shared worker pool and surface concise logs
 - [ ] Progress Tab
   - [ ] Combined log from all operations
   - [ ] Simple cancel button for current operation
   - [ ] Error panel at bottom (non-blocking)
 
-### Phase 2: Summary Groups & Integration
+#### Step 4 - Automated Conversion & Bulk Analysis
 
-#### Step 4 - Summary Groups Implementation
+- [ ] Extend project metadata to capture project root, source-relative folder selections, and conversion helper choice
+- [ ] Update project creation to gather source folder, output folder, and helper (with warning about root-level files)
+- [ ] On project open (and when "Re-scan" is pressed), detect new/changed files and prompt for conversion + bulk analysis
+- [ ] Implement conversion helper registry that handles PDFs/complex formats while skipping simple markdown/plain-text files
+- [ ] Track in-flight conversions in memory to avoid duplicate submissions during long runs; rely on file existence post-run
+- [ ] After conversion, trigger bulk analysis for eligible groups (folders selected in both tabs) using existing chunking for large files
+- [ ] Provide clear UI to accept/decline runs and surface log output per operation
 
-- [ ] Create Summary Groups tab
-  - [ ] List of summary groups with stats
-  - [ ] "Create Group" button → opens dialog
-  - [ ] Edit/Delete actions per group
-  - [ ] "Summarize" button per group
-- [ ] Create group dialog (`src/new/dialogs/summary_group_dialog.py`)
-  - [ ] Group name input
-  - [ ] Tree view with checkboxes (preserve folder structure)
-  - [ ] "Select all in folder" functionality
-  - [ ] Prompt template selection (scan prompt_templates/)
-  - [ ] LLM model selection per group
-  - [ ] No overlap validation (files can be in multiple groups)
+### Phase 2: Bulk Analysis & Integration
+
+#### Step 4 - Bulk Analysis Groups Implementation
+
+- [ ] Create Bulk Analysis tab scaffolding
+  - [ ] List groups with status chips (`Converted X / Y`, `Bulk Analysis X / Y`)
+  - [ ] "Create Group" launches modal; inline edit deferred for later polish
+  - [ ] Delete action triggers confirmation noting all generated outputs will be removed
+  - [ ] Run button enqueues jobs and streams concise log output
+- [ ] Group dialog (`src/new/dialogs/bulk_analysis_group_dialog.py`)
+  - [ ] Group name input with duplicate-name warning
+  - [ ] Folder tree mirrors Documents tab selections (checkboxes only at folder level, greyed-out nodes blocked with tooltip)
+  - [ ] System prompt + user prompt file pickers (persisted as relative paths)
+  - [ ] Model/provider selection leveraging existing configuration helpers
+  - [ ] Persist include/exclude choices and prompt paths into group `config.json`
 
 #### Step 5 - Integration & Testing
 
-- [ ] Connect summarization to groups
-  - [ ] Modify worker threads to accept group parameter
-  - [ ] Update file paths to use summaries/[group_name]/ folders
-  - [ ] Add skip logic for existing summaries
-  - [ ] Test with multiple groups
+- [ ] Connect bulk analysis workflow to groups
+  - [ ] Modify worker threads to accept group metadata and prompt file paths
+  - [ ] Update output structure to use `bulk_analysis/<group_name>/` directories
+  - [ ] Add skip logic for existing analyses (based on timestamp + prompt hash)
+  - [ ] Test with multiple groups and overlapping folders
 - [ ] Consolidate worker infrastructure under `src/new/workers/`
   - [ ] Move document processing/summarization threads into shared base classes
   - [ ] Register workers with a `QThreadPool` (max 3) and add cancellation hooks
@@ -114,14 +137,14 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [ ] Add unit tests for worker lifecycle and error propagation
 - [ ] Phoenix integration for LLM calls
   - [ ] Keep existing observability.py setup
-  - [ ] Add summary group context to traces
+  - [ ] Add bulk analysis group context to traces
   - [ ] Use fixture export for test mocks
 - [ ] Business logic testing with pytest
   - [ ] Test FileTracker functionality
-  - [ ] Test summary group CRUD operations
+  - [ ] Test bulk analysis group CRUD operations
   - [ ] Test document conversion with folder preservation
   - [ ] Reuse existing tests where applicable
-  - [ ] Stand up `tests/new_ui/` for dashboard logic (FileTracker, summary groups, project migration)
+  - [ ] Stand up `tests/new_ui/` for dashboard logic (FileTracker, bulk analysis, project lifecycle)
   - [ ] Add mocked smoke tests driven by recorded fixtures (no live API calls)
   - [ ] Maintain a separate, optional live suite for provider calls using dedicated credentials
 
@@ -143,44 +166,45 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 ```
 project_dir/
-├── project.frpd (v2 format with summary groups)
-├── imported_documents/  # Original files with preserved structure
-│   ├── medical_records/
-│   │   ├── report1.pdf
-│   │   └── report2.docx
-│   └── legal_docs/
-│       └── case_summary.pdf
-├── processed_documents/ # Markdown files with same structure
+├── project.frpd                # Project metadata (relative source paths, helper, UI state)
+├── sources.json                # Serialized tree of included folders (+ warnings for root files)
+├── converted_documents/        # Markdown outputs mirroring selected folder structure
 │   ├── medical_records/
 │   │   ├── report1.md
 │   │   └── report2.md
 │   └── legal_docs/
 │       └── case_summary.md
-└── summaries/
-    ├── clinical_records/  # User-named summary group
-    │   ├── config.json
-    │   ├── medical_records/
-    │   │   ├── report1_summary.md
-    │   │   └── report2_summary.md
-    │   └── legal_docs/
-    │       └── case_summary_summary.md
-    └── legal_documents/  # Another summary group
-        ├── config.json
-        └── legal_docs/
-            └── case_summary_summary.md
+├── bulk_analysis/
+│   ├── clinical_records/
+│   │   ├── config.json         # Prompts, model, folder subset
+│   │   └── outputs/
+│   │       ├── medical_records/
+│   │       │   ├── report1.md
+│   │       │   └── report2.md
+│   │       └── legal_docs/
+│   │           └── case_summary.md
+│   └── legal_documents/
+│       ├── config.json
+│       └── outputs/
+│           └── legal_docs/
+│               └── case_summary.md
+└── logs/
+    └── operations.log         # Conversion + bulk analysis events (rotated)
 ```
+
+> Original source files remain in their external locations; the project stores only relative references and derived outputs.
 
 ### Success Criteria for Priority 0
 
-- [ ] Users can create multiple summary groups
-- [ ] Files can exist in multiple groups (no overlap restriction)
-- [ ] App skips already processed/summarized files
-- [ ] Dashboard shows accurate counts
-- [ ] Folder structure preserved throughout pipeline
-- [ ] All operations are non-blocking
+- [ ] Users can create multiple bulk analysis groups (shared converted docs)
+- [ ] Files can belong to multiple groups without duplication
+- [ ] Scan-on-open + manual re-scan convert new files with user confirmation
+- [ ] Dashboard shows accurate `X of Y` conversion and bulk-analysis counts with root-level warnings where needed
+- [ ] Converted/bulk output mirrors folder structure via relative paths
+- [ ] Worker operations remain non-blocking with safe shutdown
 - [ ] Breaking changes implemented cleanly
 - [ ] Business logic tests passing
-- [ ] Phoenix tracing working for LLM calls
+- [ ] Phoenix tracing working for LLM calls with group context
 
 ## Current Project Status
 
@@ -451,11 +475,11 @@ _The wizard-style UI with linear stages has been replaced by the dashboard appro
 
 ## Immediate Next Steps
 
-1. Begin Priority 0 Dashboard UI Refactoring
-2. Create FileTracker and SummaryGroup classes
-3. Set up QThreadPool for parallel operations
-4. Transform wizard UI to dashboard + tabs
-5. Archive/delete old UI code when complete
+1. Finish feature flag wiring so legacy launch remains available during dashboard work
+2. Update ProjectManager to persist relative source tree, conversion helper, and UI state
+3. Implement Documents tab tree (scan-on-open + manual re-scan, root-level warnings)
+4. Build Bulk Analysis tab + group dialog (folder gating, prompt file pickers, run flows)
+5. Consolidate worker infrastructure (conversion + bulk analysis) on shared pool with safe shutdown
 
 ## Notes
 

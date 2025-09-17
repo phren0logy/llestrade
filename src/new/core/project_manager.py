@@ -342,6 +342,8 @@ class ProjectManager(QObject):
 
         if not self.project_dir:
             raise RuntimeError("Project must be created or loaded before saving summary groups")
+        group.files = sorted({path.strip() for path in group.files if path.strip()})
+        group.directories = sorted({path.strip("/").strip() for path in group.directories if path.strip("/").strip()})
         saved = save_summary_group(self.project_dir, group)
         self.summary_groups[saved.group_id] = saved
         self.mark_modified()

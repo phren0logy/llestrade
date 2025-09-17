@@ -21,6 +21,7 @@ class FileTrackerSnapshot:
 
     timestamp: datetime
     counts: Dict[str, int] = field(default_factory=dict)
+    files: Dict[str, List[str]] = field(default_factory=dict)
     missing: Dict[str, List[str]] = field(default_factory=dict)
     notes: Dict[str, str] = field(default_factory=dict)
     version: str = TRACKER_VERSION
@@ -47,6 +48,7 @@ class FileTrackerSnapshot:
         return {
             "timestamp": self.timestamp.isoformat(),
             "counts": self.counts,
+            "files": self.files,
             "missing": self.missing,
             "notes": self.notes,
             "version": self.version,
@@ -62,6 +64,7 @@ class FileTrackerSnapshot:
                 else datetime.now(timezone.utc)
             ),
             counts=dict(payload.get("counts", {})),
+            files={k: list(v) for k, v in dict(payload.get("files", {})).items()},
             missing={k: list(v) for k, v in dict(payload.get("missing", {})).items()},
             notes=dict(payload.get("notes", {})),
             version=str(payload.get("version", TRACKER_VERSION)),
@@ -113,6 +116,12 @@ class FileTracker:
             "summaries": len(summaries),
         }
 
+        files = {
+            "imported": sorted(imported),
+            "processed": sorted(processed),
+            "summaries": sorted(summaries),
+        }
+
         missing = {
             "processed_missing": sorted(imported - processed),
             "summaries_missing": sorted(processed - summaries),
@@ -121,6 +130,7 @@ class FileTracker:
         snapshot = FileTrackerSnapshot(
             timestamp=datetime.now(timezone.utc),
             counts=counts,
+            files=files,
             missing=missing,
         )
         self.snapshot = snapshot

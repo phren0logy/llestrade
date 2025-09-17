@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import sys
 import logging
+import shutil
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -172,6 +173,7 @@ class SimplifiedMainWindow(QMainWindow):
             QMessageBox.critical(self, "Project Creation Failed", str(exc))
             return
 
+        self._maybe_import_initial_documents(project_manager)
         self._activate_workspace(project_manager)
         self.statusBar().showMessage(f"Project created: {case_name.strip()}")
 
@@ -207,6 +209,52 @@ class SimplifiedMainWindow(QMainWindow):
         workspace.set_project(project_manager)
         self._display_workspace(workspace)
         self._update_window_title(project_manager)
+
+    def _maybe_import_initial_documents(self, project_manager: ProjectManager) -> None:
+        if not project_manager.project_dir:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Import Documents",
+            "Would you like to import documents into this project now?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Documents Folder",
+            str(Path.home()),
+        )
+        if not folder:
+            return
+
+        src = Path(folder)
+        dest_root = project_manager.project_dir / "imported_documents"
+
+        try:
+            if dest_root in src.resolve().parents:
+                QMessageBox.information(
+                    self,
+                    "Import Skipped",
+                    "Selected folder is inside the project directory and was skipped.",
+                )
+                return
+
+            self.logger.info("Importing documents from %s", src)
+            for path in src.rglob("*"):
+                if not path.is_file():
+                    continue
+                relative = path.relative_to(src)
+                target = dest_root / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, target)
+        except Exception as exc:
+            self.logger.exception("Failed to import documents")
+            QMessageBox.critical(self, "Import Failed", str(exc))
+
 
     def _display_workspace(self, workspace: QWidget) -> None:
         if self._workspace_widget is not None:

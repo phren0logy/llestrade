@@ -52,6 +52,7 @@ class SummaryGroup:
     name: str
     description: str = ""
     files: List[str] = field(default_factory=list)
+    directories: List[str] = field(default_factory=list)
     prompt_template: str = ""
     provider_id: str = ""
     model: str = ""
@@ -69,6 +70,7 @@ class SummaryGroup:
         *,
         description: str = "",
         files: Optional[Iterable[str]] = None,
+        directories: Optional[Iterable[str]] = None,
         prompt_template: str = "",
         provider_id: str = "",
         model: str = "",
@@ -80,6 +82,7 @@ class SummaryGroup:
             name=name,
             description=description,
             files=list(files or []),
+            directories=list(directories or []),
             prompt_template=prompt_template,
             provider_id=provider_id,
             model=model,
@@ -99,6 +102,7 @@ class SummaryGroup:
             "name": self.name,
             "description": self.description,
             "files": self.files,
+            "directories": self.directories,
             "prompt_template": self.prompt_template,
             "provider_id": self.provider_id,
             "model": self.model,
@@ -117,6 +121,7 @@ class SummaryGroup:
             name=str(payload.get("name", "Untitled Group")),
             description=str(payload.get("description", "")),
             files=list(payload.get("files", [])),
+            directories=list(payload.get("directories", [])),
             prompt_template=str(payload.get("prompt_template", "")),
             provider_id=str(payload.get("provider_id", "")),
             model=str(payload.get("model", "")),

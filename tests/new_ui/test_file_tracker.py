@@ -37,6 +37,7 @@ def test_scan_empty_project_creates_tracker(project_root: Path):
 
     stored = load_tracker_snapshot(project_root)
     assert stored["counts"] == {"imported": 0, "processed": 0, "summaries": 0}
+    assert stored["files"] == {"imported": [], "processed": [], "summaries": []}
 
 
 def test_scan_detects_missing_processed_and_summaries(project_root: Path):
@@ -48,6 +49,7 @@ def test_scan_detects_missing_processed_and_summaries(project_root: Path):
 
     assert snapshot.imported_count == 1
     assert snapshot.processed_count == 1
+    assert snapshot.files["processed"] == ["case/doc2.md"]
     assert snapshot.missing["processed_missing"] == ["case/doc1.md"]
     assert snapshot.missing["summaries_missing"] == ["case/doc2.md"]
 
@@ -64,6 +66,7 @@ def test_scan_updates_when_new_files_added(project_root: Path):
     write_file(project_root / "summaries", "doc1.md")
     snapshot = tracker.scan()
     assert snapshot.summaries_count == 1
+    assert snapshot.files["summaries"] == ["doc1.md"]
     assert snapshot.missing["summaries_missing"] == []
 
 
