@@ -4,7 +4,7 @@ Core components for the new simplified UI.
 
 from .secure_settings import SecureSettings
 from .project_manager import ProjectManager, ProjectMetadata, ProjectCosts, WorkflowState
-from .stage_manager import StageManager, BaseStage
+from .workspace_controller import WorkspaceController
 
 __all__ = [
     'SecureSettings',
@@ -12,6 +12,5 @@ __all__ = [
     'ProjectMetadata', 
     'ProjectCosts',
     'WorkflowState',
-    'StageManager',
-    'BaseStage'
+    'WorkspaceController'
 ]

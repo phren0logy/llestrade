@@ -1,394 +1,278 @@
 #!/usr/bin/env python3
-"""
-Main entry point for the new simplified UI.
-"""
+"""Main entry point for the new dashboard-oriented UI."""
+
+from __future__ import annotations
 
 import os
 import sys
 import logging
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox, QWidget, QHBoxLayout, QFileDialog, QStackedWidget
+from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QInputDialog,
+    QMainWindow,
+    QMessageBox,
+    QStackedWidget,
+    QToolBar,
+    QVBoxLayout,
+    QWidget,
+)
 from PySide6.QtCore import Qt, QTimer
 
-# Add src to path for imports
+# Ensure src/ is on sys.path for direct execution
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.config.logging_config import setup_logging
 from src.config.startup_config import configure_startup_logging
 from src.config.observability import setup_observability
-from src.new.core import SecureSettings, ProjectManager, StageManager
-from src.new.widgets import WorkflowSidebar
+from src.new.core import SecureSettings, ProjectManager, ProjectMetadata, WorkspaceController
+from src.new.stages.welcome_stage import WelcomeStage
 
 
 class SimplifiedMainWindow(QMainWindow):
-    """Main window for the simplified UI."""
-    
-    def __init__(self):
+    """Main window hosting the welcome screen and dashboard workspace."""
+
+    def __init__(self) -> None:
         super().__init__()
         self.logger = logging.getLogger(__name__)
-        
+
         # Core components
         self.settings = SecureSettings()
-        self.project_manager = None
-        self.stage_manager = StageManager(self)
-        
-        # Initialize Phoenix observability if configured in settings or environment
-        phoenix_settings = self.settings.get("phoenix_settings", {})
-        phoenix_enabled = (
-            phoenix_settings.get("enabled", False) or 
-            os.getenv("PHOENIX_ENABLED", "false").lower() == "true"
-        )
-        
-        if phoenix_enabled:
-            self.logger.info("Initializing Phoenix observability")
-            # Merge environment variables with settings
-            if os.getenv("PHOENIX_ENABLED"):
-                phoenix_settings["enabled"] = True
-            if os.getenv("PHOENIX_PORT"):
-                phoenix_settings["port"] = int(os.getenv("PHOENIX_PORT"))
-            if os.getenv("PHOENIX_PROJECT"):
-                phoenix_settings["project"] = os.getenv("PHOENIX_PROJECT")
-            
-            setup_observability({"phoenix_settings": phoenix_settings})
-        
-        # Stage widgets dictionary
-        self.stage_widgets = {}
-        
-        # Setup UI
+        self.project_manager: ProjectManager | None = None
+        self.workspace_controller = WorkspaceController(self)
+        self.workspace_controller.workspace_created.connect(self._on_workspace_created)
+
+        # Runtime state
+        self._workspace_widget: QWidget | None = None
+        self._welcome_stage: WelcomeStage | None = None
+
+        # Optional Phoenix observability
+        self._configure_observability()
+
+        # Base window configuration
         self.setWindowTitle("Forensic Report Drafter")
         self.resize(1200, 800)
-        
-        # Restore window geometry
         geometry = self.settings.get_window_geometry()
         if geometry:
             self.restoreGeometry(geometry)
-        
-        # Create basic UI structure
-        self._create_ui()
-        
-        # Show welcome or load recent project
-        QTimer.singleShot(100, self._startup)
-    
-    def _create_ui(self):
-        """Create the basic UI structure."""
-        # Create menu bar
+
+        # Build UI chrome
         self._create_menu_bar()
-        
-        # Create toolbar
         self._create_toolbar()
-        
-        # Create central widget with sidebar
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Main horizontal layout
-        main_layout = QHBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-        
-        # Create workflow sidebar
-        self.workflow_sidebar = WorkflowSidebar()
-        self.workflow_sidebar.stage_clicked.connect(self._on_sidebar_stage_clicked)
-        main_layout.addWidget(self.workflow_sidebar)
-        
-        # Create stacked widget for stages
-        self.stage_stack = QStackedWidget()
-        self.stage_stack.setStyleSheet("background-color: white;")
-        main_layout.addWidget(self.stage_stack, 1)  # Stretch factor 1
-        
-        # Add status bar with cost widget placeholder
+        self._create_central_stack()
         self.statusBar().showMessage("Ready")
-        
-    def _create_menu_bar(self):
-        """Create the application menu bar."""
+
+        # Defer heavy startup actions until the event loop spins
+        QTimer.singleShot(100, self._startup)
+
+    # ------------------------------------------------------------------
+    # UI construction helpers
+    # ------------------------------------------------------------------
+    def _configure_observability(self) -> None:
+        phoenix_settings = self.settings.get("phoenix_settings", {})
+        phoenix_enabled = (
+            phoenix_settings.get("enabled", False)
+            or os.getenv("PHOENIX_ENABLED", "false").lower() == "true"
+        )
+        if not phoenix_enabled:
+            return
+
+        self.logger.info("Initializing Phoenix observability")
+        if os.getenv("PHOENIX_ENABLED"):
+            phoenix_settings["enabled"] = True
+        if os.getenv("PHOENIX_PORT"):
+            phoenix_settings["port"] = int(os.getenv("PHOENIX_PORT"))
+        if os.getenv("PHOENIX_PROJECT"):
+            phoenix_settings["project"] = os.getenv("PHOENIX_PROJECT")
+        setup_observability({"phoenix_settings": phoenix_settings})
+
+    def _create_menu_bar(self) -> None:
         menubar = self.menuBar()
-        
-        # File menu
+
         file_menu = menubar.addMenu("File")
         file_menu.addAction("New Project", self._new_project)
         file_menu.addAction("Open Project", self._open_project)
         file_menu.addSeparator()
         file_menu.addAction("Exit", self.close)
-        
-        # Edit menu
+
         edit_menu = menubar.addMenu("Edit")
         edit_menu.addAction("Settings", self._open_settings)
-        
-        # Help menu
+
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("About", self._show_about)
-    
-    def _create_toolbar(self):
-        """Create the main toolbar."""
-        toolbar = self.addToolBar("Main")
+
+    def _create_toolbar(self) -> None:
+        toolbar = QToolBar("Main", self)
         toolbar.setMovable(False)
-        
-        # Add actions
+        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
         toolbar.addAction("New", self._new_project)
         toolbar.addAction("Open", self._open_project)
-        toolbar.addSeparator()
-        
-        # Navigation buttons (will be enabled/disabled by stage manager)
-        self.back_action = toolbar.addAction("← Back", self._go_back)
-        self.next_action = toolbar.addAction("Next →", self._go_next)
-        self.back_action.setEnabled(False)
-        self.next_action.setEnabled(False)
-    
-    def _startup(self):
-        """Handle application startup."""
-        # Import all stage classes
-        from src.new.stages import WelcomeStage, ProjectSetupStage, DocumentImportStage, DocumentProcessStage
-        from src.new.stages.analysis_stage import AnalysisStage
-        from src.new.stages.report_stage import ReportGenerationStage
-        
-        # Pre-create all stage widgets
-        self.logger.info("Creating stage widgets...")
-        
-        # Welcome stage (special case - no project)
-        welcome_stage = WelcomeStage()
-        welcome_stage.new_project_requested.connect(self._new_project)
-        welcome_stage.project_opened.connect(self._load_project)
-        self.stage_widgets['welcome'] = welcome_stage
-        self.stage_stack.addWidget(welcome_stage)
-        
-        # Create project-based stages (with None project initially)
-        stage_classes = {
-            'setup': ProjectSetupStage,
-            'import': DocumentImportStage,
-            'process': DocumentProcessStage,
-            'analysis': AnalysisStage,
-            'generate': ReportGenerationStage
-        }
-        
-        for stage_name, stage_class in stage_classes.items():
-            try:
-                stage = stage_class(None)
-                self.stage_widgets[stage_name] = stage
-                self.stage_stack.addWidget(stage)
-                self.logger.debug(f"Created stage widget: {stage_name}")
-            except Exception as e:
-                self.logger.error(f"Failed to create stage {stage_name}: {e}")
-        
-        # Register stages with manager
-        self.stage_manager.register_stages(self.stage_widgets)
-        
-        # Connect stage manager signals
-        self.stage_manager.can_go_back_changed.connect(
-            lambda enabled: self.back_action.setEnabled(enabled)
+        self.addToolBar(Qt.TopToolBarArea, toolbar)
+
+    def _create_central_stack(self) -> None:
+        central_widget = QWidget(self)
+        layout = QVBoxLayout(central_widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self._stack = QStackedWidget()
+        self._stack.setObjectName("dashboardStack")
+        layout.addWidget(self._stack)
+
+        self.setCentralWidget(central_widget)
+
+    # ------------------------------------------------------------------
+    # Startup and navigation
+    # ------------------------------------------------------------------
+    def _startup(self) -> None:
+        self.logger.info("Initializing dashboard views")
+        self._welcome_stage = WelcomeStage()
+        self._welcome_stage.new_project_requested.connect(self._new_project)
+        self._welcome_stage.project_opened.connect(self._load_project)
+        self._stack.addWidget(self._welcome_stage)
+        self._stack.setCurrentWidget(self._welcome_stage)
+
+        missing = [p for p in ("anthropic", "gemini", "azure_openai") if not self.settings.has_api_key(p)]
+        if missing:
+            self.logger.info("Missing API keys for: %s", ", ".join(missing))
+
+    def _show_welcome(self) -> None:
+        if self._welcome_stage:
+            self._stack.setCurrentWidget(self._welcome_stage)
+        self._workspace_widget = None
+        self._update_window_title()
+        self.statusBar().showMessage("Ready")
+
+    # ------------------------------------------------------------------
+    # Project lifecycle helpers
+    # ------------------------------------------------------------------
+    def _new_project(self) -> None:
+        self.logger.info("Starting new project workflow")
+
+        case_name, ok = QInputDialog.getText(self, "New Project", "Case name:")
+        if not ok or not case_name.strip():
+            return
+
+        output_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Project Folder",
+            str(Path.home()),
         )
-        self.stage_manager.can_proceed_changed.connect(
-            lambda enabled: self.next_action.setEnabled(enabled)
-        )
-        self.stage_manager.stage_changed.connect(self._update_sidebar_progress)
-        
-        # Check for API keys
-        providers = ['anthropic', 'gemini', 'azure_openai']
-        missing_keys = [p for p in providers if not self.settings.has_api_key(p)]
-        
-        if missing_keys:
-            self.logger.info(f"Missing API keys for: {missing_keys}")
-        
-        # Start with welcome screen
-        self._show_welcome()
-    
-    def set_stage_widget(self, stage_name: str):
-        """Set the current stage widget by name."""
-        if stage_name in self.stage_widgets:
-            widget = self.stage_widgets[stage_name]
-            self.stage_stack.setCurrentWidget(widget)
-            self.logger.debug(f"Switched to stage widget: {stage_name}")
-    
-    def _show_welcome(self):
-        """Show the welcome screen."""
-        self.logger.info("Showing welcome screen")
+        if not output_dir:
+            return
+
         try:
-            # Hide navigation buttons on welcome screen
-            self.back_action.setVisible(False)
-            self.next_action.setVisible(False)
-            
-            # Hide sidebar on welcome screen
-            self.workflow_sidebar.setVisible(False)
-            
-            # Switch to welcome stage
-            self.set_stage_widget('welcome')
-            self.stage_manager.set_current_stage('welcome')
-            
-        except Exception as e:
-            self.logger.error(f"Error in _show_welcome: {e}", exc_info=True)
-    
-    def _new_project(self):
-        """Start a new project."""
-        self.logger.info("Starting new project")
-        self.logger.debug("_new_project method called")
-        
-        # Create project manager if needed
-        if not self.project_manager:
-            self.project_manager = ProjectManager()
-        
-        # Show navigation buttons
-        self.back_action.setVisible(True)
-        self.next_action.setVisible(True)
-        # Show sidebar
-        self.workflow_sidebar.setVisible(True)
-        
-        # Reset setup stage for new project
-        setup_stage = self.stage_widgets.get('setup')
-        if setup_stage and hasattr(setup_stage, 'reset'):
-            setup_stage.reset()
-        
-        # Switch to setup stage
-        self.set_stage_widget('setup')
-        self.stage_manager.set_current_stage('setup')
-        
-        # Update sidebar
-        self._update_sidebar_progress('setup')
-    
-    def _open_project(self):
-        """Open an existing project."""
-        from PySide6.QtWidgets import QFileDialog
-        file_path, _ = QFileDialog.getOpenFileName(
+            project_manager = ProjectManager()
+            metadata = ProjectMetadata(case_name=case_name.strip())
+            project_manager.create_project(Path(output_dir), metadata)
+        except Exception as exc:  # pragma: no cover - UI feedback
+            self.logger.exception("Failed to create project")
+            QMessageBox.critical(self, "Project Creation Failed", str(exc))
+            return
+
+        self._activate_workspace(project_manager)
+        self.statusBar().showMessage(f"Project created: {case_name.strip()}")
+
+    def _open_project(self) -> None:
+        project_path, _ = QFileDialog.getOpenFileName(
             self,
             "Open Project",
             str(Path.home()),
-            "Forensic Report Project (*.frpd)"
+            "Forensic Report Project (*.frpd)",
         )
-        
-        if file_path:
-            self._load_project(Path(file_path))
-    
-    def _load_project(self, project_path: Path):
-        """Load a specific project."""
-        self.logger.info(f"Loading project: {project_path}")
-        
-        # Create project manager if needed
-        if not self.project_manager:
-            self.project_manager = ProjectManager()
-        
+        if not project_path:
+            return
+        self._load_project(Path(project_path))
+
+    def _load_project(self, project_path: Path) -> None:
+        self.logger.info("Loading project: %s", project_path)
+        project_manager = ProjectManager()
         try:
-            # Load the project
-            project = self.project_manager.load_project(project_path)
-            self.stage_manager.set_project(project)
-            
-            # Update all stage widgets with the project
-            for stage_widget in self.stage_widgets.values():
-                if hasattr(stage_widget, 'project'):
-                    stage_widget.project = project
-                if hasattr(stage_widget, 'load_state'):
-                    try:
-                        stage_widget.load_state()
-                    except Exception as e:
-                        self.logger.warning(f"Failed to load state for stage: {e}")
-            
-            # Show navigation and sidebar
-            self.back_action.setVisible(True)
-            self.next_action.setVisible(True)
-            self.workflow_sidebar.setVisible(True)
-            
-            # Determine which stage to show based on project state
-            current_stage = project.workflow_state.current_stage or 'import'
-            self.set_stage_widget(current_stage)
-            self.stage_manager.set_current_stage(current_stage)
-            
-            # Update UI
-            self._update_sidebar_progress(current_stage)
-            self.statusBar().showMessage(f"Loaded project: {project.metadata.case_name}")
-            
-        except Exception as e:
-            self.logger.error(f"Failed to load project: {e}")
-            QMessageBox.critical(
-                self,
-                "Failed to Load Project",
-                f"Could not load the project:\n{str(e)}"
-            )
-    
-    def _open_settings(self):
-        """Open settings dialog."""
+            if not project_manager.load_project(project_path):
+                raise RuntimeError("Project file could not be loaded.")
+        except Exception as exc:  # pragma: no cover - UI feedback
+            self.logger.exception("Failed to load project")
+            QMessageBox.critical(self, "Failed to Load Project", str(exc))
+            return
+
+        self._activate_workspace(project_manager)
+        case_name = project_manager.metadata.case_name if project_manager.metadata else project_path.stem
+        self.statusBar().showMessage(f"Project loaded: {case_name}")
+
+    def _activate_workspace(self, project_manager: ProjectManager) -> None:
+        self.project_manager = project_manager
+        workspace = self.workspace_controller.create_workspace(project_manager)
+        workspace.set_project(project_manager)
+        self._display_workspace(workspace)
+        self._update_window_title(project_manager)
+
+    def _display_workspace(self, workspace: QWidget) -> None:
+        if self._workspace_widget is not None:
+            index = self._stack.indexOf(self._workspace_widget)
+            if index != -1:
+                widget = self._stack.widget(index)
+                self._stack.removeWidget(widget)
+                widget.deleteLater()
+        self._workspace_widget = workspace
+        self._stack.addWidget(workspace)
+        self._stack.setCurrentWidget(workspace)
+
+    def _on_workspace_created(self, workspace: QWidget) -> None:  # pragma: no cover - hook for future extensions
+        self.logger.debug("Workspace widget created: %s", workspace)
+
+    # ------------------------------------------------------------------
+    # Misc helpers
+    # ------------------------------------------------------------------
+    def _open_settings(self) -> None:
         from src.new.dialogs import SettingsDialog
-        
+
         dialog = SettingsDialog(self)
         dialog.settings_changed.connect(self._on_settings_changed)
         dialog.exec()
-    
-    def _on_settings_changed(self):
-        """Handle settings changes."""
+
+    def _on_settings_changed(self) -> None:
         self.logger.info("Settings updated")
-        # If we're on the setup stage, refresh it to show new evaluator name
-        if self.stage_manager.current_stage_name == 'setup':
-            self.stage_manager.load_stage('setup')
-    
-    def _show_about(self):
-        """Show about dialog."""
-        from PySide6.QtWidgets import QMessageBox
+
+    def _show_about(self) -> None:
         QMessageBox.about(
             self,
             "About Forensic Report Drafter",
             "<h3>Forensic Report Drafter</h3>"
-            "<p>New simplified UI - Development Version</p>"
-            "<p>A professional tool for forensic psychologists to analyze and draft comprehensive reports.</p>"
+            "<p>Dashboard prototype in development.</p>"
+            "<p>A professional tool for forensic psychologists to analyze complex records.</p>",
         )
-    
-    def _go_back(self):
-        """Navigate to previous stage."""
-        # Check if we're going back to welcome
-        current_stage = self.stage_manager.current_stage_name
-        if current_stage == 'setup':
-            # Going back to welcome
-            self._show_welcome()
+
+    def _update_window_title(self, project_manager: ProjectManager | None = None) -> None:
+        project_manager = project_manager or self.project_manager
+        if project_manager and project_manager.metadata:
+            case_name = project_manager.metadata.case_name
+            self.setWindowTitle(f"Forensic Report Drafter — {case_name}")
         else:
-            self.stage_manager.previous_stage()
-    
-    def _go_next(self):
-        """Navigate to next stage."""
-        self.stage_manager.next_stage()
-    
-    def _on_sidebar_stage_clicked(self, stage_name: str):
-        """Handle sidebar stage click."""
-        self.logger.info(f"Sidebar stage clicked: {stage_name}")
-        self.stage_manager.jump_to_stage(stage_name)
-    
-    def _update_sidebar_progress(self, current_stage: str):
-        """Update sidebar with current progress."""
-        progress = self.stage_manager.get_stage_progress()
-        self.workflow_sidebar.set_stage_progress(progress)
-    
-    def closeEvent(self, event):
-        """Handle window close."""
-        # Save window geometry
+            self.setWindowTitle("Forensic Report Drafter")
+
+    def closeEvent(self, event) -> None:  # noqa: N802
         self.settings.save_window_geometry(self.saveGeometry())
-        
-        # Close project if open
         if self.project_manager:
             self.project_manager.close_project()
-        
-        event.accept()
+        super().closeEvent(event)
 
 
-def main():
-    """Main entry point for new UI."""
-    # Configure startup logging
+def main() -> int:
+    """Run the dashboard UI."""
     configure_startup_logging()
-    
-    # Setup logging
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("Starting Forensic Report Drafter (New UI)")
-    
-    # Create Qt application
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication(sys.argv)
-    
-    # Set application metadata
+
+    app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("Forensic Report Drafter")
     app.setOrganizationName("Forensic Psychology Tools")
     app.setApplicationDisplayName("Forensic Report Drafter")
-    
-    # Create and show main window
+
     window = SimplifiedMainWindow()
     window.show()
-    
-    # Run application
     return app.exec()
 
 

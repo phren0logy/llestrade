@@ -16,20 +16,20 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Pre-Flight Foundation Audit
 
-- [ ] Identify unused/abandoned modules and move them into `src/archive/`
-- [ ] Remove obsolete wiring from `main_new.py` and stage imports that will be replaced
+- [x] Identify unused/abandoned modules and move them into `src/archive/`
+- [x] Remove obsolete wiring from `main_new.py` and stage imports that will be replaced
 - [ ] Capture retained legacy behavior in notes/TODOs before deletion
 
 #### Step 0 - Decommission Wizard Flow
 
-- [ ] Refactor stage navigation to support the dashboard model
-  - [ ] Retire the linear wizard assumptions in `StageManager`
-  - [ ] Remove unused stages (e.g., `refine`) and decouple welcome from project routing
-  - [ ] Introduce a `WorkspaceController` (or equivalent) that can manage tabbed dashboards
-- [ ] Redesign `main_new.py` to host the dashboard shell (sidebar + tabbed workspace)
-  - [ ] Preserve welcome-screen entry, but swap the stacked wizard for a minimal tab scaffold (welcome + empty workspace)
+- [x] Refactor stage navigation to support the dashboard model
+  - [x] Retire the linear wizard assumptions in `StageManager`
+  - [x] Remove unused stages (e.g., `refine`) and decouple welcome from project routing
+  - [x] Introduce a `WorkspaceController` (or equivalent) that can manage tabbed dashboards
+- [x] Redesign `main_new.py` to host the dashboard shell (sidebar + tabbed workspace)
+  - [x] Preserve welcome-screen entry, but swap the stacked wizard for a minimal tab scaffold (welcome + empty workspace)
   - [ ] Add temporary feature flag handling so current flows continue to launch
-- [ ] Stub out `src/new/stages/project_workspace.py` with placeholder tabs to unblock downstream work
+- [x] Stub out `src/new/stages/project_workspace.py` with placeholder tabs to unblock downstream work
 
 #### Step 1 - Core Infrastructure
 
@@ -56,7 +56,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Step 2 - Dashboard Enhancement & Project Setup
 
-- [ ] Wire `main_new.py` dashboard shell into welcome + workspace views
+- [x] Wire `main_new.py` dashboard shell into welcome + workspace views
   - [ ] Enhance Welcome Stage (`src/new/stages/welcome_stage.py`)
     - [ ] Add FileTracker stats to project cards (X/Y converted, X/Y summarized)
     - [ ] Implement project deletion
