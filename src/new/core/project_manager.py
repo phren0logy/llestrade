@@ -5,6 +5,7 @@ Handles project files, auto-save, and state persistence.
 
 import json
 import logging
+import re
 import shutil
 import uuid
 from datetime import datetime
@@ -94,6 +95,93 @@ class WorkflowState:
         return cls(**data)
 
 
+PROJECT_FILENAME = "project.frpd"
+SOURCES_FILENAME = "sources.json"
+
+
+@dataclass
+class SourceTreeState:
+    """Persisted source folder selection relative to the project directory."""
+
+    root: str = ""  # relative path from project dir (allows .. for external roots)
+    selected_folders: List[str] = field(default_factory=list)  # relative to root
+    include_root_files: bool = False
+    last_scan: Optional[str] = None
+    warnings: List[str] = field(default_factory=list)
+    version: str = "1"
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "SourceTreeState":
+        payload = {**data}
+        payload.setdefault("selected_folders", [])
+        payload.setdefault("warnings", [])
+        return cls(**payload)
+
+
+@dataclass
+class ConversionSettings:
+    """Conversion helper configuration for a project."""
+
+    helper: str = "default"
+    options: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ConversionSettings":
+        payload = {**data}
+        payload.setdefault("options", {})
+        return cls(**payload)
+
+
+@dataclass
+class DashboardState:
+    """UI state for the dashboard experience."""
+
+    last_open_tab: str = "documents"
+    pending_jobs: List[Dict[str, Any]] = field(default_factory=list)
+    notices: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "DashboardState":
+        payload = {**data}
+        payload.setdefault("pending_jobs", [])
+        payload.setdefault("notices", [])
+        return cls(**payload)
+
+
+def _sanitize_project_folder(name: str) -> str:
+    """Return a filesystem-friendly folder name derived from the project title."""
+    if not name:
+        return "project"
+    # Replace whitespace with dashes and drop unsupported characters
+    candidate = re.sub(r"\s+", "-", name.strip())
+    candidate = re.sub(r"[^A-Za-z0-9._-]", "", candidate)
+    candidate = re.sub(r"-+", "-", candidate)
+    candidate = candidate.strip("-_.")
+    return candidate or "project"
+
+
+def _ensure_unique_dir(base_path: Path, folder_name: str) -> Path:
+    """Return a unique directory path, appending numeric suffixes if needed."""
+    candidate = base_path / folder_name
+    if not candidate.exists():
+        return candidate
+    index = 2
+    while True:
+        suffixed = base_path / f"{folder_name}-{index}"
+        if not suffixed.exists():
+            return suffixed
+        index += 1
+
+
 class ProjectManager(QObject):
     """Manages project files with auto-save and state persistence."""
     
@@ -104,7 +192,7 @@ class ProjectManager(QObject):
     project_loaded = Signal(str)  # project path
     cost_added = Signal(float, str, str)  # amount, provider, stage
     
-    VERSION = "1.0"
+    VERSION = "2.0"
     PROJECT_EXTENSION = ".frpd"
     
     def __init__(self, project_path: Optional[Path] = None):
@@ -120,6 +208,9 @@ class ProjectManager(QObject):
         self.costs = ProjectCosts()
         self.workflow_state = WorkflowState()
         self.settings: Dict[str, Any] = {}
+        self.source_state = SourceTreeState()
+        self.conversion_settings = ConversionSettings()
+        self.dashboard_state = DashboardState()
         
         # Auto-save timer
         self._auto_save_timer = QTimer()
@@ -138,27 +229,30 @@ class ProjectManager(QObject):
         # Generate project ID
         self.project_id = str(uuid.uuid4())
         
-        # Create project directory
-        safe_name = "".join(c for c in metadata.case_name if c.isalnum() or c in " -_")
-        project_name = f"{safe_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        self.project_dir = base_path / project_name
+        # Create project directory based on sanitized case name (spaces → dashes)
+        safe_name = _sanitize_project_folder(metadata.case_name)
+        self.project_dir = _ensure_unique_dir(base_path, safe_name)
         self.project_dir.mkdir(parents=True, exist_ok=True)
+        project_name = self.project_dir.name
         
         # Create subdirectories
         subdirs = [
-            "source_documents",
-            "processed_documents", 
-            "summaries",
+            "converted_documents",
+            "bulk_analysis",
             "reports",
             "templates",
             "logs",
-            "backups"
+            "backups",
+            # Legacy folders kept for backward compatibility with in-flight code paths
+            "source_documents",
+            "processed_documents",
+            "summaries",
         ]
         for subdir in subdirs:
             (self.project_dir / subdir).mkdir(exist_ok=True)
         
         # Set project file path
-        self.project_path = self.project_dir / f"{project_name}{self.PROJECT_EXTENSION}"
+        self.project_path = self.project_dir / PROJECT_FILENAME
         
         # Initialize project data
         self.metadata = metadata
@@ -169,9 +263,13 @@ class ProjectManager(QObject):
             "llm_model": "claude-sonnet-4-20250514",
             "template_id": "standard_competency"
         }
+        self.source_state = SourceTreeState()
+        self.conversion_settings = ConversionSettings()
+        self.dashboard_state = DashboardState()
         
         # Save initial project file
         self.save_project()
+        self._write_sources_state()
         
         # Add to recent projects
         settings = SecureSettings()
@@ -215,7 +313,10 @@ class ProjectManager(QObject):
             self.costs = ProjectCosts.from_dict(data.get("costs", {}))
             self.workflow_state = WorkflowState.from_dict(data.get("workflow_state", {}))
             self.settings = data.get("settings", {})
-            
+            self.source_state = SourceTreeState.from_dict(data.get("source", {}))
+            self.conversion_settings = ConversionSettings.from_dict(data.get("conversion", {}))
+            self.dashboard_state = DashboardState.from_dict(data.get("dashboard_state", {}))
+
             # Update recent projects
             settings = SecureSettings()
             project_info = {
@@ -228,6 +329,9 @@ class ProjectManager(QObject):
             # Start auto-save
             self._auto_save_timer.start()
             self._modified = False
+
+            # Load persisted source tree selections (create if missing)
+            self._load_sources_state()
             
             self.project_loaded.emit(str(self.project_path))
             self.logger.info(f"Loaded project: {self.project_path}")
@@ -255,7 +359,10 @@ class ProjectManager(QObject):
                 "metadata": self.metadata.to_dict() if self.metadata else {},
                 "costs": self.costs.to_dict(),
                 "workflow_state": self.workflow_state.to_dict(),
-                "settings": self.settings
+                "settings": self.settings,
+                "source": self.source_state.to_dict(),
+                "conversion": self.conversion_settings.to_dict(),
+                "dashboard_state": self.dashboard_state.to_dict(),
             }
             
             # Write to temporary file first
@@ -278,7 +385,10 @@ class ProjectManager(QObject):
             
             # Move temp file to actual path
             temp_path.replace(self.project_path)
-            
+
+            # Persist source selection alongside project file
+            self._write_sources_state()
+
             # Update recent projects
             settings = SecureSettings()
             project_info = {
@@ -297,6 +407,35 @@ class ProjectManager(QObject):
         except Exception as e:
             self.logger.error(f"Failed to save project: {e}")
             return False
+
+    def _sources_file(self) -> Optional[Path]:
+        if not self.project_dir:
+            return None
+        return self.project_dir / SOURCES_FILENAME
+
+    def _write_sources_state(self) -> None:
+        path = self._sources_file()
+        if not path:
+            return
+        try:
+            path.write_text(json.dumps(self.source_state.to_dict(), indent=2))
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning("Failed to persist sources.json: %s", exc)
+
+    def _load_sources_state(self) -> None:
+        path = self._sources_file()
+        if not path:
+            return
+        if not path.exists():
+            self._write_sources_state()
+            return
+        try:
+            payload = json.loads(path.read_text())
+            self.source_state = SourceTreeState.from_dict(payload)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self.logger.warning("Failed to load sources.json (%s), resetting", exc)
+            self.source_state = SourceTreeState()
+            self._write_sources_state()
 
     def auto_save(self):
         """Auto-save if project has been modified."""
@@ -457,30 +596,37 @@ class ProjectManager(QObject):
         """Provide project data in the format expected by stages."""
         if not self.project_path:
             return {}
-        
+        base_paths = {
+            'base': str(self.project_dir),
+            'converted_documents': str(self.project_dir / 'converted_documents'),
+            'bulk_analysis': str(self.project_dir / 'bulk_analysis'),
+            'reports': str(self.project_dir / 'reports'),
+            'templates': str(self.project_dir / 'templates'),
+            'logs': str(self.project_dir / 'logs'),
+            'backups': str(self.project_dir / 'backups'),
+        }
+        # Legacy keys kept for compatibility with in-progress refactors
+        base_paths['source_documents'] = str(self.project_dir / 'source_documents')
+        base_paths['processed_documents'] = str(self.project_dir / 'processed_documents')
+        base_paths['summaries'] = str(self.project_dir / 'summaries')
+
         return {
-            'paths': {
-                'base': str(self.project_dir),
-                'source_documents': str(self.project_dir / 'source_documents'),
-                'processed_documents': str(self.project_dir / 'processed_documents'),
-                'summaries': str(self.project_dir / 'summaries'),
-                'reports': str(self.project_dir / 'reports'),
-                'templates': str(self.project_dir / 'templates'),
-                'logs': str(self.project_dir / 'logs'),
-                'backups': str(self.project_dir / 'backups')
-            },
+            'paths': base_paths,
             'metadata': self.metadata.to_dict() if self.metadata else {},
             'settings': self.settings,
             'workflow_state': self.workflow_state.to_dict(),
             'costs': self.costs.to_dict(),
-            'project_id': self.project_id
+            'project_id': self.project_id,
+            'source': self.source_state.to_dict(),
+            'conversion': self.conversion_settings.to_dict(),
+            'dashboard_state': self.dashboard_state.to_dict(),
         }
     
     @property
     def project_name(self) -> str:
         """Get the project name from the project path."""
-        if self.project_path:
-            return self.project_path.stem
+        if self.project_dir:
+            return self.project_dir.name
         return ""
     
     def close_project(self):
@@ -500,6 +646,9 @@ class ProjectManager(QObject):
         self.costs = ProjectCosts()
         self.workflow_state = WorkflowState()
         self.settings = {}
+        self.source_state = SourceTreeState()
+        self.conversion_settings = ConversionSettings()
+        self.dashboard_state = DashboardState()
         self._modified = False
-        
+
         self.logger.info("Closed project")
