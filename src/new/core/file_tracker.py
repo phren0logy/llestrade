@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -56,7 +56,11 @@ class FileTrackerSnapshot:
     def from_json(cls, payload: Dict[str, object]) -> "FileTrackerSnapshot":
         timestamp = payload.get("timestamp")
         return cls(
-            timestamp=datetime.fromisoformat(timestamp) if isinstance(timestamp, str) else datetime.utcnow(),
+            timestamp=(
+                datetime.fromisoformat(timestamp)
+                if isinstance(timestamp, str)
+                else datetime.now(timezone.utc)
+            ),
             counts=dict(payload.get("counts", {})),
             missing={k: list(v) for k, v in dict(payload.get("missing", {})).items()},
             notes=dict(payload.get("notes", {})),
@@ -115,7 +119,7 @@ class FileTracker:
         }
 
         snapshot = FileTrackerSnapshot(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             counts=counts,
             missing=missing,
         )

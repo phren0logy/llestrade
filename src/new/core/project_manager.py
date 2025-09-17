@@ -124,6 +124,7 @@ class ProjectManager(QObject):
         self._auto_save_timer.setInterval(60000)  # 1 minute
         self._modified = False
         self._file_tracker = None
+        self.summary_groups: Dict[str, "SummaryGroup"] = {}
         
         # Load project if path provided
         if project_path:
@@ -183,6 +184,7 @@ class ProjectManager(QObject):
         
         self.project_loaded.emit(str(self.project_path))
         self.logger.info(f"Created new project: {self.project_path}")
+        self.refresh_summary_groups()
         
         return self.project_path
     
@@ -226,6 +228,7 @@ class ProjectManager(QObject):
             
             self.project_loaded.emit(str(self.project_path))
             self.logger.info(f"Loaded project: {self.project_path}")
+            self.refresh_summary_groups()
             
             return True
             
@@ -312,6 +315,45 @@ class ProjectManager(QObject):
             self._file_tracker = FileTracker(self.project_dir)
             self._file_tracker.load()
         return self._file_tracker
+
+    # ------------------------------------------------------------------
+    # Summary group helpers
+    # ------------------------------------------------------------------
+    def refresh_summary_groups(self) -> List["SummaryGroup"]:
+        from src.new.core.summary_groups import load_summary_groups
+
+        if not self.project_dir:
+            self.summary_groups = {}
+            return []
+        groups = load_summary_groups(self.project_dir)
+        self.summary_groups = {group.group_id: group for group in groups}
+        return groups
+
+    def list_summary_groups(self) -> List["SummaryGroup"]:
+        if not self.summary_groups:
+            return self.refresh_summary_groups()
+        return list(self.summary_groups.values())
+
+    def save_summary_group(self, group: "SummaryGroup") -> "SummaryGroup":
+        from src.new.core.summary_groups import save_summary_group
+
+        if not self.project_dir:
+            raise RuntimeError("Project must be created or loaded before saving summary groups")
+        saved = save_summary_group(self.project_dir, group)
+        self.summary_groups[saved.group_id] = saved
+        self.mark_modified()
+        return saved
+
+    def delete_summary_group(self, group_id: str) -> bool:
+        from src.new.core.summary_groups import delete_summary_group
+
+        group = self.summary_groups.get(group_id)
+        if not group or not self.project_dir:
+            return False
+        delete_summary_group(self.project_dir, group)
+        self.summary_groups.pop(group_id, None)
+        self.mark_modified()
+        return True
     
     def _get_created_date(self) -> str:
         """Get project creation date."""

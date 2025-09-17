@@ -33,22 +33,22 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Step 1 - Core Infrastructure
 
-- [ ] Create FileTracker class (`src/new/core/file_tracker.py`)
-  - [ ] Implement file existence checking with folder structure preservation
-  - [ ] Add project statistics calculation
-  - [ ] Write pytest tests for critical methods
-  - [ ] Limit initial scope to counts, last-run timestamps, and deterministic reconciliation
+- [x] Create FileTracker class (`src/new/core/file_tracker.py`)
+  - [x] Implement file existence checking with folder structure preservation
+  - [x] Add project statistics calculation
+  - [x] Write pytest tests for critical methods
+  - [x] Limit initial scope to counts, last-run timestamps, and deterministic reconciliation
 - [ ] Update ProjectManager (`src/new/core/project_manager.py`)
   - [ ] Bump project format to v2 and emit migration metadata
   - [ ] Rename on-disk folders to `imported_documents/`, `processed_documents/`, and `summaries/`
   - [ ] Add summary-group aware schema (groups array + config pointers)
   - [ ] Replace `WorkflowState` with dashboard/tab state primitives
   - [ ] Provide upgrade path or conversion script for v1 projects
-- [ ] Create SummaryGroup system (`src/new/core/summary_groups.py`)
-  - [ ] Implement SummaryGroup dataclass
-  - [ ] Add config.json serialization for groups
-  - [ ] Create folder structure management
-  - [ ] Base mocked responses on fixtures captured from real provider calls
+- [x] Create SummaryGroup system (`src/new/core/summary_groups.py`)
+  - [x] Implement SummaryGroup dataclass
+  - [x] Add config.json serialization for groups
+  - [x] Create folder structure management
+  - [x] Base mocked responses on fixtures captured from real provider calls
 - [ ] Extract and consolidate worker threads
   - [ ] Move DocumentProcessorThread to `src/new/workers/`
   - [ ] Create shared base class for workers
