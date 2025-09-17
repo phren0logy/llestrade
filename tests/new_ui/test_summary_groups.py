@@ -18,8 +18,10 @@ def test_summary_group_save_and_load(project_manager: ProjectManager):
     group = SummaryGroup.create(
         name="Clinical Records",
         files=["medical/doc1.md", "medical/doc2.md"],
-        prompt_template="clinical_summary",
+        provider_id="anthropic",
         model="claude-3-sonnet",
+        system_prompt_path="prompt_templates/system.md",
+        user_prompt_path="prompt_templates/user.md",
     )
 
     saved = project_manager.save_summary_group(group)
@@ -30,6 +32,9 @@ def test_summary_group_save_and_load(project_manager: ProjectManager):
     loaded_group = reloaded[0]
     assert loaded_group.slug == saved.slug
     assert loaded_group.files == ["medical/doc1.md", "medical/doc2.md"]
+    assert loaded_group.system_prompt_path == "prompt_templates/system.md"
+    assert loaded_group.user_prompt_path == "prompt_templates/user.md"
+    assert loaded_group.provider_id == "anthropic"
 
 
 def test_summary_group_slug_uniqueness(project_manager: ProjectManager):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -52,7 +53,10 @@ class SummaryGroup:
     description: str = ""
     files: List[str] = field(default_factory=list)
     prompt_template: str = ""
+    provider_id: str = ""
     model: str = ""
+    system_prompt_path: str = ""
+    user_prompt_path: str = ""
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
     slug: Optional[str] = None
@@ -66,7 +70,10 @@ class SummaryGroup:
         description: str = "",
         files: Optional[Iterable[str]] = None,
         prompt_template: str = "",
+        provider_id: str = "",
         model: str = "",
+        system_prompt_path: str = "",
+        user_prompt_path: str = "",
     ) -> "SummaryGroup":
         return cls(
             group_id=str(uuid.uuid4()),
@@ -74,7 +81,10 @@ class SummaryGroup:
             description=description,
             files=list(files or []),
             prompt_template=prompt_template,
+            provider_id=provider_id,
             model=model,
+            system_prompt_path=system_prompt_path,
+            user_prompt_path=user_prompt_path,
         )
 
     def touch(self) -> None:
@@ -90,7 +100,10 @@ class SummaryGroup:
             "description": self.description,
             "files": self.files,
             "prompt_template": self.prompt_template,
+            "provider_id": self.provider_id,
             "model": self.model,
+            "system_prompt_path": self.system_prompt_path,
+            "user_prompt_path": self.user_prompt_path,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "slug": self.slug,
@@ -105,7 +118,10 @@ class SummaryGroup:
             description=str(payload.get("description", "")),
             files=list(payload.get("files", [])),
             prompt_template=str(payload.get("prompt_template", "")),
+            provider_id=str(payload.get("provider_id", "")),
             model=str(payload.get("model", "")),
+            system_prompt_path=str(payload.get("system_prompt_path", "")),
+            user_prompt_path=str(payload.get("user_prompt_path", "")),
             created_at=_parse_datetime(payload.get("created_at")),
             updated_at=_parse_datetime(payload.get("updated_at")),
             slug=payload.get("slug"),
@@ -170,12 +186,7 @@ def delete_summary_group(project_dir: Path, group: SummaryGroup) -> None:
         return
     group_dir = _groups_root(project_dir) / group.slug
     if group_dir.exists():
-        for path in group_dir.glob("*"):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
-        group_dir.rmdir()
+        shutil.rmtree(group_dir, ignore_errors=True)
 
 
 __all__ = [

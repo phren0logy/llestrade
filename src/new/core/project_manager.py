@@ -9,10 +9,13 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, TYPE_CHECKING
 from dataclasses import dataclass, asdict, field
 
 from PySide6.QtCore import QObject, Signal, QTimer
+
+if TYPE_CHECKING:
+    from src.new.core.summary_groups import SummaryGroup
 
 from .secure_settings import SecureSettings
 
