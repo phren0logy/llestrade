@@ -123,6 +123,7 @@ class ProjectManager(QObject):
         self._auto_save_timer.timeout.connect(self.auto_save)
         self._auto_save_timer.setInterval(60000)  # 1 minute
         self._modified = False
+        self._file_tracker = None
         
         # Load project if path provided
         if project_path:
@@ -290,13 +291,27 @@ class ProjectManager(QObject):
         except Exception as e:
             self.logger.error(f"Failed to save project: {e}")
             return False
-    
+
     def auto_save(self):
         """Auto-save if project has been modified."""
         if self._modified:
             if self.save_project():
                 self.auto_saved.emit()
                 self.logger.debug("Auto-saved project")
+
+    # ------------------------------------------------------------------
+    # Dashboard helpers
+    # ------------------------------------------------------------------
+    def get_file_tracker(self):
+        """Return a lazily-instantiated FileTracker for the project."""
+        from src.new.core.file_tracker import FileTracker
+
+        if not self.project_dir:
+            raise RuntimeError("Project must be created or loaded before accessing FileTracker")
+        if self._file_tracker is None or self._file_tracker.project_path != self.project_dir:
+            self._file_tracker = FileTracker(self.project_dir)
+            self._file_tracker.load()
+        return self._file_tracker
     
     def _get_created_date(self) -> str:
         """Get project creation date."""

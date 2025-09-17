@@ -26,17 +26,29 @@ class ProjectWorkspace(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_info_tab(), "Documents")
+        self._tabs.addTab(self._build_documents_tab(), "Documents")
         self._tabs.addTab(self._build_placeholder_tab("Summary Groups"), "Summary Groups")
         self._tabs.addTab(self._build_placeholder_tab("Progress"), "Progress")
 
         layout.addWidget(self._project_path_label)
         layout.addWidget(self._tabs)
 
-    def _build_info_tab(self) -> QWidget:
+    def _build_documents_tab(self) -> QWidget:
         widget = QWidget()
         tab_layout = QVBoxLayout(widget)
-        tab_layout.addWidget(QLabel("Document management tools are coming soon."))
+        tab_layout.setSpacing(8)
+
+        self._counts_label = QLabel("Scan pending…")
+        self._counts_label.setStyleSheet("font-weight: bold;")
+        tab_layout.addWidget(self._counts_label)
+
+        self._missing_processed_label = QLabel("Processed missing: —")
+        self._missing_summaries_label = QLabel("Summaries missing: —")
+
+        for label in (self._missing_processed_label, self._missing_summaries_label):
+            label.setWordWrap(True)
+            tab_layout.addWidget(label)
+
         tab_layout.addStretch()
         return widget
 
@@ -55,7 +67,42 @@ class ProjectWorkspace(QWidget):
         self._project_path_label.setText(
             f"Active project: {project_path}" if project_path else "Active project: (unsaved)"
         )
+        self._refresh_file_tracker()
 
     def project_manager(self) -> Optional[ProjectManager]:
         """Return the current project manager if one has been set."""
         return self._project_manager
+
+    def refresh(self) -> None:
+        """Manual refresh hook for future toolbar integrations."""
+        self._refresh_file_tracker()
+
+    def _refresh_file_tracker(self) -> None:
+        if not self._project_manager:
+            return
+        try:
+            tracker = self._project_manager.get_file_tracker()
+            snapshot = tracker.scan()
+        except Exception as exc:
+            self._counts_label.setText("Scan failed")
+            self._missing_processed_label.setText(str(exc))
+            self._missing_summaries_label.setText("")
+            return
+
+        self._counts_label.setText(
+            (
+                f"Imported: {snapshot.imported_count} | "
+                f"Processed: {snapshot.processed_count} | "
+                f"Summaries: {snapshot.summaries_count}"
+            )
+        )
+
+        processed_missing = snapshot.missing.get("processed_missing", [])
+        summaries_missing = snapshot.missing.get("summaries_missing", [])
+
+        self._missing_processed_label.setText(
+            "Processed missing: " + (", ".join(processed_missing) if processed_missing else "None")
+        )
+        self._missing_summaries_label.setText(
+            "Summaries missing: " + (", ".join(summaries_missing) if summaries_missing else "None")
+        )
