@@ -320,8 +320,8 @@ class NewProjectDialog(QDialog):
     def _init_helper_controls(self) -> None:
         self._helper_combo.blockSignals(True)
         self._helper_combo.clear()
-        for key, info in AVAILABLE_HELPERS.items():
-            self._helper_combo.addItem(info.get("label", key.title()), userData=key)
+        for helper in _available_helpers():
+            self._helper_combo.addItem(helper.name, userData=helper.helper_id)
         self._helper_combo.blockSignals(False)
         self._helper_combo.currentIndexChanged.connect(self._on_helper_changed)
         self._on_helper_changed(self._helper_combo.currentIndex())
