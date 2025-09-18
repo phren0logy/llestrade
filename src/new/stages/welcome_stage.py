@@ -36,6 +36,7 @@ class WelcomeStage(QWidget):
 
     new_project_requested = Signal()
     project_opened = Signal(Path)
+    settings_requested = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -378,7 +379,7 @@ class WelcomeStage(QWidget):
         self._api_group = QGroupBox("Settings")
         self._api_layout = QVBoxLayout(self._api_group)
         configure_btn = QPushButton("Open Settings")
-        configure_btn.clicked.connect(self._emit_open_settings_warning)
+        configure_btn.clicked.connect(self.settings_requested.emit)
         self._api_layout.addWidget(configure_btn)
         return self._api_group
 
@@ -410,13 +411,6 @@ class WelcomeStage(QWidget):
         )
         if file_path:
             self.project_opened.emit(Path(file_path))
-
-    def _emit_open_settings_warning(self) -> None:
-        QMessageBox.information(
-            self,
-            "Settings",
-            "Settings are managed from the dashboard toolbar.",
-        )
 
     def _remove_legacy_projects(self) -> None:
         recent = self.settings.get_recent_projects()

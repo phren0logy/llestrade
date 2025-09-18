@@ -139,6 +139,7 @@ class SimplifiedMainWindow(QMainWindow):
         self._welcome_stage = WelcomeStage()
         self._welcome_stage.new_project_requested.connect(self._new_project)
         self._welcome_stage.project_opened.connect(self._load_project)
+        self._welcome_stage.settings_requested.connect(self._open_settings)
         self._stack.addWidget(self._welcome_stage)
         self._stack.setCurrentWidget(self._welcome_stage)
 
