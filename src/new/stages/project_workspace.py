@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import os
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
@@ -16,8 +19,11 @@ from PySide6.QtWidgets import (
     QTabWidget,
     QTableWidget,
     QTableWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
+    QDialog,
 )
 from PySide6.QtWidgets import QHeaderView
 
@@ -36,6 +42,8 @@ class ProjectWorkspace(QWidget):
         self._processed_total = 0
         self._imported_total = 0
         self._latest_snapshot = None
+        self._updating_tree = False
+        self._current_warnings: List[str] = []
 
         self._build_ui()
         if project_manager:
@@ -58,16 +66,44 @@ class ProjectWorkspace(QWidget):
         tab_layout = QVBoxLayout(widget)
         tab_layout.setSpacing(8)
 
+        # Source root selector
+        root_layout = QHBoxLayout()
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        self._source_root_label = QLabel("Source root: not set")
+        self._source_root_label.setStyleSheet("font-weight: bold;")
+        root_layout.addWidget(self._source_root_label)
+        root_layout.addStretch()
+        select_button = QPushButton("Choose Folder…")
+        select_button.clicked.connect(self._select_source_root)
+        root_layout.addWidget(select_button)
+        tab_layout.addLayout(root_layout)
+
+        # Counts + scan controls
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
-        self._counts_label = QLabel("Scan pending…")
-        self._counts_label.setStyleSheet("font-weight: bold;")
+        self._counts_label = QLabel("Re-scan pending…")
         header_layout.addWidget(self._counts_label)
         header_layout.addStretch()
-        refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self.refresh)
-        header_layout.addWidget(refresh_button)
+        self._last_scan_label = QLabel("")
+        self._last_scan_label.setStyleSheet("color: #666;")
+        header_layout.addWidget(self._last_scan_label)
+        rescan_button = QPushButton("Re-scan")
+        rescan_button.clicked.connect(self._handle_rescan_clicked)
+        header_layout.addWidget(rescan_button)
         tab_layout.addLayout(header_layout)
+
+        # Tree view for folder selection
+        self._source_tree = QTreeWidget()
+        self._source_tree.setHeaderHidden(True)
+        self._source_tree.setSelectionMode(QAbstractItemView.NoSelection)
+        self._source_tree.itemChanged.connect(self._on_tree_item_changed)
+        tab_layout.addWidget(self._source_tree)
+
+        self._root_warning_label = QLabel("")
+        self._root_warning_label.setWordWrap(True)
+        self._root_warning_label.setStyleSheet("color: #b26a00;")
+        tab_layout.addWidget(self._root_warning_label)
+        self._root_warning_label.hide()
 
         self._missing_processed_label = QLabel("Processed missing: —")
         self._missing_summaries_label = QLabel("Summaries missing: —")
@@ -135,14 +171,24 @@ class ProjectWorkspace(QWidget):
         self._project_path_label.setText(
             f"Active project: {project_path}" if project_path else "Active project: (unsaved)"
         )
+        self._populate_source_tree()
+        self._update_source_root_label()
+        self._update_last_scan_label()
         self.refresh()
 
     def project_manager(self) -> Optional[ProjectManager]:
         return self._project_manager
 
     def refresh(self) -> None:
+        self._populate_source_tree()
+        self._update_source_root_label()
+        self._update_last_scan_label()
         self._refresh_file_tracker()
         self._refresh_summary_groups()
+
+    def begin_initial_conversion(self) -> None:
+        """Trigger an initial scan/conversion after project creation."""
+        self._handle_rescan_clicked()
 
     def _refresh_file_tracker(self) -> None:
         if not self._project_manager:
@@ -186,6 +232,238 @@ class ProjectWorkspace(QWidget):
         self._missing_summaries_label.setText(
             "Summaries missing: " + (", ".join(summaries_missing) if summaries_missing else "None")
         )
+
+    # ------------------------------------------------------------------
+    # Source tree helpers
+    # ------------------------------------------------------------------
+    def _handle_rescan_clicked(self) -> None:
+        if not self._project_manager:
+            return
+        self._populate_source_tree()
+        self._refresh_file_tracker()
+        timestamp = datetime.utcnow().isoformat()
+        self._project_manager.update_source_state(last_scan=timestamp, warnings=self._current_warnings)
+        self._update_last_scan_label()
+
+    def _select_source_root(self) -> None:
+        if not self._project_manager or not self._project_manager.project_dir:
+            QMessageBox.warning(self, "Project Required", "Create or open a project first.")
+            return
+        start_dir = str(self._resolve_source_root() or self._project_manager.project_dir)
+        chosen = QFileDialog.getExistingDirectory(self, "Select Source Folder", start_dir)
+        if not chosen:
+            return
+        chosen_path = Path(chosen)
+        relative = self._to_project_relative(chosen_path)
+        self._project_manager.update_source_state(root=relative, selected_folders=[], warnings=[])
+        self._populate_source_tree()
+        self._update_source_root_label()
+        self._update_last_scan_label()
+
+    def _update_source_root_label(self) -> None:
+        if not self._project_manager:
+            self._source_root_label.setText("Source root: not set")
+            return
+        root_path = self._resolve_source_root()
+        if not root_path or not root_path.exists():
+            self._source_root_label.setText("Source root: not set")
+        else:
+            self._source_root_label.setText(f"Source root: {root_path}")
+
+    def _update_last_scan_label(self) -> None:
+        if not self._project_manager:
+            self._last_scan_label.setText("")
+            return
+        last_scan = self._project_manager.source_state.last_scan
+        if not last_scan:
+            self._last_scan_label.setText("Last scan: never")
+            return
+        try:
+            parsed = datetime.fromisoformat(last_scan)
+            display = parsed.strftime("Last scan: %Y-%m-%d %H:%M")
+        except ValueError:
+            display = f"Last scan: {last_scan}"
+        self._last_scan_label.setText(display)
+
+    def _populate_source_tree(self) -> None:
+        if not hasattr(self, "_source_tree"):
+            return
+        self._updating_tree = True
+        self._source_tree.clear()
+        self._updating_tree = False
+
+        if not self._project_manager:
+            self._source_tree.setDisabled(True)
+            self._set_root_warning([])
+            return
+
+        root_path = self._resolve_source_root()
+        if not root_path or not root_path.exists():
+            self._source_tree.setDisabled(True)
+            warning = ["Select a source folder to begin tracking documents."]
+            self._set_root_warning(warning)
+            if self._project_manager:
+                self._project_manager.update_source_state(warnings=warning)
+            return
+
+        self._source_tree.setDisabled(False)
+        state = self._project_manager.source_state
+        selected = set(state.selected_folders or [])
+        auto_select = not selected
+
+        directories = sorted(self._iter_directories(root_path))
+        self._updating_tree = True
+        for relative_path in directories:
+            parts = relative_path.split("/")
+            parent = self._source_tree.invisibleRootItem()
+            path_so_far = []
+            for index, part in enumerate(parts):
+                path_so_far.append(part)
+                rel_key = "/".join(path_so_far)
+                child = self._find_child(parent, part)
+                if child is None:
+                    child = QTreeWidgetItem([part])
+                    child.setFlags(child.flags() | Qt.ItemIsUserCheckable)
+                    child.setData(0, Qt.UserRole, rel_key)
+                    if auto_select or rel_key in selected:
+                        child.setCheckState(0, Qt.Checked)
+                    else:
+                        child.setCheckState(0, Qt.Unchecked)
+                    parent.addChild(child)
+                parent = child
+            if not auto_select:
+                parent.setCheckState(0, Qt.Checked if relative_path in selected else Qt.Unchecked)
+        if not auto_select:
+            for idx in range(self._source_tree.topLevelItemCount()):
+                self._update_parent_checkstate(self._source_tree.topLevelItem(idx))
+        self._updating_tree = False
+
+        if auto_select:
+            selected_list = self._collect_selected_folders()
+            self._project_manager.update_source_state(selected_folders=selected_list)
+
+        self._current_warnings = self._compute_root_warnings(root_path)
+        self._set_root_warning(self._current_warnings)
+        if self._project_manager:
+            self._project_manager.update_source_state(warnings=self._current_warnings)
+        self._update_source_root_label()
+
+    def _iter_directories(self, root_path: Path) -> List[str]:
+        results: List[str] = []
+        for path in root_path.rglob("*"):
+            if path.is_dir():
+                try:
+                    rel = path.relative_to(root_path).as_posix()
+                except ValueError:
+                    continue
+                results.append(rel)
+        return results
+
+    def _find_child(self, parent: QTreeWidgetItem, name: str) -> Optional[QTreeWidgetItem]:
+        for index in range(parent.childCount()):
+            child = parent.child(index)
+            if child.text(0) == name:
+                return child
+        return None
+
+    def _collect_selected_folders(self) -> List[str]:
+        selected: List[str] = []
+        root = self._source_tree.invisibleRootItem()
+        stack = [root]
+        while stack:
+            current = stack.pop()
+            for index in range(current.childCount()):
+                child = current.child(index)
+                stack.append(child)
+                if child.checkState(0) == Qt.Checked:
+                    rel = child.data(0, Qt.UserRole)
+                    if rel:
+                        selected.append(str(rel))
+        selected.sort()
+        return selected
+
+    def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if self._updating_tree or column != 0:
+            return
+        self._updating_tree = True
+        state = item.checkState(0)
+        # Propagate to children
+        def cascade(target: QTreeWidgetItem, value: Qt.CheckState) -> None:
+            for idx in range(target.childCount()):
+                child = target.child(idx)
+                child.setCheckState(0, value)
+                cascade(child, value)
+
+        cascade(item, state)
+        self._update_parent_checkstate(item.parent())
+        self._updating_tree = False
+
+        selected = self._collect_selected_folders()
+        if self._project_manager:
+            self._project_manager.update_source_state(selected_folders=selected)
+        root_path = self._resolve_source_root()
+        if root_path:
+            self._current_warnings = self._compute_root_warnings(root_path)
+            self._set_root_warning(self._current_warnings)
+
+    def _update_parent_checkstate(self, parent: Optional[QTreeWidgetItem]) -> None:
+        while parent is not None and parent is not self._source_tree.invisibleRootItem():
+            checked = 0
+            unchecked = 0
+            for idx in range(parent.childCount()):
+                state = parent.child(idx).checkState(0)
+                if state == Qt.Checked:
+                    checked += 1
+                elif state == Qt.Unchecked:
+                    unchecked += 1
+            if checked and unchecked:
+                parent.setCheckState(0, Qt.PartiallyChecked)
+            elif checked and not unchecked:
+                parent.setCheckState(0, Qt.Checked)
+            else:
+                parent.setCheckState(0, Qt.Unchecked)
+            parent = parent.parent()
+
+    def _set_root_warning(self, warnings: List[str]) -> None:
+        if warnings:
+            self._root_warning_label.setText("\n".join(warnings))
+            self._root_warning_label.show()
+        else:
+            self._root_warning_label.clear()
+            self._root_warning_label.hide()
+
+    def _compute_root_warnings(self, root_path: Path) -> List[str]:
+        warnings: List[str] = []
+        has_root_files = any(child.is_file() for child in root_path.iterdir())
+        if has_root_files:
+            warnings.append(
+                "Files in the source root will be skipped. Move them into subfolders so they can be processed."
+            )
+        if not self._collect_selected_folders():
+            warnings.append("Select at least one folder to include in scanning.")
+        return warnings
+
+    def _resolve_source_root(self) -> Optional[Path]:
+        if not self._project_manager or not self._project_manager.project_dir:
+            return None
+        root_spec = (self._project_manager.source_state.root or "").strip()
+        if not root_spec:
+            return None
+        root_path = Path(root_spec)
+        if not root_path.is_absolute():
+            root_path = (self._project_manager.project_dir / root_path).resolve()
+        return root_path
+
+    def _to_project_relative(self, path: Path) -> str:
+        if not self._project_manager or not self._project_manager.project_dir:
+            return path.as_posix()
+        project_dir = Path(self._project_manager.project_dir).resolve()
+        try:
+            rel = path.resolve().relative_to(project_dir)
+            return rel.as_posix()
+        except ValueError:
+            rel_str = os.path.relpath(path.resolve(), project_dir)
+            return Path(rel_str).as_posix()
 
     def _refresh_summary_groups(self) -> None:
         if not self._project_manager:

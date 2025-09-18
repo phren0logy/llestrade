@@ -211,6 +211,7 @@ class ProjectManager(QObject):
         self.source_state = SourceTreeState()
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
+        self.version_warning: Optional[str] = None
         
         # Auto-save timer
         self._auto_save_timer = QTimer()
@@ -266,6 +267,7 @@ class ProjectManager(QObject):
         self.source_state = SourceTreeState()
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
+        self.version_warning = None
         
         # Save initial project file
         self.save_project()
@@ -302,6 +304,9 @@ class ProjectManager(QObject):
             version = data.get("version", "0.0")
             if version != self.VERSION:
                 self.logger.warning(f"Project version mismatch: {version} != {self.VERSION}")
+                self.version_warning = version
+            else:
+                self.version_warning = None
             
             # Set paths
             self.project_path = project_path
@@ -573,10 +578,45 @@ class ProjectManager(QObject):
         """Update project settings."""
         self.settings.update(kwargs)
         self.mark_modified()
-    
+
     def get_setting(self, key: str, default: Any = None) -> Any:
         """Get a project setting."""
         return self.settings.get(key, default)
+
+    # Source state management
+    def update_source_state(
+        self,
+        *,
+        root: Optional[str] = None,
+        selected_folders: Optional[List[str]] = None,
+        include_root_files: Optional[bool] = None,
+        warnings: Optional[List[str]] = None,
+        last_scan: Optional[str] = None,
+    ) -> None:
+        if root is not None:
+            self.source_state.root = root
+        if selected_folders is not None:
+            self.source_state.selected_folders = selected_folders
+        if include_root_files is not None:
+            self.source_state.include_root_files = include_root_files
+        if warnings is not None:
+            self.source_state.warnings = warnings
+        if last_scan is not None:
+            self.source_state.last_scan = last_scan
+        self.mark_modified()
+        self._write_sources_state()
+
+    def update_conversion_helper(self, helper: str, **options: Any) -> None:
+        self.conversion_settings.helper = helper
+        if options:
+            self.conversion_settings.options.update(options)
+        self.mark_modified()
+
+    def update_dashboard_state(self, **kwargs: Any) -> None:
+        for key, value in kwargs.items():
+            if hasattr(self.dashboard_state, key):
+                setattr(self.dashboard_state, key, value)
+        self.mark_modified()
     
     # File management
     def get_project_file(self, subdir: str, filename: str) -> Path:

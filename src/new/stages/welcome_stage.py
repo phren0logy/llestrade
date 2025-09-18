@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
@@ -56,7 +58,10 @@ class WelcomeStage(QWidget):
 
         content_row = QHBoxLayout()
         content_row.setSpacing(30)
-        content_row.addWidget(self._build_recent_projects_card(), 2)
+        self._recent_projects_group = QGroupBox("Recent Projects")
+        self._recent_projects_layout = QVBoxLayout(self._recent_projects_group)
+        self._populate_recent_projects()
+        content_row.addWidget(self._recent_projects_group, 2)
         content_row.addLayout(self._build_side_panel(), 1)
         layout.addLayout(content_row)
         layout.addStretch()
@@ -79,17 +84,20 @@ class WelcomeStage(QWidget):
         h_layout.addWidget(subtitle)
         return header
 
-    def _build_recent_projects_card(self) -> QWidget:
-        group = QGroupBox("Recent Projects")
-        layout = QVBoxLayout(group)
+    def _populate_recent_projects(self) -> None:
+        while self._recent_projects_layout.count():
+            item = self._recent_projects_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
 
         recent_projects = self.settings.get_recent_projects()
         if not recent_projects:
             empty = QLabel("No recent projects")
             empty.setAlignment(Qt.AlignCenter)
             empty.setStyleSheet("color: #999; padding: 40px;")
-            layout.addWidget(empty)
-            return group
+            self._recent_projects_layout.addWidget(empty)
+            return
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -104,8 +112,7 @@ class WelcomeStage(QWidget):
             grid.addWidget(self._build_project_card(project_info), row, col)
 
         scroll.setWidget(container)
-        layout.addWidget(scroll)
-        return group
+        self._recent_projects_layout.addWidget(scroll)
 
     def _build_project_card(self, project_info: Dict) -> QWidget:
         card = QFrame()
@@ -186,6 +193,15 @@ class WelcomeStage(QWidget):
         open_btn.clicked.connect(self._open_project_dialog)
         layout.addWidget(open_btn)
 
+        purge_btn = QPushButton("🗑 Remove Legacy Projects")
+        purge_btn.setMinimumHeight(40)
+        purge_btn.setStyleSheet(
+            "QPushButton { border: 1px solid #d32f2f; color: #d32f2f; border-radius: 4px; }"
+            "QPushButton:hover { background-color: #ffebee; }"
+        )
+        purge_btn.clicked.connect(self._remove_legacy_projects)
+        layout.addWidget(purge_btn)
+
         return group
 
     def _build_api_status(self) -> QWidget:
@@ -231,6 +247,69 @@ class WelcomeStage(QWidget):
             "Settings",
             "Settings are managed from the dashboard toolbar.",
         )
+
+    def _remove_legacy_projects(self) -> None:
+        recent = self.settings.get_recent_projects()
+        if not recent:
+            QMessageBox.information(self, "No Projects", "No recent projects found.")
+            return
+
+        legacy_entries: List[tuple[Path, Path, str]] = []
+        for info in recent:
+            project_path = Path(info.get("path", "")).expanduser()
+            if not project_path.exists():
+                continue
+            try:
+                data = json.loads(project_path.read_text())
+            except Exception:
+                continue
+            version = str(data.get("version", "1.0"))
+            if version != ProjectManager.VERSION:
+                legacy_entries.append((project_path, project_path.parent, info.get("name", project_path.stem)))
+
+        if not legacy_entries:
+            QMessageBox.information(
+                self,
+                "Nothing to Remove",
+                "No legacy projects were detected."
+            )
+            return
+
+        entries_text = "\n".join(f"• {directory}" for _, directory, _ in legacy_entries)
+        reply = QMessageBox.question(
+            self,
+            "Remove Legacy Projects",
+            "The following legacy projects will be permanently deleted:\n\n"
+            f"{entries_text}\n\nThis action cannot be undone. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        errors: List[str] = []
+        for project_file, project_dir, name in legacy_entries:
+            try:
+                if project_dir.exists():
+                    shutil.rmtree(project_dir)
+                self.settings.remove_recent_project(project_file.as_posix())
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+
+        self._populate_recent_projects()
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Removal Issues",
+                "Some projects could not be removed:\n\n" + "\n".join(errors),
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Legacy Projects Removed",
+                "All legacy projects were removed successfully.",
+            )
 
     def _update_api_status(self) -> None:
         while self._api_layout.count() > 1:

@@ -6,13 +6,12 @@ from __future__ import annotations
 import os
 import sys
 import logging
-import shutil
 from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
-    QInputDialog,
+    QDialog,
     QMainWindow,
     QMessageBox,
     QStackedWidget,
@@ -29,6 +28,7 @@ from src.config.logging_config import setup_logging
 from src.config.startup_config import configure_startup_logging
 from src.config.observability import setup_observability
 from src.new.core import SecureSettings, ProjectManager, ProjectMetadata, WorkspaceController
+from src.new.dialogs import NewProjectDialog
 from src.new.stages.welcome_stage import WelcomeStage
 
 
@@ -152,30 +152,41 @@ class SimplifiedMainWindow(QMainWindow):
     def _new_project(self) -> None:
         self.logger.info("Starting new project workflow")
 
-        case_name, ok = QInputDialog.getText(self, "New Project", "Case name:")
-        if not ok or not case_name.strip():
+        dialog = NewProjectDialog(self)
+        if dialog.exec() != QDialog.Accepted:
             return
 
-        output_dir = QFileDialog.getExistingDirectory(
-            self,
-            "Select Project Folder",
-            str(Path.home()),
-        )
-        if not output_dir:
+        config = dialog.result_config()
+        if not config:
             return
 
         try:
             project_manager = ProjectManager()
-            metadata = ProjectMetadata(case_name=case_name.strip())
-            project_manager.create_project(Path(output_dir), metadata)
+            metadata = ProjectMetadata(case_name=config.name.strip())
+            project_manager.create_project(config.output_base, metadata)
         except Exception as exc:  # pragma: no cover - UI feedback
             self.logger.exception("Failed to create project")
             QMessageBox.critical(self, "Project Creation Failed", str(exc))
             return
 
-        self._maybe_import_initial_documents(project_manager)
+        try:
+            relative_root = self._project_relative_path(project_manager.project_dir, config.source_root)
+            project_manager.update_source_state(
+                root=relative_root,
+                selected_folders=config.selected_folders,
+                warnings=dialog.current_warnings(),
+                last_scan=None,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.exception("Failed to persist source configuration", exc_info=exc)
+
         self._activate_workspace(project_manager)
-        self.statusBar().showMessage(f"Project created: {case_name.strip()}")
+
+        workspace = self.workspace_controller.current_workspace()
+        if workspace:
+            workspace.begin_initial_conversion()
+
+        self.statusBar().showMessage(f"Project created: {config.name.strip()}")
 
     def _open_project(self) -> None:
         project_path, _ = QFileDialog.getOpenFileName(
@@ -199,6 +210,17 @@ class SimplifiedMainWindow(QMainWindow):
             QMessageBox.critical(self, "Failed to Load Project", str(exc))
             return
 
+        if project_manager.version_warning:
+            QMessageBox.warning(
+                self,
+                "Legacy Project",
+                "This project was created with an older preview build and is not compatible with the dashboard. "
+                "Use 'Remove Legacy Projects' from the welcome screen to delete it.",
+            )
+            project_manager.close_project()
+            self.project_manager = None
+            return
+
         self._activate_workspace(project_manager)
         case_name = project_manager.metadata.case_name if project_manager.metadata else project_path.stem
         self.statusBar().showMessage(f"Project loaded: {case_name}")
@@ -210,51 +232,16 @@ class SimplifiedMainWindow(QMainWindow):
         self._display_workspace(workspace)
         self._update_window_title(project_manager)
 
-    def _maybe_import_initial_documents(self, project_manager: ProjectManager) -> None:
-        if not project_manager.project_dir:
-            return
-        reply = QMessageBox.question(
-            self,
-            "Import Documents",
-            "Would you like to import documents into this project now?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.Yes,
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        folder = QFileDialog.getExistingDirectory(
-            self,
-            "Select Documents Folder",
-            str(Path.home()),
-        )
-        if not folder:
-            return
-
-        src = Path(folder)
-        dest_root = project_manager.project_dir / "imported_documents"
-
+    def _project_relative_path(self, project_dir: Path | None, external: Path) -> str:
+        external = external.resolve()
+        if not project_dir:
+            return external.as_posix()
+        project_dir = Path(project_dir).resolve()
         try:
-            if dest_root in src.resolve().parents:
-                QMessageBox.information(
-                    self,
-                    "Import Skipped",
-                    "Selected folder is inside the project directory and was skipped.",
-                )
-                return
-
-            self.logger.info("Importing documents from %s", src)
-            for path in src.rglob("*"):
-                if not path.is_file():
-                    continue
-                relative = path.relative_to(src)
-                target = dest_root / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(path, target)
-        except Exception as exc:
-            self.logger.exception("Failed to import documents")
-            QMessageBox.critical(self, "Import Failed", str(exc))
-
+            return external.relative_to(project_dir).as_posix()
+        except ValueError:
+            rel = os.path.relpath(external, project_dir)
+            return Path(rel).as_posix()
 
     def _display_workspace(self, workspace: QWidget) -> None:
         if self._workspace_widget is not None:
