@@ -58,7 +58,6 @@ class ProjectWorkspace(QWidget):
         self._processed_total = 0
         self._imported_total = 0
         self._latest_snapshot = None
-        self._updating_tree = False
         self._current_warnings: List[str] = []
         self._thread_pool = QThreadPool.globalInstance()
         self._active_workers: List[ConversionWorker] = []
@@ -121,9 +120,6 @@ class ProjectWorkspace(QWidget):
         self._source_root_label.setStyleSheet("font-weight: bold;")
         root_layout.addWidget(self._source_root_label)
         root_layout.addStretch()
-        select_button = QPushButton("Choose Folder…")
-        select_button.clicked.connect(self._select_source_root)
-        root_layout.addWidget(select_button)
         tab_layout.addLayout(root_layout)
 
         # Counts + scan controls
@@ -144,7 +140,6 @@ class ProjectWorkspace(QWidget):
         self._source_tree = QTreeWidget()
         self._source_tree.setHeaderHidden(True)
         self._source_tree.setSelectionMode(QAbstractItemView.NoSelection)
-        self._source_tree.itemChanged.connect(self._on_tree_item_changed)
         tab_layout.addWidget(self._source_tree)
 
         self._root_warning_label = QLabel("")
@@ -464,9 +459,7 @@ class ProjectWorkspace(QWidget):
     def _populate_source_tree(self) -> None:
         if not hasattr(self, "_source_tree"):
             return
-        self._updating_tree = True
         self._source_tree.clear()
-        self._updating_tree = False
 
         if not self._project_manager:
             self._source_tree.setDisabled(True)
@@ -477,7 +470,7 @@ class ProjectWorkspace(QWidget):
         if not root_path or not root_path.exists():
             self._source_tree.setDisabled(True)
             warning = [
-                "Source folder missing. Re-select the root to resume scanning."
+                "Source folder missing. Update the project location to resume scanning."
                 if self._project_manager and self._project_manager.source_state.root
                 else "Select a source folder to begin tracking documents."
             ]
@@ -491,48 +484,77 @@ class ProjectWorkspace(QWidget):
 
         self._source_tree.setDisabled(False)
         self._missing_root_prompted = False
-        state = self._project_manager.source_state
-        selected = set(state.selected_folders or [])
-        auto_select = not selected
 
-        directories = sorted(self._iter_directories(root_path))
-        self._updating_tree = True
-        for relative_path in directories:
-            parts = relative_path.split("/")
-            parent = self._source_tree.invisibleRootItem()
-            path_so_far = []
-            for index, part in enumerate(parts):
-                path_so_far.append(part)
-                rel_key = "/".join(path_so_far)
-                child = self._find_child(parent, part)
-                if child is None:
-                    child = QTreeWidgetItem([part])
-                    child.setFlags(child.flags() | Qt.ItemIsUserCheckable)
-                    child.setData(0, Qt.UserRole, rel_key)
-                    if auto_select or rel_key in selected:
-                        child.setCheckState(0, Qt.Checked)
-                    else:
-                        child.setCheckState(0, Qt.Unchecked)
-                    parent.addChild(child)
-                parent = child
-            if not auto_select:
-                parent.setCheckState(0, Qt.Checked if relative_path in selected else Qt.Unchecked)
-        if not auto_select:
-            for idx in range(self._source_tree.topLevelItemCount()):
-                self._update_parent_checkstate(self._source_tree.topLevelItem(idx))
-        self._updating_tree = False
-
-        if auto_select:
-            selected_list = self._collect_selected_folders()
-            self._project_manager.update_source_state(selected_folders=selected_list)
-
+        selected = sorted(self._project_manager.source_state.selected_folders or [])
         self._current_warnings = self._compute_root_warnings(root_path)
         self._set_root_warning(self._current_warnings)
         if self._project_manager:
             self._project_manager.update_source_state(warnings=self._current_warnings)
-        self._update_source_root_label()
+
+        root_label = root_path.name or root_path.as_posix()
+        root_item = QTreeWidgetItem([root_label])
+        root_item.setData(0, Qt.UserRole, root_path.as_posix())
+        self._source_tree.addTopLevelItem(root_item)
+
+        if not selected:
+            placeholder = QTreeWidgetItem(["No folders were selected during project setup."])
+            placeholder.setFlags(Qt.NoItemFlags)
+            root_item.addChild(placeholder)
+        else:
+            processed_dirs: set[Path] = set()
+            for relative in selected:
+                directory = (root_path / relative).resolve()
+                if not directory.exists():
+                    continue
+                container = self._ensure_tree_path(root_item, root_path, relative)
+                if directory.is_dir() and directory not in processed_dirs:
+                    self._populate_directory_contents(container, directory, processed_dirs)
+        self._source_tree.expandItem(root_item)
+
         if self._feature_flags.summary_groups_enabled:
             self._populate_group_source_tree()
+
+    def _ensure_tree_path(self, root_item: QTreeWidgetItem, root_path: Path, relative_path: str) -> QTreeWidgetItem:
+        current_item = root_item
+        cumulative = Path()
+        for part in Path(relative_path).parts:
+            cumulative = cumulative / part
+            child = self._find_child(current_item, part)
+            if child is None:
+                child = QTreeWidgetItem([part])
+                child.setData(0, Qt.UserRole, (root_path / cumulative).resolve().as_posix())
+                current_item.addChild(child)
+            current_item = child
+        return current_item
+
+    def _populate_directory_contents(
+        self,
+        parent_item: QTreeWidgetItem,
+        directory: Path,
+        processed: set[Path],
+    ) -> None:
+        directory = directory.resolve()
+        if directory in processed:
+            return
+        processed.add(directory)
+
+        try:
+            entries = sorted(
+                directory.iterdir(),
+                key=lambda entry: (not entry.is_dir(), entry.name.lower()),
+            )
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.debug("Failed to enumerate %s: %s", directory, exc)
+            return
+
+        for entry in entries:
+            child = self._find_child(parent_item, entry.name)
+            if child is None:
+                child = QTreeWidgetItem([entry.name])
+                child.setData(0, Qt.UserRole, entry.resolve().as_posix())
+                parent_item.addChild(child)
+            if entry.is_dir():
+                self._populate_directory_contents(child, entry, processed)
 
     def _iter_directories(self, root_path: Path) -> List[str]:
         results: List[str] = []
@@ -617,48 +639,6 @@ class ProjectWorkspace(QWidget):
             return []
         return [job for job in jobs if job.source_path not in self._inflight_sources]
 
-    def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        if self._updating_tree or column != 0:
-            return
-        self._updating_tree = True
-        state = item.checkState(0)
-        # Propagate to children
-        def cascade(target: QTreeWidgetItem, value: Qt.CheckState) -> None:
-            for idx in range(target.childCount()):
-                child = target.child(idx)
-                child.setCheckState(0, value)
-                cascade(child, value)
-
-        cascade(item, state)
-        self._update_parent_checkstate(item.parent())
-        self._updating_tree = False
-
-        selected = self._collect_selected_folders()
-        if self._project_manager:
-            self._project_manager.update_source_state(selected_folders=selected)
-        root_path = self._resolve_source_root()
-        if root_path:
-            self._current_warnings = self._compute_root_warnings(root_path)
-            self._set_root_warning(self._current_warnings)
-
-    def _update_parent_checkstate(self, parent: Optional[QTreeWidgetItem]) -> None:
-        while parent is not None and parent is not self._source_tree.invisibleRootItem():
-            checked = 0
-            unchecked = 0
-            for idx in range(parent.childCount()):
-                state = parent.child(idx).checkState(0)
-                if state == Qt.Checked:
-                    checked += 1
-                elif state == Qt.Unchecked:
-                    unchecked += 1
-            if checked and unchecked:
-                parent.setCheckState(0, Qt.PartiallyChecked)
-            elif checked and not unchecked:
-                parent.setCheckState(0, Qt.Checked)
-            else:
-                parent.setCheckState(0, Qt.Unchecked)
-            parent = parent.parent()
-
     def _set_root_warning(self, warnings: List[str]) -> None:
         if warnings:
             self._root_warning_label.setText("\n".join(warnings))
@@ -674,7 +654,8 @@ class ProjectWorkspace(QWidget):
             warnings.append(
                 "Files in the source root will be skipped. Move them into subfolders so they can be processed."
             )
-        if not self._collect_selected_folders():
+        selected = self._project_manager.source_state.selected_folders if self._project_manager else []
+        if not selected:
             warnings.append("Select at least one folder to include in scanning.")
         return warnings
 
