@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWidgets import QHeaderView
 
 from src.new.core.conversion_manager import ConversionJob, build_conversion_jobs
+from src.new.core.feature_flags import FeatureFlags
 from src.new.core.project_manager import ProjectManager
 from src.new.core.summary_groups import SummaryGroup
 from src.new.dialogs.summary_group_dialog import SummaryGroupDialog
@@ -37,8 +38,15 @@ from src.new.workers import ConversionWorker
 class ProjectWorkspace(QWidget):
     """Dashboard workspace showing documents and summary groups."""
 
-    def __init__(self, project_manager: Optional[ProjectManager] = None, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        project_manager: Optional[ProjectManager] = None,
+        parent: Optional[QWidget] = None,
+        *,
+        feature_flags: Optional[FeatureFlags] = None,
+    ) -> None:
         super().__init__(parent)
+        self._feature_flags = feature_flags or FeatureFlags()
         self._project_manager: Optional[ProjectManager] = None
         self._project_path_label = QLabel()
         self._processed_total = 0
@@ -53,6 +61,12 @@ class ProjectWorkspace(QWidget):
         self._conversion_total = 0
         self._missing_root_prompted = False
         self._running_groups: dict[str, QTimer] = {}
+        self._summary_tab: QWidget | None = None
+        self._summary_table: QTableWidget | None = None
+        self._summary_empty_label: QLabel | None = None
+        self._summary_info_label: QLabel | None = None
+        self._group_source_tree: QTreeWidget | None = None
+        self._progress_tab: QWidget | None = None
 
         self._build_ui()
         if project_manager:
@@ -63,9 +77,14 @@ class ProjectWorkspace(QWidget):
         layout.setContentsMargins(16, 16, 16, 16)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_documents_tab(), "Documents")
-        self._tabs.addTab(self._build_summary_groups_tab(), "Summary Groups")
-        self._tabs.addTab(self._build_placeholder_tab("Progress"), "Progress")
+        self._documents_tab = self._build_documents_tab()
+        self._tabs.addTab(self._documents_tab, "Documents")
+        if self._feature_flags.summary_groups_enabled:
+            self._summary_tab = self._build_summary_groups_tab()
+            self._tabs.addTab(self._summary_tab, "Summary Groups")
+        if self._feature_flags.progress_tab_enabled:
+            self._progress_tab = self._build_placeholder_tab("Progress")
+            self._tabs.addTab(self._progress_tab, "Progress")
 
         layout.addWidget(self._project_path_label)
         layout.addWidget(self._tabs)
@@ -220,12 +239,16 @@ class ProjectWorkspace(QWidget):
         self._update_source_root_label()
         self._update_last_scan_label()
         self._refresh_file_tracker()
-        self._prune_running_groups()
-        self._refresh_summary_groups()
+        if self._feature_flags.summary_groups_enabled:
+            self._prune_running_groups()
+            self._refresh_summary_groups()
+        else:
+            self._running_groups.clear()
 
     def begin_initial_conversion(self) -> None:
         """Trigger an initial scan/conversion after project creation."""
-        self._trigger_conversion(auto_run=True)
+        if self._feature_flags.auto_run_conversion_on_create:
+            self._trigger_conversion(auto_run=True)
 
     def _refresh_file_tracker(self) -> None:
         if not self._project_manager:
@@ -439,7 +462,8 @@ class ProjectWorkspace(QWidget):
         if self._project_manager:
             self._project_manager.update_source_state(warnings=self._current_warnings)
         self._update_source_root_label()
-        self._populate_group_source_tree()
+        if self._feature_flags.summary_groups_enabled:
+            self._populate_group_source_tree()
 
     def _iter_directories(self, root_path: Path) -> List[str]:
         results: List[str] = []
@@ -453,7 +477,7 @@ class ProjectWorkspace(QWidget):
         return results
 
     def _populate_group_source_tree(self) -> None:
-        if not hasattr(self, "_group_source_tree"):
+        if not self._feature_flags.summary_groups_enabled or self._group_source_tree is None:
             return
         self._group_source_tree.clear()
 
@@ -668,6 +692,10 @@ class ProjectWorkspace(QWidget):
             )
 
     def _refresh_summary_groups(self) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
+        if not self._summary_table or not self._summary_empty_label or not self._summary_info_label:
+            return
         if not self._project_manager:
             self._summary_table.setRowCount(0)
             self._summary_empty_label.show()
@@ -691,6 +719,10 @@ class ProjectWorkspace(QWidget):
             self._populate_group_row(row, group, total_docs)
 
     def _populate_group_row(self, row: int, group: SummaryGroup, total_docs: int) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
+        if not self._summary_table:
+            return
         description = group.description or ""
         name_item = QTableWidgetItem(group.name)
         name_item.setToolTip(description)
@@ -752,6 +784,8 @@ class ProjectWorkspace(QWidget):
             status_item.setToolTip("\n".join(tooltip_parts))
 
     def _show_create_group_dialog(self) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
         if not self._project_manager or not self._project_manager.project_dir:
             return
         dialog = SummaryGroupDialog(self._project_manager.project_dir, self)
@@ -765,6 +799,8 @@ class ProjectWorkspace(QWidget):
                 self.refresh()
 
     def _confirm_delete_group(self, group: SummaryGroup) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
         if not self._project_manager:
             return
         message = (
@@ -786,6 +822,8 @@ class ProjectWorkspace(QWidget):
                 self.refresh()
 
     def _open_group_folder(self, group: SummaryGroup) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
         if not self._project_manager or not self._project_manager.project_dir:
             return
         folder = self._project_manager.project_dir / "summaries" / group.folder_name
@@ -793,6 +831,8 @@ class ProjectWorkspace(QWidget):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def _start_group_run(self, group: SummaryGroup) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
         if group.group_id in self._running_groups:
             QMessageBox.information(
                 self,
@@ -815,10 +855,13 @@ class ProjectWorkspace(QWidget):
         timer.timeout.connect(lambda gid=group.group_id: self._on_group_run_finished(gid))
         timer.start(2000)
         self._running_groups[group.group_id] = timer
-        self._summary_info_label.setText("Running bulk analysis…")
+        if self._summary_info_label:
+            self._summary_info_label.setText("Running bulk analysis…")
         self._refresh_summary_groups()
 
     def _cancel_group_run(self, group: SummaryGroup) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
         timer = self._running_groups.pop(group.group_id, None)
         if timer:
             timer.stop()
@@ -826,6 +869,8 @@ class ProjectWorkspace(QWidget):
         self._refresh_summary_groups()
 
     def _on_group_run_finished(self, group_id: str) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
         timer = self._running_groups.pop(group_id, None)
         if timer:
             timer.deleteLater()
@@ -833,6 +878,8 @@ class ProjectWorkspace(QWidget):
         self._refresh_summary_groups()
 
     def _resolve_group_files(self, group: SummaryGroup) -> set[str]:
+        if not self._feature_flags.summary_groups_enabled:
+            return set()
         converted = set()
         if self._latest_snapshot:
             converted = set(self._latest_snapshot.files.get("imported", []))
@@ -854,6 +901,8 @@ class ProjectWorkspace(QWidget):
         return selected
 
     def _prune_running_groups(self, valid_ids: Optional[set[str]] = None) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
         if valid_ids is None:
             valid_ids = set()
             if self._project_manager:

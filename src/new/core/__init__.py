@@ -6,6 +6,7 @@ from .secure_settings import SecureSettings
 from .project_manager import ProjectManager, ProjectMetadata, ProjectCosts, WorkflowState
 from .workspace_controller import WorkspaceController
 from .summary_groups import SummaryGroup
+from .feature_flags import FeatureFlags
 
 __all__ = [
     'SecureSettings',
@@ -14,5 +15,6 @@ __all__ = [
     'ProjectCosts',
     'WorkflowState',
     'WorkspaceController',
-    'SummaryGroup'
+    'SummaryGroup',
+    'FeatureFlags'
 ]

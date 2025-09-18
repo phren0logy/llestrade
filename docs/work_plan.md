@@ -28,7 +28,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Introduce a `WorkspaceController` (or equivalent) that can manage tabbed dashboards
 - [x] Redesign `main_new.py` to host the dashboard shell (sidebar + tabbed workspace)
   - [x] Preserve welcome-screen entry, but swap the stacked wizard for a minimal tab scaffold (welcome + empty workspace)
-  - [ ] Add temporary feature flag handling so current flows continue to launch
+  - [x] Add temporary feature flag handling so current flows continue to launch
 - [x] Stub out `src/new/stages/project_workspace.py` with placeholder tabs to unblock downstream work
 
 #### Legacy UI Reference (Captured 2025-03-11)

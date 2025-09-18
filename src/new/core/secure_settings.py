@@ -56,7 +56,10 @@ class SecureSettings(QObject):
         if self.settings_path.exists():
             try:
                 with open(self.settings_path, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        data.setdefault("feature_flags", {})
+                    return data
             except Exception as e:
                 self.logger.error(f"Error loading settings: {e}")
         return self._get_default_settings()
@@ -86,7 +89,8 @@ class SecureSettings(QObject):
             "show_welcome_screen": True,
             "check_for_updates": True,
             "telemetry_enabled": False,
-            "debug_mode": False
+            "debug_mode": False,
+            "feature_flags": {},
         }
     
     # API Key Management (Secure)

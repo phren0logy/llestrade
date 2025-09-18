@@ -27,7 +27,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.config.logging_config import setup_logging
 from src.config.startup_config import configure_startup_logging
 from src.config.observability import setup_observability
-from src.new.core import SecureSettings, ProjectManager, ProjectMetadata, WorkspaceController
+from src.new.core import (
+    FeatureFlags,
+    ProjectManager,
+    ProjectMetadata,
+    SecureSettings,
+    WorkspaceController,
+)
 from src.new.dialogs import NewProjectDialog
 from src.new.stages.welcome_stage import WelcomeStage
 
@@ -41,8 +47,9 @@ class SimplifiedMainWindow(QMainWindow):
 
         # Core components
         self.settings = SecureSettings()
+        self.feature_flags = FeatureFlags.from_settings(self.settings)
         self.project_manager: ProjectManager | None = None
-        self.workspace_controller = WorkspaceController(self)
+        self.workspace_controller = WorkspaceController(self, feature_flags=self.feature_flags)
         self.workspace_controller.workspace_created.connect(self._on_workspace_created)
 
         # Runtime state
