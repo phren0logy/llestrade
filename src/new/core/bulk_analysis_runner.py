@@ -200,14 +200,31 @@ def _safe_format(template: str, context: Dict[str, object]) -> str:
 def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:
     if not path_str:
         return ""
-    candidate = Path(path_str)
-    if not candidate.is_absolute():
-        candidate = project_dir / candidate
-    try:
-        return candidate.read_text(encoding="utf-8")
-    except Exception as exc:  # pragma: no cover - defensive logging
-        LOGGER.warning("Failed to load prompt file %s: %s", candidate, exc)
-        return ""
+    candidate = Path(path_str).expanduser()
+    search_paths: List[Path] = []
+    if candidate.is_absolute():
+        search_paths.append(candidate)
+    else:
+        if project_dir:
+            search_paths.append((project_dir / candidate).resolve())
+        repo_root = Path(__file__).resolve().parents[3]
+        search_paths.append((repo_root / candidate).resolve())
+
+    seen: set[Path] = set()
+    for path in search_paths:
+        if path in seen:
+            continue
+        seen.add(path)
+        try:
+            return path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            continue
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.warning("Failed to load prompt file %s: %s", path, exc)
+            return ""
+
+    LOGGER.warning("Prompt file %s not found in project or application templates", path_str)
+    return ""
 
 
 def _metadata_context(metadata: Optional[ProjectMetadata]) -> Dict[str, str]:

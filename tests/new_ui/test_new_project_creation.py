@@ -13,6 +13,7 @@ _ = PySide6
 from src.new.core.conversion_manager import ConversionJob
 from src.new.core.project_manager import ProjectManager, ProjectMetadata
 from src.new.dialogs.new_project_dialog import NewProjectDialog
+from src.new.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.new.dialogs.summary_group_dialog import SummaryGroupDialog
 from src.new.workers.conversion_worker import ConversionWorker
 from src.new.core.file_tracker import FileTracker
@@ -39,6 +40,9 @@ def test_new_project_dialog_collects_helper_and_preview(tmp_path: Path, qt_app: 
 
     dialog = NewProjectDialog()
     dialog._project_name_edit.setText("Case Name")
+    dialog._subject_name_edit.setText("Jane Doe")
+    dialog._dob_edit.setText("1975-08-19")
+    dialog._case_info_edit.setPlainText("Referral for competency evaluation")
     dialog._source_root = source_root
     dialog._source_line.setText(source_root.as_posix())
     dialog._populate_tree()
@@ -54,6 +58,9 @@ def test_new_project_dialog_collects_helper_and_preview(tmp_path: Path, qt_app: 
     dialog._on_accept()
     config = dialog.result_config()
     assert config is not None
+    assert config.subject_name == "Jane Doe"
+    assert config.date_of_birth == "1975-08-19"
+    assert config.case_description == "Referral for competency evaluation"
     assert config.conversion_helper == "azure_di"
     assert config.conversion_options == {}
     assert config.output_base == output_base
@@ -174,7 +181,15 @@ def test_workspace_prompts_for_missing_source(monkeypatch: pytest.MonkeyPatch, t
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
     manager = ProjectManager()
-    manager.create_project(projects_root, ProjectMetadata(case_name="Missing Source"))
+    manager.create_project(
+        projects_root,
+        ProjectMetadata(
+            case_name="Missing Source",
+            subject_name="Alex Parker",
+            date_of_birth="1981-02-14",
+            case_description="Guardianship evaluation",
+        ),
+    )
 
     missing_root = tmp_path / "external_source"
     manager.update_source_state(root=missing_root.as_posix(), selected_folders=[], warnings=[])
@@ -193,6 +208,11 @@ def test_workspace_prompts_for_missing_source(monkeypatch: pytest.MonkeyPatch, t
     assert prompt_called["count"] == 1
     assert manager.source_state.warnings
     assert "Source folder" in manager.source_state.warnings[0]
+    assert workspace._metadata_label is not None
+    metadata_text = workspace._metadata_label.text()
+    assert "Alex Parker" in metadata_text
+    assert "1981-02-14" in metadata_text
+    workspace.deleteLater()
 
 
 def test_summary_group_dialog_lists_converted_documents(tmp_path: Path, qt_app: QApplication) -> None:
@@ -217,3 +237,25 @@ def test_summary_group_dialog_lists_converted_documents(tmp_path: Path, qt_app: 
         assert "doc.md" in child_names
     finally:
         dialog.deleteLater()
+
+
+def test_project_metadata_dialog_updates_fields(qt_app: QApplication) -> None:
+    assert qt_app is not None
+    original = ProjectMetadata(
+        case_name="Sample Case",
+        subject_name="Initial Subject",
+        date_of_birth="1990-05-10",
+        case_description="Initial description",
+    )
+
+    dialog = ProjectMetadataDialog(original)
+    dialog._subject_edit.setText("Updated Subject")
+    dialog._dob_edit.setText("1991-06-11")
+    dialog._case_info_edit.setPlainText("Updated details")
+
+    result = dialog.result_metadata()
+    assert result.subject_name == "Updated Subject"
+    assert result.date_of_birth == "1991-06-11"
+    assert result.case_description == "Updated details"
+
+    dialog.deleteLater()

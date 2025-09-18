@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QCheckBox,
+    QPlainTextEdit,
     QSizePolicy,
     QTreeWidget,
     QTreeWidgetItem,
@@ -39,6 +40,9 @@ def _available_helpers() -> List[ConversionHelper]:
 @dataclass(frozen=True)
 class NewProjectConfig:
     name: str
+    subject_name: str
+    date_of_birth: str
+    case_description: str
     source_root: Path
     selected_folders: List[str]
     output_base: Path
@@ -55,6 +59,13 @@ class NewProjectDialog(QDialog):
         self.resize(640, 520)
 
         self._project_name_edit = QLineEdit()
+        self._subject_name_edit = QLineEdit()
+        self._subject_name_edit.setPlaceholderText("e.g., Jane Doe")
+        self._dob_edit = QLineEdit()
+        self._dob_edit.setPlaceholderText("e.g., 1975-08-19")
+        self._case_info_edit = QPlainTextEdit()
+        self._case_info_edit.setPlaceholderText("Key case context, referral questions, etc.")
+        self._case_info_edit.setFixedHeight(80)
         self._source_line = QLineEdit()
         self._source_line.setReadOnly(True)
         self._output_line = QLineEdit()
@@ -111,6 +122,10 @@ class NewProjectDialog(QDialog):
         form.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
 
         form.addRow("Project name:", self._project_name_edit)
+
+        form.addRow("Subject name:", self._subject_name_edit)
+        form.addRow("Subject DOB:", self._dob_edit)
+        form.addRow("Case info:", self._case_info_edit)
 
         source_row = QHBoxLayout()
         source_row.addWidget(self._source_line)
@@ -421,6 +436,9 @@ class NewProjectDialog(QDialog):
 
         config = NewProjectConfig(
             name=name,
+            subject_name=self._subject_name_edit.text().strip(),
+            date_of_birth=self._dob_edit.text().strip(),
+            case_description=self._case_info_edit.toPlainText().strip(),
             source_root=self._source_root,
             selected_folders=list(self._selected_folders),
             output_base=self._output_base,

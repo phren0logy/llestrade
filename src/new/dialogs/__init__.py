@@ -3,6 +3,7 @@ Dialogs for the new UI.
 """
 
 from .new_project_dialog import NewProjectDialog, NewProjectConfig
+from .project_metadata_dialog import ProjectMetadataDialog
 from .settings_dialog import SettingsDialog
 from .summary_group_dialog import SummaryGroupDialog
 
@@ -11,4 +12,5 @@ __all__ = [
     'SummaryGroupDialog',
     'NewProjectDialog',
     'NewProjectConfig',
+    'ProjectMetadataDialog',
 ]

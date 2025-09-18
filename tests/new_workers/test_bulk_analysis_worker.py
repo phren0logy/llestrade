@@ -64,6 +64,8 @@ def test_bulk_analysis_worker_writes_output(tmp_path: Path, qt_app: QApplication
 
     group = SummaryGroup.create(name="Example", files=["doc.md"])
     group.slug = "example-group"
+    group.system_prompt_path = "prompt_templates/document_analysis_system_prompt.md"
+    group.user_prompt_path = "prompt_templates/document_summary_prompt.md"
 
     metadata = ProjectMetadata(
         case_name="Case",

@@ -138,6 +138,18 @@ class WelcomeStage(QWidget):
         case_label.setStyleSheet("color: #666; font-size: 11px;")
         layout.addWidget(case_label)
 
+        subject_name = metadata.get("subject_name")
+        if subject_name:
+            subject_label = QLabel(f"Subject: {subject_name}")
+            subject_label.setStyleSheet("color: #666; font-size: 11px;")
+            layout.addWidget(subject_label)
+
+        dob = metadata.get("date_of_birth")
+        if dob:
+            dob_label = QLabel(f"DOB: {dob}")
+            dob_label.setStyleSheet("color: #666; font-size: 11px;")
+            layout.addWidget(dob_label)
+
         last_modified = project_info.get("last_modified")
         if last_modified:
             try:

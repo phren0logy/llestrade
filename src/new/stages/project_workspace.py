@@ -32,6 +32,7 @@ from src.new.core.conversion_manager import ConversionJob, build_conversion_jobs
 from src.new.core.feature_flags import FeatureFlags
 from src.new.core.project_manager import ProjectManager
 from src.new.core.summary_groups import SummaryGroup
+from src.new.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.new.dialogs.summary_group_dialog import SummaryGroupDialog
 from src.new.workers import BulkAnalysisWorker, ConversionWorker
 
@@ -52,6 +53,8 @@ class ProjectWorkspace(QWidget):
         self._feature_flags = feature_flags or FeatureFlags()
         self._project_manager: Optional[ProjectManager] = None
         self._project_path_label = QLabel()
+        self._metadata_label: QLabel | None = None
+        self._edit_metadata_button: QPushButton | None = None
         self._processed_total = 0
         self._imported_total = 0
         self._latest_snapshot = None
@@ -93,6 +96,17 @@ class ProjectWorkspace(QWidget):
             self._tabs.addTab(self._progress_tab, "Progress")
 
         layout.addWidget(self._project_path_label)
+        metadata_row = QHBoxLayout()
+        metadata_row.setContentsMargins(0, 0, 0, 0)
+        self._metadata_label = QLabel("Subject: — | DOB: —")
+        self._metadata_label.setStyleSheet("color: #555;")
+        metadata_row.addWidget(self._metadata_label)
+        metadata_row.addStretch()
+        self._edit_metadata_button = QPushButton("Edit Project Info…")
+        self._edit_metadata_button.setEnabled(False)
+        self._edit_metadata_button.clicked.connect(self._edit_project_metadata)
+        metadata_row.addWidget(self._edit_metadata_button)
+        layout.addLayout(metadata_row)
         layout.addWidget(self._tabs)
 
     def _build_documents_tab(self) -> QWidget:
@@ -232,6 +246,9 @@ class ProjectWorkspace(QWidget):
         self._project_path_label.setText(
             f"Active project: {project_path}" if project_path else "Active project: (unsaved)"
         )
+        if self._edit_metadata_button:
+            self._edit_metadata_button.setEnabled(True)
+        self._update_metadata_label()
         self._populate_source_tree()
         self._update_source_root_label()
         self._update_last_scan_label()
@@ -250,6 +267,38 @@ class ProjectWorkspace(QWidget):
             self._refresh_summary_groups()
         else:
             self._running_groups.clear()
+        self._update_metadata_label()
+
+    def _update_metadata_label(self) -> None:
+        if not self._metadata_label:
+            return
+        metadata = self._project_manager.metadata if self._project_manager else None
+        if not metadata:
+            self._metadata_label.setText("Subject: — | DOB: —")
+            return
+
+        subject = metadata.subject_name.strip() if metadata.subject_name else "—"
+        dob = metadata.date_of_birth.strip() if metadata.date_of_birth else "—"
+        parts = [f"Subject: {subject}", f"DOB: {dob}"]
+        if metadata.case_description:
+            first_line = metadata.case_description.strip().splitlines()[0]
+            if len(first_line) > 80:
+                first_line = first_line[:77] + "…"
+            parts.append(f"Case info: {first_line}")
+        self._metadata_label.setText(" | ".join(parts))
+
+    def _edit_project_metadata(self) -> None:
+        if not self._project_manager:
+            return
+
+        dialog = ProjectMetadataDialog(self._project_manager.metadata, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        updated = dialog.result_metadata()
+        self._project_manager.update_metadata(metadata=updated)
+        self._project_manager.save_project()
+        self._update_metadata_label()
 
     def begin_initial_conversion(self) -> None:
         """Trigger an initial scan/conversion after project creation."""

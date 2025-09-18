@@ -170,7 +170,12 @@ class SimplifiedMainWindow(QMainWindow):
 
         try:
             project_manager = ProjectManager()
-            metadata = ProjectMetadata(case_name=config.name.strip())
+            metadata = ProjectMetadata(
+                case_name=config.name.strip(),
+                subject_name=config.subject_name,
+                date_of_birth=config.date_of_birth,
+                case_description=config.case_description,
+            )
             project_manager.create_project(config.output_base, metadata)
             project_manager.update_conversion_helper(
                 config.conversion_helper,
