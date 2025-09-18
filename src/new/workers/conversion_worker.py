@@ -102,8 +102,11 @@ class ConversionWorker(QObject, QRunnable):
         endpoint, key = self._azure_credentials()
         output_dir = job.destination_path.parent
         output_dir.mkdir(parents=True, exist_ok=True)
-        json_dir = output_dir / ".azure-di"
-        json_dir.mkdir(parents=True, exist_ok=True)
+        # NOTE: Azure DI JSON export is temporarily disabled. Keep this block commented so we can
+        #       restore the raw output if downstream tooling needs it again.
+        # json_dir = output_dir / ".azure-di"
+        # json_dir.mkdir(parents=True, exist_ok=True)
+        json_dir = None
 
         json_path, markdown_path = self._process_with_azure(
             job.source_path,
@@ -119,7 +122,8 @@ class ConversionWorker(QObject, QRunnable):
                 job.destination_path.unlink()
             produced.rename(job.destination_path)
 
-        LOGGER.debug("Azure DI JSON saved to %s", json_path)
+        if json_path:
+            LOGGER.debug("Azure DI JSON saved to %s", json_path)
 
     def _azure_credentials(self) -> tuple[str, str]:
         settings = SecureSettings()
@@ -151,7 +155,7 @@ class ConversionWorker(QObject, QRunnable):
         return process_pdf_with_azure(
             str(source_path),
             str(output_dir),
-            str(json_dir),
+            str(json_dir) if json_dir is not None else None,
             str(output_dir),
             endpoint,
             key,

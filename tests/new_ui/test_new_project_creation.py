@@ -85,12 +85,10 @@ def test_conversion_worker_uses_azure_when_configured(monkeypatch: pytest.Monkey
     produced_json = job.destination_path.parent / ".azure-di" / "sample.json"
 
     def fake_process(_self, source_path, output_dir, json_dir, endpoint, key):
-        json_dir.mkdir(parents=True, exist_ok=True)
+        assert json_dir is None
         produced_markdown.parent.mkdir(parents=True, exist_ok=True)
         produced_markdown.write_text("azure output")
-        produced_json.parent.mkdir(parents=True, exist_ok=True)
-        produced_json.write_text("{}")
-        return str(produced_json), str(produced_markdown)
+        return None, str(produced_markdown)
 
     class StubSettings:
         def __init__(self) -> None:
@@ -116,7 +114,7 @@ def test_conversion_worker_uses_azure_when_configured(monkeypatch: pytest.Monkey
     worker._convert_pdf_with_azure(job)
 
     assert job.destination_path.read_text() == "azure output"
-    assert produced_json.exists()
+    assert not produced_json.exists()
 
 
 def test_conversion_worker_raises_without_azure_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

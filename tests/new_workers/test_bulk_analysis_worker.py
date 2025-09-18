@@ -92,6 +92,6 @@ def test_bulk_analysis_worker_writes_output(tmp_path: Path, qt_app: QApplication
     worker.run()
 
     assert finished_events == [(1, 0)]
-    output_path = tmp_path / "bulk_analysis" / group.folder_name / "outputs" / "doc_analysis.md"
+    output_path = tmp_path / "bulk_analysis" / group.folder_name / "doc_analysis.md"
     assert output_path.exists()
     assert "Generated summary" in output_path.read_text(encoding="utf-8")

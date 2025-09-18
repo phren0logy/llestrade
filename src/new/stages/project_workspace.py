@@ -68,6 +68,7 @@ class ProjectWorkspace(QWidget):
         self._running_groups: Dict[str, BulkAnalysisWorker] = {}
         self._bulk_progress: Dict[str, tuple[int, int]] = {}
         self._bulk_failures: Dict[str, List[str]] = {}
+        self._cancelling_groups: set[str] = set()
         self._summary_tab: QWidget | None = None
         self._summary_table: QTableWidget | None = None
         self._summary_empty_label: QLabel | None = None
@@ -792,11 +793,14 @@ class ProjectWorkspace(QWidget):
         self._summary_table.setItem(row, 2, updated_item)
 
         if group.group_id in self._running_groups:
-            progress = self._bulk_progress.get(group.group_id)
-            if progress and progress[1]:
-                status_text = f"Running ({progress[0]}/{progress[1]})"
+            if group.group_id in self._cancelling_groups:
+                status_text = "Cancelling…"
             else:
-                status_text = "Running…"
+                progress = self._bulk_progress.get(group.group_id)
+                if progress and progress[1]:
+                    status_text = f"Running ({progress[0]}/{progress[1]})"
+                else:
+                    status_text = "Running…"
         else:
             status_text = "Ready" if files_count else "No converted files"
         status_item = QTableWidgetItem(status_text)
@@ -931,6 +935,7 @@ class ProjectWorkspace(QWidget):
         self._running_groups[group.group_id] = worker
         self._bulk_progress[group.group_id] = (0, len(files))
         self._bulk_failures[group.group_id] = []
+        self._cancelling_groups.discard(group.group_id)
         if self._summary_info_label:
             self._summary_info_label.setText("Running bulk analysis…")
         self._refresh_summary_groups()
@@ -939,17 +944,23 @@ class ProjectWorkspace(QWidget):
     def _cancel_group_run(self, group: SummaryGroup) -> None:
         if not self._feature_flags.summary_groups_enabled:
             return
-        worker = self._running_groups.pop(group.group_id, None)
+        worker = self._running_groups.get(group.group_id)
         if worker:
             worker.cancel()
-            worker.deleteLater()
-        self._bulk_progress.pop(group.group_id, None)
-        self._bulk_failures.pop(group.group_id, None)
-        if self._summary_info_label:
-            self._summary_info_label.setText("Bulk analysis cancelled.")
+            self._cancelling_groups.add(group.group_id)
+            if self._summary_info_label:
+                self._summary_info_label.setText("Cancelling bulk analysis…")
+        else:
+            self._bulk_progress.pop(group.group_id, None)
+            self._bulk_failures.pop(group.group_id, None)
+            self._cancelling_groups.discard(group.group_id)
+            if self._summary_info_label:
+                self._summary_info_label.setText("Bulk analysis cancelled.")
         self._refresh_summary_groups()
 
     def _on_bulk_progress(self, group_id: str, completed: int, total: int, relative_path: str) -> None:
+        if group_id in self._cancelling_groups:
+            return
         self._bulk_progress[group_id] = (completed, total)
         if self._summary_info_label:
             self._summary_info_label.setText(
@@ -970,9 +981,14 @@ class ProjectWorkspace(QWidget):
             worker.deleteLater()
         self._bulk_progress.pop(group_id, None)
         errors = self._bulk_failures.pop(group_id, [])
+        was_cancelled = group_id in self._cancelling_groups
+        if was_cancelled:
+            self._cancelling_groups.discard(group_id)
 
         if self._summary_info_label:
-            if failures:
+            if was_cancelled:
+                self._summary_info_label.setText("Bulk analysis cancelled.")
+            elif failures:
                 self._summary_info_label.setText(
                     f"Bulk analysis completed with {failures} error(s)."
                 )
@@ -1030,3 +1046,4 @@ class ProjectWorkspace(QWidget):
                 worker.deleteLater()
             self._bulk_progress.pop(gid, None)
             self._bulk_failures.pop(gid, None)
+            self._cancelling_groups.discard(gid)

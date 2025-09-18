@@ -45,7 +45,7 @@ def prepare_documents(
     """Resolve bulk-analysis documents and their output paths."""
 
     converted_root = project_dir / "converted_documents"
-    outputs_root = project_dir / "bulk_analysis" / group.folder_name / "outputs"
+    group_root = project_dir / "bulk_analysis" / group.folder_name
     documents: List[BulkAnalysisDocument] = []
 
     for relative in selected_files:
@@ -56,7 +56,7 @@ def prepare_documents(
 
         output_relative = Path(relative).with_suffix("")
         output_filename = f"{output_relative.name}_analysis.md"
-        output_path = outputs_root / output_relative.parent / output_filename
+        output_path = group_root / output_relative.parent / output_filename
         documents.append(
             BulkAnalysisDocument(
                 source_path=source_path,

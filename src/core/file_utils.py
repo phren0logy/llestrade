@@ -215,7 +215,11 @@ def process_docx_to_markdown(docx_path: str, output_dir: str) -> str:
         logging.warning("pypandoc not available, using basic text extraction")
         try:
             from docx import Document
-            
+
+            docx_path = Path(docx_path)
+            output_dir = Path(output_dir)
+            output_dir.mkdir(exist_ok=True)
+
             doc = Document(str(docx_path))
             
             # Extract text from paragraphs
