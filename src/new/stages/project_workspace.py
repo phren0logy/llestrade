@@ -254,37 +254,41 @@ class ProjectWorkspace(QWidget):
         if not self._project_manager:
             return
         try:
+            metrics = self._project_manager.get_dashboard_metrics(refresh=True)
             tracker = self._project_manager.get_file_tracker()
-            snapshot = tracker.scan()
-            self._latest_snapshot = snapshot
-            self._imported_total = snapshot.imported_count
-            self._processed_total = snapshot.processed_count
+            snapshot = tracker.snapshot
         except Exception as exc:
             self._counts_label.setText("Scan failed")
             self._missing_processed_label.setText(str(exc))
             self._missing_summaries_label.setText("")
             return
 
-        imported = snapshot.imported_count
-        processed = snapshot.processed_count
-        summaries = snapshot.summaries_count
+        if snapshot is None:
+            snapshot = self._project_manager.get_file_tracker().load()
 
-        if imported:
+        self._latest_snapshot = snapshot
+        self._imported_total = metrics.imported_total
+        self._processed_total = metrics.processed_total
+
+        if metrics.imported_total:
             counts_text = (
-                f"Imported: {imported} | "
-                f"Processed: {processed} of {imported} | "
-                f"Summaries: {summaries} of {imported}"
+                f"Converted: {metrics.imported_total} | "
+                f"Processed: {metrics.processed_total} of {metrics.imported_total} | "
+                f"Summaries: {metrics.summaries_total} of {metrics.imported_total}"
             )
         else:
             counts_text = (
-                f"Imported: {imported} | "
-                f"Processed: {processed} | "
-                f"Summaries: {summaries}"
+                "Converted: 0 | "
+                f"Processed: {metrics.processed_total} | "
+                f"Summaries: {metrics.summaries_total}"
             )
         self._counts_label.setText(counts_text)
 
-        processed_missing = snapshot.missing.get("processed_missing", [])
-        summaries_missing = snapshot.missing.get("summaries_missing", [])
+        processed_missing = []
+        summaries_missing = []
+        if snapshot:
+            processed_missing = snapshot.missing.get("processed_missing", [])
+            summaries_missing = snapshot.missing.get("summaries_missing", [])
 
         self._missing_processed_label.setText(
             "Processed missing: " + (", ".join(processed_missing) if processed_missing else "None")
@@ -292,6 +296,8 @@ class ProjectWorkspace(QWidget):
         self._missing_summaries_label.setText(
             "Summaries missing: " + (", ".join(summaries_missing) if summaries_missing else "None")
         )
+
+        self._update_last_scan_label()
 
     # ------------------------------------------------------------------
     # Source tree helpers
@@ -381,14 +387,20 @@ class ProjectWorkspace(QWidget):
         if not self._project_manager:
             self._last_scan_label.setText("")
             return
-        last_scan = self._project_manager.source_state.last_scan
+        metrics = self._project_manager.dashboard_metrics
+        last_scan = metrics.last_scan if metrics else None
+        if not last_scan and self._project_manager.source_state.last_scan:
+            try:
+                last_scan = datetime.fromisoformat(self._project_manager.source_state.last_scan)
+            except ValueError:
+                last_scan = self._project_manager.source_state.last_scan
+
         if not last_scan:
             self._last_scan_label.setText("Last scan: never")
             return
-        try:
-            parsed = datetime.fromisoformat(last_scan)
-            display = parsed.strftime("Last scan: %Y-%m-%d %H:%M")
-        except ValueError:
+        if isinstance(last_scan, datetime):
+            display = last_scan.strftime("Last scan: %Y-%m-%d %H:%M")
+        else:
             display = f"Last scan: {last_scan}"
         self._last_scan_label.setText(display)
 

@@ -238,6 +238,10 @@ class WelcomeStage(QWidget):
     # Project helpers
     # ------------------------------------------------------------------
     def _project_stats_text(self, project_path: Path) -> str:
+        metrics_text = self._metrics_text(project_path)
+        if metrics_text:
+            return metrics_text
+
         if not project_path.exists():
             return "Project file not found."
         project_dir = project_path.parent
@@ -252,6 +256,58 @@ class WelcomeStage(QWidget):
                 f"Summaries {summaries}/{converted}"
             )
         return "No converted documents yet."
+
+    def _metrics_text(self, project_path: Path) -> str:
+        project_file = project_path
+        if project_file.is_dir():
+            project_file = project_file / "project.frpd"
+        elif project_file.suffix != ProjectManager.PROJECT_EXTENSION:
+            project_file = project_file / "project.frpd"
+
+        if not project_file.exists():
+            return ""
+
+        try:
+            data = json.loads(project_file.read_text())
+        except Exception:
+            return ""
+
+        metrics = data.get("dashboard_metrics")
+        if not isinstance(metrics, dict):
+            return ""
+
+        converted = int(metrics.get("imported_total", 0))
+        processed = int(metrics.get("processed_total", 0))
+        summaries = int(metrics.get("summaries_total", 0))
+        pending = int(metrics.get("pending_processing", 0))
+        pending_summaries = int(metrics.get("pending_summaries", 0))
+
+        if converted:
+            text = (
+                f"Converted {converted} | Processed {processed}/{converted}"
+                f" | Summaries {summaries}/{converted}"
+            )
+        else:
+            text = "No converted documents yet."
+
+        if pending or pending_summaries:
+            details: List[str] = []
+            if pending:
+                details.append(f"{pending} awaiting processing")
+            if pending_summaries:
+                details.append(f"{pending_summaries} awaiting summaries")
+            text += " (" + ", ".join(details) + ")"
+
+        last_scan = metrics.get("last_scan")
+        if isinstance(last_scan, str) and last_scan:
+            try:
+                parsed = datetime.fromisoformat(last_scan)
+                formatted = parsed.strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                formatted = last_scan
+            text += f" - Last scan {formatted}"
+
+        return text
 
     def _open_project_path(self, project_path: Path) -> None:
         if project_path.exists():

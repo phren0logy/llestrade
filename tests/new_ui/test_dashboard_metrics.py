@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 _ = PySide6
 
 from src.new.core.project_manager import ProjectManager, ProjectMetadata
+from src.new.stages.welcome_stage import WelcomeStage
 
 
 @pytest.fixture(scope="module")
@@ -84,3 +85,25 @@ def test_dashboard_metrics_persist_across_project_reload(tmp_path: Path, qt_app:
     cached_metrics = reloaded.get_dashboard_metrics()
     assert cached_metrics == reloaded.dashboard_metrics
     assert cached_metrics.imported_total == 1
+
+
+def test_welcome_stage_uses_persisted_metrics(tmp_path: Path, qt_app: QApplication) -> None:
+    assert qt_app is not None
+    manager = ProjectManager()
+    project_path = manager.create_project(tmp_path, ProjectMetadata(case_name="Welcome Metrics"))
+
+    converted = manager.project_dir / "converted_documents"
+    converted.mkdir(exist_ok=True)
+    (converted / "doc.md").write_text("data")
+
+    manager.get_dashboard_metrics(refresh=True)
+    manager.save_project()
+
+    stage = WelcomeStage()
+    try:
+        stats_text = stage._project_stats_text(manager.project_path)
+    finally:
+        stage.deleteLater()
+
+    assert "Converted 1" in stats_text
+    assert "Processed" in stats_text
