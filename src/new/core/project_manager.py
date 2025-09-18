@@ -608,8 +608,7 @@ class ProjectManager(QObject):
 
     def update_conversion_helper(self, helper: str, **options: Any) -> None:
         self.conversion_settings.helper = helper
-        if options:
-            self.conversion_settings.options.update(options)
+        self.conversion_settings.options = dict(options)
         self.mark_modified()
 
     def update_dashboard_state(self, **kwargs: Any) -> None:

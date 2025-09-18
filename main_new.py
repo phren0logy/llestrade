@@ -164,6 +164,10 @@ class SimplifiedMainWindow(QMainWindow):
             project_manager = ProjectManager()
             metadata = ProjectMetadata(case_name=config.name.strip())
             project_manager.create_project(config.output_base, metadata)
+            project_manager.update_conversion_helper(
+                config.conversion_helper,
+                **config.conversion_options,
+            )
         except Exception as exc:  # pragma: no cover - UI feedback
             self.logger.exception("Failed to create project")
             QMessageBox.critical(self, "Project Creation Failed", str(exc))

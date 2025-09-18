@@ -106,7 +106,9 @@ class FileTracker:
 
     def scan(self) -> FileTrackerSnapshot:
         """Walk the project directories and generate a fresh snapshot."""
-        imported = self._gather_files("imported_documents")
+        imported = self._gather_files("converted_documents")
+        if not imported:
+            imported = self._gather_files("imported_documents")
         processed = self._gather_files("processed_documents")
         summaries = self._gather_files("summaries")
 

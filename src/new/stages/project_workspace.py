@@ -51,6 +51,7 @@ class ProjectWorkspace(QWidget):
         self._inflight_sources: set[Path] = set()
         self._conversion_running = False
         self._conversion_total = 0
+        self._missing_root_prompted = False
 
         self._build_ui()
         if project_manager:
@@ -286,10 +287,33 @@ class ProjectWorkspace(QWidget):
             return
         chosen_path = Path(chosen)
         relative = self._to_project_relative(chosen_path)
-        self._project_manager.update_source_state(root=relative, selected_folders=[], warnings=[])
+        self._project_manager.update_source_state(
+            root=relative,
+            selected_folders=[],
+            warnings=[],
+        )
         self._populate_source_tree()
         self._update_source_root_label()
         self._update_last_scan_label()
+        self._set_root_warning([])
+
+    def _prompt_reselect_source_root(self) -> None:
+        if not self._project_manager:
+            return
+        root_spec = self._project_manager.source_state.root
+        if not root_spec:
+            return
+        response = QMessageBox.question(
+            self,
+            "Source Folder Missing",
+            "The previously selected source folder cannot be found.\n"
+            "Do you want to locate it now?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if response == QMessageBox.Yes:
+            self._missing_root_prompted = False
+            self._select_source_root()
 
     def _update_source_root_label(self) -> None:
         if not self._project_manager:
@@ -331,13 +355,21 @@ class ProjectWorkspace(QWidget):
         root_path = self._resolve_source_root()
         if not root_path or not root_path.exists():
             self._source_tree.setDisabled(True)
-            warning = ["Select a source folder to begin tracking documents."]
+            warning = [
+                "Source folder missing. Re-select the root to resume scanning."
+                if self._project_manager and self._project_manager.source_state.root
+                else "Select a source folder to begin tracking documents."
+            ]
             self._set_root_warning(warning)
             if self._project_manager:
                 self._project_manager.update_source_state(warnings=warning)
+                if not self._missing_root_prompted:
+                    self._missing_root_prompted = True
+                    self._prompt_reselect_source_root()
             return
 
         self._source_tree.setDisabled(False)
+        self._missing_root_prompted = False
         state = self._project_manager.source_state
         selected = set(state.selected_folders or [])
         auto_select = not selected
@@ -519,7 +551,9 @@ class ProjectWorkspace(QWidget):
 
         self._inflight_sources.update(job.source_path for job in jobs)
 
-        worker = ConversionWorker(jobs, helper=self._project_manager.conversion_settings.helper)
+        helper = self._project_manager.conversion_settings.helper
+        options = dict(self._project_manager.conversion_settings.options or {})
+        worker = ConversionWorker(jobs, helper=helper, options=options)
         worker.progress.connect(self._on_conversion_progress)
         worker.file_failed.connect(self._on_conversion_failed)
         worker.finished.connect(lambda success, failed, w=worker, js=jobs: self._on_conversion_finished(w, js, success, failed))

@@ -70,11 +70,11 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
     - [ ] Implement project deletion
     - [ ] Add "Open Folder" action
     - [ ] Test with existing projects (breaking changes OK)
-- [ ] Simplify project creation
+- [x] Simplify project creation
   - [x] Single-screen setup (name, source folder, output folder)
   - [x] Create `<selected folder>/<project-name>/` (spaces → dashes) and call out folder creation to the user
   - [x] Remove multi-stage wizard flow; initial import deferred to Documents tab
-  - [ ] Capture conversion helper selection in the setup dialog
+  - [x] Capture conversion helper selection in the setup dialog
 
 #### Step 3 - Project Workspace
 
@@ -86,7 +86,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Source folder picker with tree view checkboxes (folder-level only, default to all selected)
   - [x] Store selections as relative paths and surface manual "Re-scan for new files" action with last-scan timestamp
   - [x] Warn when files exist in the source root but no folders are selected (conversion requires subfolders)
-  - [ ] Display `X of Y` counts from FileTracker for files converted vs. pending (including converted_documents)
+  - [x] Display `X of Y` counts from FileTracker for files converted vs. pending (including converted_documents)
   - [x] Keep batch operations non-blocking and track in-flight conversions to avoid duplicate submissions
 - [ ] Bulk Analysis Tab
   - [ ] List bulk analysis groups with `X of Y` document coverage using FileTracker data
@@ -101,7 +101,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 #### Step 4 - Automated Conversion & Bulk Analysis
 
 - [x] Extend project metadata to capture project root, source-relative folder selections, and conversion helper choice
-- [x] Update project creation to gather source folder and output folder (warning about root-level files); helper selection pending
+- [x] Update project creation to gather source folder and output folder (warning about root-level files); helper selection stored in project metadata
 - [x] On project open (and when "Re-scan" is pressed), detect new/changed files and prompt for conversion + bulk analysis
 - [x] Implement conversion helper registry that handles PDFs/complex formats while skipping simple markdown/plain-text files *(default helper in place; additional helpers TBD)*
 - [x] Track in-flight conversions in memory to avoid duplicate submissions during long runs; rely on file existence post-run

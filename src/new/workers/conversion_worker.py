@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Iterable, List
+from typing import Any, Dict, Iterable, List, Optional
 
 from PySide6.QtCore import QObject, QRunnable, Signal
 
@@ -26,12 +26,19 @@ class ConversionWorker(QObject, QRunnable):
     file_failed = Signal(str, str)    # source path, error message
     finished = Signal(int, int)       # successful, failed
 
-    def __init__(self, jobs: Iterable[ConversionJob], helper: str = "default") -> None:
+    def __init__(
+        self,
+        jobs: Iterable[ConversionJob],
+        *,
+        helper: str = "default",
+        options: Optional[Dict[str, Any]] = None,
+    ) -> None:
         QObject.__init__(self)
         QRunnable.__init__(self)
         self.setAutoDelete(True)
         self._jobs: List[ConversionJob] = list(jobs)
-        self._helper = helper
+        self._helper = helper or "default"
+        self._options: Dict[str, Any] = dict(options or {})
 
     def run(self) -> None:  # pragma: no cover - executed in worker thread
         total = len(self._jobs)
@@ -90,11 +97,45 @@ class ConversionWorker(QObject, QRunnable):
     def _convert_pdf(self, job: ConversionJob) -> None:
         job.destination_path.parent.mkdir(parents=True, exist_ok=True)
         content = extract_text_from_pdf(str(job.source_path))
-        metadata = (
-            "---\n"
-            f"title: {job.source_path.stem}\n"
-            f"source: {job.source_path.name}\n"
-            "converted_with: local_pdf_extractor\n"
-            "---\n\n"
-        )
-        write_file_content(str(job.destination_path), metadata + content)
+        if not self._preserve_page_markers():
+            content = self._strip_page_markers(content)
+
+        if self._include_pdf_front_matter():
+            metadata = (
+                "---\n"
+                f"title: {job.source_path.stem}\n"
+                f"source: {job.source_path.name}\n"
+                f"converted_with: {self._converted_with_tag()}\n"
+                "---\n\n"
+            )
+            output = metadata + content
+        else:
+            output = content
+
+        write_file_content(str(job.destination_path), output)
+
+    # ------------------------------------------------------------------
+    # Helper settings
+    # ------------------------------------------------------------------
+    def _include_pdf_front_matter(self) -> bool:
+        default = self._helper != "text_only"
+        return bool(self._options.get("include_pdf_front_matter", default))
+
+    def _preserve_page_markers(self) -> bool:
+        default = self._helper == "default"
+        return bool(self._options.get("preserve_page_markers", default))
+
+    def _converted_with_tag(self) -> str:
+        if self._helper == "text_only":
+            return "text_only_pdf_extractor"
+        return "local_pdf_extractor"
+
+    @staticmethod
+    def _strip_page_markers(content: str) -> str:
+        lines = []
+        for line in content.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("--- Page ") and stripped.endswith(" ---"):
+                continue
+            lines.append(line)
+        return "\n".join(lines).strip()
