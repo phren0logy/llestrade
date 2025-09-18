@@ -35,8 +35,13 @@ class FileTrackerSnapshot:
         return self.counts.get("processed", 0)
 
     @property
+    def bulk_analysis_count(self) -> int:
+        return self.counts.get("bulk_analysis", 0)
+
+    @property
     def summaries_count(self) -> int:
-        return self.counts.get("summaries", 0)
+        """Compatibility alias for legacy callers."""
+        return self.bulk_analysis_count
 
     @property
     def processed_ratio(self) -> Optional[float]:
@@ -61,15 +66,26 @@ class FileTrackerSnapshot:
     @classmethod
     def from_json(cls, payload: Dict[str, object]) -> "FileTrackerSnapshot":
         timestamp = payload.get("timestamp")
+        counts = dict(payload.get("counts", {}))
+        files = {k: list(v) for k, v in dict(payload.get("files", {})).items()}
+        missing = {k: list(v) for k, v in dict(payload.get("missing", {})).items()}
+
+        if "bulk_analysis" not in counts and "summaries" in counts:
+            counts["bulk_analysis"] = counts.pop("summaries")
+        if "bulk_analysis" not in files and "summaries" in files:
+            files["bulk_analysis"] = files.pop("summaries")
+        if "bulk_analysis_missing" not in missing and "summaries_missing" in missing:
+            missing["bulk_analysis_missing"] = missing.pop("summaries_missing")
+
         return cls(
             timestamp=(
                 datetime.fromisoformat(timestamp)
                 if isinstance(timestamp, str)
                 else datetime.now(timezone.utc)
             ),
-            counts=dict(payload.get("counts", {})),
-            files={k: list(v) for k, v in dict(payload.get("files", {})).items()},
-            missing={k: list(v) for k, v in dict(payload.get("missing", {})).items()},
+            counts=counts,
+            files=files,
+            missing=missing,
             notes=dict(payload.get("notes", {})),
             version=str(payload.get("version", TRACKER_VERSION)),
         )
@@ -82,9 +98,9 @@ class DashboardMetrics:
     last_scan: Optional[datetime]
     imported_total: int = 0
     processed_total: int = 0
-    summaries_total: int = 0
+    bulk_analysis_total: int = 0
     pending_processing: int = 0
-    pending_summaries: int = 0
+    pending_bulk_analysis: int = 0
     notes: Dict[str, str] = field(default_factory=dict)
     snapshot_version: str = TRACKER_VERSION
 
@@ -94,9 +110,9 @@ class DashboardMetrics:
             last_scan=None,
             imported_total=0,
             processed_total=0,
-            summaries_total=0,
+            bulk_analysis_total=0,
             pending_processing=0,
-            pending_summaries=0,
+            pending_bulk_analysis=0,
             notes={},
             snapshot_version=TRACKER_VERSION,
         )
@@ -107,9 +123,9 @@ class DashboardMetrics:
             last_scan=snapshot.timestamp,
             imported_total=snapshot.imported_count,
             processed_total=snapshot.processed_count,
-            summaries_total=snapshot.summaries_count,
+            bulk_analysis_total=snapshot.bulk_analysis_count,
             pending_processing=len(snapshot.missing.get("processed_missing", [])),
-            pending_summaries=len(snapshot.missing.get("summaries_missing", [])),
+            pending_bulk_analysis=len(snapshot.missing.get("bulk_analysis_missing", [])),
             notes=dict(snapshot.notes),
             snapshot_version=snapshot.version,
         )
@@ -119,9 +135,9 @@ class DashboardMetrics:
             "last_scan": self.last_scan.isoformat() if self.last_scan else None,
             "imported_total": self.imported_total,
             "processed_total": self.processed_total,
-            "summaries_total": self.summaries_total,
+            "bulk_analysis_total": self.bulk_analysis_total,
             "pending_processing": self.pending_processing,
-            "pending_summaries": self.pending_summaries,
+            "pending_bulk_analysis": self.pending_bulk_analysis,
             "notes": dict(self.notes),
             "snapshot_version": self.snapshot_version,
         }
@@ -139,13 +155,21 @@ class DashboardMetrics:
                 last_scan = None
         else:
             last_scan = None
+        bulk_total = payload.get("bulk_analysis_total") if isinstance(payload, dict) else None
+        if bulk_total is None and isinstance(payload, dict):
+            bulk_total = payload.get("summaries_total")
+
+        pending_bulk = payload.get("pending_bulk_analysis") if isinstance(payload, dict) else None
+        if pending_bulk is None and isinstance(payload, dict):
+            pending_bulk = payload.get("pending_summaries")
+
         return cls(
             last_scan=last_scan,
             imported_total=int(payload.get("imported_total", 0)),
             processed_total=int(payload.get("processed_total", 0)),
-            summaries_total=int(payload.get("summaries_total", 0)),
+            bulk_analysis_total=int(bulk_total or 0),
             pending_processing=int(payload.get("pending_processing", 0)),
-            pending_summaries=int(payload.get("pending_summaries", 0)),
+            pending_bulk_analysis=int(pending_bulk or 0),
             notes=dict(payload.get("notes", {})),
             snapshot_version=str(payload.get("snapshot_version", TRACKER_VERSION)),
         )
@@ -156,7 +180,7 @@ class FileTracker:
     The tracker inspects three canonical subdirectories:
     - imported_documents/
     - processed_documents/
-    - summaries/
+    - bulk_analysis/
 
     Each `scan()` collects counts and missing counterparts, then persists
     the snapshot to `file_tracker.json` under the project root.
@@ -189,23 +213,23 @@ class FileTracker:
         if not imported:
             imported = self._gather_files("imported_documents")
         processed = self._gather_files("processed_documents")
-        summaries = self._gather_files("summaries")
+        bulk_analysis = self._gather_files("bulk_analysis")
 
         counts = {
             "imported": len(imported),
             "processed": len(processed),
-            "summaries": len(summaries),
+            "bulk_analysis": len(bulk_analysis),
         }
 
         files = {
             "imported": sorted(imported),
             "processed": sorted(processed),
-            "summaries": sorted(summaries),
+            "bulk_analysis": sorted(bulk_analysis),
         }
 
         missing = {
             "processed_missing": sorted(imported - processed),
-            "summaries_missing": sorted(processed - summaries),
+            "bulk_analysis_missing": sorted(processed - bulk_analysis),
         }
 
         snapshot = FileTrackerSnapshot(

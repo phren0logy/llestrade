@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QApplication
 
 _ = PySide6
 
+from src.new.core.file_tracker import DashboardMetrics
 from src.new.core.project_manager import ProjectManager, ProjectMetadata
 from src.new.stages.welcome_stage import WelcomeStage
 
@@ -32,9 +33,9 @@ def test_get_dashboard_metrics_scans_when_missing(tmp_path: Path, qt_app: QAppli
 
     assert metrics.imported_total == 0
     assert metrics.processed_total == 0
-    assert metrics.summaries_total == 0
+    assert metrics.bulk_analysis_total == 0
     assert metrics.pending_processing == 0
-    assert metrics.pending_summaries == 0
+    assert metrics.pending_bulk_analysis == 0
     assert metrics.last_scan is not None
     assert manager.dashboard_metrics == metrics
     assert manager.source_state.last_scan is not None
@@ -58,9 +59,9 @@ def test_dashboard_metrics_refresh_counts_files(tmp_path: Path, qt_app: QApplica
 
     assert metrics.imported_total == 2
     assert metrics.processed_total == 1
-    assert metrics.summaries_total == 0
+    assert metrics.bulk_analysis_total == 0
     assert metrics.pending_processing == 1  # doc2.md still pending processing
-    assert metrics.pending_summaries == 1  # doc1.md awaits summarisation
+    assert metrics.pending_bulk_analysis == 1  # doc1.md awaits bulk analysis
     assert manager.dashboard_metrics == metrics
 
 
@@ -107,3 +108,18 @@ def test_welcome_stage_uses_persisted_metrics(tmp_path: Path, qt_app: QApplicati
 
     assert "Converted 1" in stats_text
     assert "Processed" in stats_text
+
+
+def test_dashboard_metrics_from_dict_accepts_legacy_keys() -> None:
+    payload = {
+        "imported_total": 5,
+        "processed_total": 4,
+        "summaries_total": 3,
+        "pending_processing": 1,
+        "pending_summaries": 2,
+    }
+
+    metrics = DashboardMetrics.from_dict(payload)
+
+    assert metrics.bulk_analysis_total == 3
+    assert metrics.pending_bulk_analysis == 2

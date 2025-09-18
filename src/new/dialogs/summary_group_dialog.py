@@ -175,11 +175,19 @@ class SummaryGroupDialog(QDialog):
             self.file_tree.addTopLevelItem(notice)
             return
 
-        converted_files = sorted(
-            path.relative_to(converted_root).as_posix()
-            for path in converted_root.rglob("*")
-            if path.is_file()
-        )
+        converted_files = []
+        for path in converted_root.rglob("*"):
+            if not path.is_file():
+                continue
+            # Hide Azure DI artefacts from the picker to avoid confusing users.
+            if any(
+                part in {".azure-di", ".azure_di"} or part.startswith(".azure-di") or part.startswith(".azure_di")
+                for part in path.parts
+            ):
+                continue
+            converted_files.append(path.relative_to(converted_root).as_posix())
+
+        converted_files.sort()
 
         if not converted_files:
             notice = QTreeWidgetItem(["Converted folder is empty. Run conversion first."])
@@ -228,14 +236,36 @@ class SummaryGroupDialog(QDialog):
         if self._block_tree_signal:
             return
         node_type, _ = item.data(0, Qt.UserRole) or (None, None)
-        if node_type != "dir":
-            return
         state = item.checkState(0)
+
         self._block_tree_signal = True
-        for index in range(item.childCount()):
-            child = item.child(index)
-            child.setCheckState(0, state)
+        if node_type == "dir" and state in (Qt.Checked, Qt.Unchecked):
+            for index in range(item.childCount()):
+                child = item.child(index)
+                child.setCheckState(0, state)
+
+        self._sync_parent_state(item.parent())
         self._block_tree_signal = False
+
+    def _sync_parent_state(self, parent: Optional[QTreeWidgetItem]) -> None:
+        while parent is not None:
+            checked = unchecked = 0
+            for index in range(parent.childCount()):
+                state = parent.child(index).checkState(0)
+                if state == Qt.Checked:
+                    checked += 1
+                elif state == Qt.Unchecked:
+                    unchecked += 1
+                else:
+                    checked += 1
+                    unchecked += 1
+            if checked and not unchecked:
+                parent.setCheckState(0, Qt.Checked)
+            elif unchecked and not checked:
+                parent.setCheckState(0, Qt.Unchecked)
+            else:
+                parent.setCheckState(0, Qt.PartiallyChecked)
+            parent = parent.parent()
 
     def _collect_selection(self) -> tuple[List[str], List[str]]:
         files: List[str] = []

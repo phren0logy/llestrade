@@ -37,7 +37,7 @@ def test_defaults_without_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     flags = FeatureFlags.from_settings(None)
 
     assert flags.dashboard_workspace_enabled is True
-    assert flags.summary_groups_enabled is False
+    assert flags.summary_groups_enabled is True
     assert flags.progress_tab_enabled is False
     assert flags.auto_run_conversion_on_create is True
 

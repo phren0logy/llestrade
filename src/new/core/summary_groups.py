@@ -15,7 +15,7 @@ from typing import Dict, Iterable, List, Optional
 LOGGER = logging.getLogger(__name__)
 
 CONFIG_FILENAME = "config.json"
-SUMMARY_FOLDER = "summaries"
+BULK_ANALYSIS_FOLDER = "bulk_analysis"
 SUMMARY_GROUP_VERSION = "1"
 
 
@@ -41,7 +41,7 @@ def _ensure_unique_slug(base_dir: Path, candidate: str, existing_slug: Optional[
 
 
 def _groups_root(project_dir: Path) -> Path:
-    root = project_dir / SUMMARY_FOLDER
+    root = project_dir / BULK_ANALYSIS_FOLDER
     root.mkdir(parents=True, exist_ok=True)
     return root
 

@@ -30,7 +30,7 @@ class FeatureFlags:
     """Feature toggles that can be overridden by settings or environment."""
 
     dashboard_workspace_enabled: bool = True
-    summary_groups_enabled: bool = False
+    summary_groups_enabled: bool = True
     progress_tab_enabled: bool = False
     auto_run_conversion_on_create: bool = True
 

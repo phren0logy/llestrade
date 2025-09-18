@@ -249,12 +249,12 @@ class WelcomeStage(QWidget):
 
         converted = self._count_files(project_dir / "converted_documents")
         processed = self._count_files(project_dir / "processed_documents")
-        summaries = self._count_files(project_dir / "summaries")
+        bulk_outputs = self._count_files(project_dir / "bulk_analysis")
 
         if converted:
             return (
                 f"Converted {converted} | Processed {processed}/{converted} | "
-                f"Summaries {summaries}/{converted}"
+                f"Bulk analysis {bulk_outputs}/{converted}"
             )
         return "No converted documents yet."
 
@@ -279,24 +279,24 @@ class WelcomeStage(QWidget):
 
         converted = int(metrics.get("imported_total", 0))
         processed = int(metrics.get("processed_total", 0))
-        summaries = int(metrics.get("summaries_total", 0))
+        bulk_analysis = int(metrics.get("bulk_analysis_total", 0))
         pending = int(metrics.get("pending_processing", 0))
-        pending_summaries = int(metrics.get("pending_summaries", 0))
+        pending_bulk = int(metrics.get("pending_bulk_analysis", 0))
 
         if converted:
             text = (
                 f"Converted {converted} | Processed {processed}/{converted}"
-                f" | Summaries {summaries}/{converted}"
+                f" | Bulk analysis {bulk_analysis}/{converted}"
             )
         else:
             text = "No converted documents yet."
 
-        if pending or pending_summaries:
+        if pending or pending_bulk:
             details: List[str] = []
             if pending:
                 details.append(f"{pending} awaiting processing")
-            if pending_summaries:
-                details.append(f"{pending_summaries} awaiting summaries")
+            if pending_bulk:
+                details.append(f"{pending_bulk} awaiting bulk analysis")
             text += " (" + ", ".join(details) + ")"
 
         last_scan = metrics.get("last_scan")

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Sequence
+from typing import Dict, Optional, List, Sequence
 
-from PySide6.QtCore import Qt, QThreadPool, QUrl, QTimer
+from PySide6.QtCore import Qt, QThreadPool, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -32,11 +33,13 @@ from src.new.core.feature_flags import FeatureFlags
 from src.new.core.project_manager import ProjectManager
 from src.new.core.summary_groups import SummaryGroup
 from src.new.dialogs.summary_group_dialog import SummaryGroupDialog
-from src.new.workers import ConversionWorker
+from src.new.workers import BulkAnalysisWorker, ConversionWorker
+
+LOGGER = logging.getLogger(__name__)
 
 
 class ProjectWorkspace(QWidget):
-    """Dashboard workspace showing documents and summary groups."""
+    """Dashboard workspace showing documents and bulk analysis groups."""
 
     def __init__(
         self,
@@ -60,11 +63,14 @@ class ProjectWorkspace(QWidget):
         self._conversion_running = False
         self._conversion_total = 0
         self._missing_root_prompted = False
-        self._running_groups: dict[str, QTimer] = {}
+        self._running_groups: Dict[str, BulkAnalysisWorker] = {}
+        self._bulk_progress: Dict[str, tuple[int, int]] = {}
+        self._bulk_failures: Dict[str, List[str]] = {}
         self._summary_tab: QWidget | None = None
         self._summary_table: QTableWidget | None = None
         self._summary_empty_label: QLabel | None = None
         self._summary_info_label: QLabel | None = None
+        self._missing_bulk_label: QLabel | None = None
         self._group_source_tree: QTreeWidget | None = None
         self._progress_tab: QWidget | None = None
 
@@ -81,7 +87,7 @@ class ProjectWorkspace(QWidget):
         self._tabs.addTab(self._documents_tab, "Documents")
         if self._feature_flags.summary_groups_enabled:
             self._summary_tab = self._build_summary_groups_tab()
-            self._tabs.addTab(self._summary_tab, "Summary Groups")
+            self._tabs.addTab(self._summary_tab, "Bulk Analysis")
         if self._feature_flags.progress_tab_enabled:
             self._progress_tab = self._build_placeholder_tab("Progress")
             self._tabs.addTab(self._progress_tab, "Progress")
@@ -134,9 +140,9 @@ class ProjectWorkspace(QWidget):
         self._root_warning_label.hide()
 
         self._missing_processed_label = QLabel("Processed missing: —")
-        self._missing_summaries_label = QLabel("Summaries missing: —")
+        self._missing_bulk_label = QLabel("Bulk analysis missing: —")
 
-        for label in (self._missing_processed_label, self._missing_summaries_label):
+        for label in (self._missing_processed_label, self._missing_bulk_label):
             label.setWordWrap(True)
             tab_layout.addWidget(label)
 
@@ -150,7 +156,7 @@ class ProjectWorkspace(QWidget):
 
         header_layout = QHBoxLayout()
         header_layout.setContentsMargins(0, 0, 0, 0)
-        header_layout.addWidget(QLabel("Manage summary groups to organise processed documents."))
+        header_layout.addWidget(QLabel("Manage bulk analysis groups to organise processed documents."))
         header_layout.addStretch()
         create_button = QPushButton("Create Group…")
         create_button.clicked.connect(self._show_create_group_dialog)
@@ -160,7 +166,7 @@ class ProjectWorkspace(QWidget):
         header_layout.addWidget(refresh_button)
         layout.addLayout(header_layout)
 
-        self._summary_info_label = QLabel("No summary groups yet.")
+        self._summary_info_label = QLabel("No bulk analysis groups yet.")
         layout.addWidget(self._summary_info_label)
 
         content_layout = QHBoxLayout()
@@ -183,7 +189,7 @@ class ProjectWorkspace(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         table_container.addWidget(self._summary_table)
 
-        self._summary_empty_label = QLabel("No summary groups created yet.")
+        self._summary_empty_label = QLabel("No bulk analysis groups created yet.")
         self._summary_empty_label.setAlignment(Qt.AlignCenter)
         self._summary_empty_label.setStyleSheet("color: #666; padding: 20px;")
         table_container.addWidget(self._summary_empty_label)
@@ -260,7 +266,8 @@ class ProjectWorkspace(QWidget):
         except Exception as exc:
             self._counts_label.setText("Scan failed")
             self._missing_processed_label.setText(str(exc))
-            self._missing_summaries_label.setText("")
+            if getattr(self, "_missing_bulk_label", None):
+                self._missing_bulk_label.setText("")
             return
 
         if snapshot is None:
@@ -274,28 +281,29 @@ class ProjectWorkspace(QWidget):
             counts_text = (
                 f"Converted: {metrics.imported_total} | "
                 f"Processed: {metrics.processed_total} of {metrics.imported_total} | "
-                f"Summaries: {metrics.summaries_total} of {metrics.imported_total}"
+                f"Bulk analysis: {metrics.bulk_analysis_total} of {metrics.imported_total}"
             )
         else:
             counts_text = (
                 "Converted: 0 | "
                 f"Processed: {metrics.processed_total} | "
-                f"Summaries: {metrics.summaries_total}"
+                f"Bulk analysis: {metrics.bulk_analysis_total}"
             )
         self._counts_label.setText(counts_text)
 
         processed_missing = []
-        summaries_missing = []
+        bulk_missing = []
         if snapshot:
             processed_missing = snapshot.missing.get("processed_missing", [])
-            summaries_missing = snapshot.missing.get("summaries_missing", [])
+            bulk_missing = snapshot.missing.get("bulk_analysis_missing", [])
 
         self._missing_processed_label.setText(
             "Processed missing: " + (", ".join(processed_missing) if processed_missing else "None")
         )
-        self._missing_summaries_label.setText(
-            "Summaries missing: " + (", ".join(summaries_missing) if summaries_missing else "None")
-        )
+        if getattr(self, "_missing_bulk_label", None):
+            self._missing_bulk_label.setText(
+                "Bulk analysis missing: " + (", ".join(bulk_missing) if bulk_missing else "None")
+            )
 
         self._update_last_scan_label()
 
@@ -720,11 +728,11 @@ class ProjectWorkspace(QWidget):
         self._summary_table.setRowCount(0)
         if not groups:
             self._summary_empty_label.show()
-            self._summary_info_label.setText("No summary groups yet.")
+            self._summary_info_label.setText("No bulk analysis groups yet.")
             return
 
         self._summary_empty_label.hide()
-        self._summary_info_label.setText(f"{len(groups)} summary group(s)")
+        self._summary_info_label.setText(f"{len(groups)} bulk analysis group(s)")
 
         self._summary_table.setRowCount(len(groups))
         for row, group in enumerate(groups):
@@ -737,6 +745,7 @@ class ProjectWorkspace(QWidget):
             return
         description = group.description or ""
         name_item = QTableWidgetItem(group.name)
+        name_item.setData(Qt.UserRole, group.group_id)
         name_item.setToolTip(description)
         self._summary_table.setItem(row, 0, name_item)
 
@@ -752,7 +761,14 @@ class ProjectWorkspace(QWidget):
         updated_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 2, updated_item)
 
-        status_text = "Running…" if group.group_id in self._running_groups else ("Ready" if files_count else "No converted files")
+        if group.group_id in self._running_groups:
+            progress = self._bulk_progress.get(group.group_id)
+            if progress and progress[1]:
+                status_text = f"Running ({progress[0]}/{progress[1]})"
+            else:
+                status_text = "Running…"
+        else:
+            status_text = "Ready" if files_count else "No converted files"
         status_item = QTableWidgetItem(status_text)
         status_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 3, status_item)
@@ -806,7 +822,7 @@ class ProjectWorkspace(QWidget):
             try:
                 self._project_manager.save_summary_group(group)
             except Exception as exc:
-                QMessageBox.critical(self, "Create Summary Group Failed", str(exc))
+                QMessageBox.critical(self, "Create Bulk Analysis Group Failed", str(exc))
             else:
                 self.refresh()
 
@@ -816,19 +832,19 @@ class ProjectWorkspace(QWidget):
         if not self._project_manager:
             return
         message = (
-            f"Delete summary group '{group.name}'?\n\n"
-            "All generated summaries stored in this group will be deleted."
+            f"Delete bulk analysis group '{group.name}'?\n\n"
+            "All generated bulk analysis outputs stored in this group will be deleted."
         )
         reply = QMessageBox.question(
             self,
-            "Delete Summary Group",
+            "Delete Bulk Analysis Group",
             message,
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
             if not self._project_manager.delete_summary_group(group.group_id):
-                QMessageBox.warning(self, "Delete Failed", "Could not delete the summary group.")
+                QMessageBox.warning(self, "Delete Failed", "Could not delete the bulk analysis group.")
             else:
                 self._cancel_group_run(group)
                 self.refresh()
@@ -838,7 +854,7 @@ class ProjectWorkspace(QWidget):
             return
         if not self._project_manager or not self._project_manager.project_dir:
             return
-        folder = self._project_manager.project_dir / "summaries" / group.folder_name
+        folder = self._project_manager.project_dir / "bulk_analysis" / group.folder_name
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
@@ -853,7 +869,7 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        files = self._resolve_group_files(group)
+        files = sorted(self._resolve_group_files(group))
         if not files:
             QMessageBox.warning(
                 self,
@@ -862,31 +878,85 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        timer = QTimer(self)
-        timer.setSingleShot(True)
-        timer.timeout.connect(lambda gid=group.group_id: self._on_group_run_finished(gid))
-        timer.start(2000)
-        self._running_groups[group.group_id] = timer
+        if not self._project_manager or not self._project_manager.project_dir:
+            QMessageBox.warning(self, "Missing Project", "The project directory is not available.")
+            return
+
+        provider_default = (
+            (self._project_manager.settings or {}).get("llm_provider", ""),
+            (self._project_manager.settings or {}).get("llm_model", ""),
+        )
+        worker = BulkAnalysisWorker(
+            project_dir=self._project_manager.project_dir,
+            group=group,
+            files=files,
+            metadata=self._project_manager.metadata,
+            default_provider=provider_default,
+        )
+        worker.progress.connect(lambda done, total, path, gid=group.group_id: self._on_bulk_progress(gid, done, total, path))
+        worker.file_failed.connect(lambda rel, err, gid=group.group_id: self._on_bulk_failed(gid, rel, err))
+        worker.finished.connect(lambda success, failed, gid=group.group_id: self._on_bulk_finished(gid, success, failed))
+        worker.log_message.connect(lambda message, gid=group.group_id: self._on_bulk_log(gid, message))
+
+        self._running_groups[group.group_id] = worker
+        self._bulk_progress[group.group_id] = (0, len(files))
+        self._bulk_failures[group.group_id] = []
         if self._summary_info_label:
             self._summary_info_label.setText("Running bulk analysis…")
         self._refresh_summary_groups()
+        self._thread_pool.start(worker)
 
     def _cancel_group_run(self, group: SummaryGroup) -> None:
         if not self._feature_flags.summary_groups_enabled:
             return
-        timer = self._running_groups.pop(group.group_id, None)
-        if timer:
-            timer.stop()
-            timer.deleteLater()
+        worker = self._running_groups.pop(group.group_id, None)
+        if worker:
+            worker.cancel()
+            worker.deleteLater()
+        self._bulk_progress.pop(group.group_id, None)
+        self._bulk_failures.pop(group.group_id, None)
+        if self._summary_info_label:
+            self._summary_info_label.setText("Bulk analysis cancelled.")
         self._refresh_summary_groups()
 
-    def _on_group_run_finished(self, group_id: str) -> None:
-        if not self._feature_flags.summary_groups_enabled:
-            return
-        timer = self._running_groups.pop(group_id, None)
-        if timer:
-            timer.deleteLater()
-        QMessageBox.information(self, "Bulk Analysis", "Bulk analysis completed for the selected group.")
+    def _on_bulk_progress(self, group_id: str, completed: int, total: int, relative_path: str) -> None:
+        self._bulk_progress[group_id] = (completed, total)
+        if self._summary_info_label:
+            self._summary_info_label.setText(
+                f"Running bulk analysis ({completed}/{total})… {relative_path}"
+            )
+        self._refresh_summary_groups()
+
+    def _on_bulk_failed(self, group_id: str, relative_path: str, error: str) -> None:
+        LOGGER.error("Bulk analysis failed for %s: %s", relative_path, error)
+        self._bulk_failures.setdefault(group_id, []).append(f"{relative_path}: {error}")
+
+    def _on_bulk_log(self, group_id: str, message: str) -> None:  # noqa: ARG002 - future use
+        LOGGER.info("[BulkAnalysis][%s] %s", group_id, message)
+
+    def _on_bulk_finished(self, group_id: str, successes: int, failures: int) -> None:
+        worker = self._running_groups.pop(group_id, None)
+        if worker:
+            worker.deleteLater()
+        self._bulk_progress.pop(group_id, None)
+        errors = self._bulk_failures.pop(group_id, [])
+
+        if self._summary_info_label:
+            if failures:
+                self._summary_info_label.setText(
+                    f"Bulk analysis completed with {failures} error(s)."
+                )
+            else:
+                self._summary_info_label.setText("Bulk analysis completed.")
+
+        if errors:
+            QMessageBox.warning(
+                self,
+                "Bulk Analysis Issues",
+                "Some documents failed during bulk analysis:\n" + "\n".join(errors),
+            )
+
+        self._refresh_file_tracker()
         self._refresh_summary_groups()
 
     def _resolve_group_files(self, group: SummaryGroup) -> set[str]:
@@ -924,7 +994,9 @@ class ProjectWorkspace(QWidget):
                     valid_ids = set()
         stale = [gid for gid in list(self._running_groups.keys()) if gid not in valid_ids]
         for gid in stale:
-            timer = self._running_groups.pop(gid, None)
-            if timer:
-                timer.stop()
-                timer.deleteLater()
+            worker = self._running_groups.pop(gid, None)
+            if worker:
+                worker.cancel()
+                worker.deleteLater()
+            self._bulk_progress.pop(gid, None)
+            self._bulk_failures.pop(gid, None)

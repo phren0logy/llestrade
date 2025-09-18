@@ -51,8 +51,8 @@ def test_summary_group_delete(project_manager: ProjectManager):
     group = project_manager.save_summary_group(SummaryGroup.create(name="To Delete"))
     assert project_manager.delete_summary_group(group.group_id)
     assert project_manager.list_summary_groups() == []
-    summaries_dir = project_manager.project_dir / "summaries"
-    assert not (summaries_dir / group.slug).exists()
+    bulk_dir = project_manager.project_dir / "bulk_analysis"
+    assert not (bulk_dir / group.slug).exists()
 
 
 def test_refresh_summary_groups_updates_cache(project_manager: ProjectManager):
