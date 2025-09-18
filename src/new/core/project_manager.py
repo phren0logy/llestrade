@@ -126,7 +126,7 @@ class SourceTreeState:
 class ConversionSettings:
     """Conversion helper configuration for a project."""
 
-    helper: str = "default"
+    helper: str = "azure_di"
     options: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:

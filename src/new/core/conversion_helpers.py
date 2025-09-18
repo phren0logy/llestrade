@@ -3,20 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
-
-
-@dataclass(frozen=True)
-class HelperOption:
-    """Metadata describing a configurable option for a conversion helper."""
-
-    key: str
-    label: str
-    option_type: str  # e.g. "checkbox", "select"
-    default: Any = False
-    tooltip: str = ""
-    choices: Optional[List[str]] = None  # used for select options
 
 
 @dataclass(frozen=True)
@@ -27,7 +14,7 @@ class ConversionHelper:
     name: str
     description: str
     supported_extensions: Iterable[str]
-    options: Iterable[HelperOption] = field(default_factory=list)
+    options: Iterable[Any] = field(default_factory=list)
     executor: Optional[Callable[..., None]] = None  # injected later by workers
 
 
@@ -36,12 +23,15 @@ class HelperRegistry:
 
     def __init__(self) -> None:
         self._helpers: Dict[str, ConversionHelper] = {}
+        self._default_id: Optional[str] = None
 
     # ------------------------------------------------------------------
     # Registration
     # ------------------------------------------------------------------
     def register(self, helper: ConversionHelper) -> None:
         self._helpers[helper.helper_id] = helper
+        if self._default_id is None:
+            self._default_id = helper.helper_id
 
     def get(self, helper_id: str) -> Optional[ConversionHelper]:
         return self._helpers.get(helper_id)
@@ -50,7 +40,9 @@ class HelperRegistry:
         return list(self._helpers.values())
 
     def default_helper(self) -> ConversionHelper:
-        helper = self.get("default")
+        if self._default_id is None:
+            raise KeyError("No conversion helpers registered")
+        helper = self.get(self._default_id)
         if helper is None:
             raise KeyError("Default conversion helper is not registered")
         return helper
@@ -64,43 +56,13 @@ _registry = HelperRegistry()
 
 _registry.register(
     ConversionHelper(
-        helper_id="default",
-        name="Local extractor (recommended)",
+        helper_id="azure_di",
+        name="Azure Document Intelligence",
         description=(
-            "Uses built-in converters for PDFs, Word documents, text, and markdown files. "
-            "Generates Markdown with YAML front matter for PDFs."
+            "Uploads PDFs and other richly formatted files to Azure Document Intelligence and"
+            " saves the generated Markdown into the project. Plain text files are copied locally."
         ),
-        supported_extensions=[".pdf", ".doc", ".docx", ".txt", ".md", ".markdown"],
-        options=[
-            HelperOption(
-                key="include_pdf_front_matter",
-                label="Include PDF metadata header",
-                option_type="checkbox",
-                default=True,
-                tooltip="Keeps title/source metadata in converted PDFs.",
-            ),
-        ],
-    )
-)
-
-_registry.register(
-    ConversionHelper(
-        helper_id="text_only",
-        name="Text-only output",
-        description= (
-            "Produces plain markdown without YAML headers. Useful when downstream workflows "
-            "expect raw text only."
-        ),
-        supported_extensions=[".pdf", ".doc", ".docx", ".txt"],
-        options=[
-            HelperOption(
-                key="preserve_page_markers",
-                label="Preserve PDF page markers",
-                option_type="checkbox",
-                default=False,
-                tooltip="Adds simple page markers (--- Page N ---) when converting PDFs.",
-            ),
-        ],
+        supported_extensions=[".pdf", ".doc", ".docx", ".ppt", ".pptx"],
     )
 )
 
@@ -118,7 +80,6 @@ def find_helper(helper_id: str) -> ConversionHelper:
 
 
 __all__ = [
-    "HelperOption",
     "ConversionHelper",
     "HelperRegistry",
     "registry",

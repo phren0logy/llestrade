@@ -96,7 +96,7 @@ def _classify_conversion(source_file: Path) -> str | None:
     if suffix in SUPPORTED_MARKDOWN_EXTENSIONS:
         return "copy"
     if suffix in SUPPORTED_TEXT_EXTENSIONS:
-        return "text"
+        return "copy"
     if suffix in SUPPORTED_DOC_EXTENSIONS:
         return "docx"
     if suffix in SUPPORTED_PDF_EXTENSIONS:

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict
-
 import pytest
 
 PySide6 = pytest.importorskip("PySide6")
@@ -49,18 +47,15 @@ def test_new_project_dialog_collects_helper_and_preview(tmp_path: Path, qt_app: 
     dialog._output_line.setText(output_base.as_posix())
     dialog._update_folder_preview()
 
-    helper_index = dialog._helper_combo.findData("text_only")
-    assert helper_index != -1
-    dialog._helper_combo.setCurrentIndex(helper_index)
-    option = dialog._helper_option_widgets.get("preserve_page_markers")
-    assert option is not None
-    option.setChecked(True)
+    assert dialog._helper_combo.count() == 1
+    helper_id = dialog._helper_combo.itemData(0)
+    assert helper_id == "azure_di"
 
     dialog._on_accept()
     config = dialog.result_config()
     assert config is not None
-    assert config.conversion_helper == "text_only"
-    assert config.conversion_options.get("preserve_page_markers") is True
+    assert config.conversion_helper == "azure_di"
+    assert config.conversion_options == {}
     assert config.output_base == output_base
     assert config.selected_folders == ["bundle"]
     assert "Case-Name-2" in dialog._folder_preview_label.text()
@@ -68,19 +63,7 @@ def test_new_project_dialog_collects_helper_and_preview(tmp_path: Path, qt_app: 
     dialog.deleteLater()
 
 
-def test_conversion_worker_respects_helper_options(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    captured: Dict[str, str] = {}
-
-    def fake_extract(_path: str) -> str:
-        return "--- Page 1 ---\nHello\n--- Page 2 ---\nWorld"
-
-    def fake_write(path: str, content: str) -> None:
-        captured["path"] = path
-        captured["content"] = content
-
-    monkeypatch.setattr("src.new.workers.conversion_worker.extract_text_from_pdf", fake_extract)
-    monkeypatch.setattr("src.new.workers.conversion_worker.write_file_content", fake_write)
-
+def test_conversion_worker_uses_azure_when_configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     job = ConversionJob(
         source_path=tmp_path / "sample.pdf",
         relative_path="sample.pdf",
@@ -88,11 +71,73 @@ def test_conversion_worker_respects_helper_options(monkeypatch: pytest.MonkeyPat
         conversion_type="pdf",
     )
 
-    worker = ConversionWorker([job], helper="text_only", options={"preserve_page_markers": False})
-    worker._convert_pdf(job)
+    job.source_path.parent.mkdir(parents=True, exist_ok=True)
+    job.source_path.write_bytes(b"pdf")
 
-    assert captured["path"].endswith("sample.md")
-    assert captured["content"] == "Hello\nWorld"
+    produced_markdown = job.destination_path.parent / "sample.md"
+    produced_json = job.destination_path.parent / ".azure-di" / "sample.json"
+
+    def fake_process(_self, source_path, output_dir, json_dir, endpoint, key):
+        json_dir.mkdir(parents=True, exist_ok=True)
+        produced_markdown.parent.mkdir(parents=True, exist_ok=True)
+        produced_markdown.write_text("azure output")
+        produced_json.parent.mkdir(parents=True, exist_ok=True)
+        produced_json.write_text("{}")
+        return str(produced_json), str(produced_markdown)
+
+    class StubSettings:
+        def __init__(self) -> None:
+            pass
+
+        def get(self, key, default=None):
+            if key == "azure_di_settings":
+                return {"endpoint": "https://example"}
+            return default
+
+        def get_api_key(self, provider):
+            if provider == "azure_di":
+                return "secret"
+            return None
+
+    monkeypatch.setattr("src.new.workers.conversion_worker.SecureSettings", StubSettings)
+    monkeypatch.setattr(
+        "src.new.workers.conversion_worker.ConversionWorker._process_with_azure",
+        fake_process,
+    )
+
+    worker = ConversionWorker([job], helper="azure_di")
+    worker._convert_pdf_with_azure(job)
+
+    assert job.destination_path.read_text() == "azure output"
+    assert produced_json.exists()
+
+
+def test_conversion_worker_raises_without_azure_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    job = ConversionJob(
+        source_path=tmp_path / "sample.pdf",
+        relative_path="sample.pdf",
+        destination_path=tmp_path / "converted" / "sample.md",
+        conversion_type="pdf",
+    )
+
+    job.source_path.parent.mkdir(parents=True, exist_ok=True)
+    job.source_path.write_bytes(b"pdf")
+
+    class EmptySettings:
+        def __init__(self) -> None:
+            pass
+
+        def get(self, key, default=None):
+            return default
+
+        def get_api_key(self, provider):
+            return None
+
+    monkeypatch.setattr("src.new.workers.conversion_worker.SecureSettings", EmptySettings)
+
+    worker = ConversionWorker([job], helper="azure_di")
+    with pytest.raises(RuntimeError, match="Azure Document Intelligence credentials"):
+        worker._convert_pdf_with_azure(job)
 
 
 def test_project_manager_update_conversion_helper_replaces_options(qt_app: QApplication) -> None:
@@ -100,12 +145,8 @@ def test_project_manager_update_conversion_helper_replaces_options(qt_app: QAppl
     manager = ProjectManager()
     manager.conversion_settings.options = {"legacy": True}
 
-    manager.update_conversion_helper("text_only", preserve_page_markers=True)
-    assert manager.conversion_settings.helper == "text_only"
-    assert manager.conversion_settings.options == {"preserve_page_markers": True}
-
-    manager.update_conversion_helper("default")
-    assert manager.conversion_settings.helper == "default"
+    manager.update_conversion_helper("azure_di")
+    assert manager.conversion_settings.helper == "azure_di"
     assert manager.conversion_settings.options == {}
 
 
