@@ -6,6 +6,7 @@ Handles API keys and sensitive configuration using OS keychain.
 import json
 import logging
 from pathlib import Path
+import os
 from datetime import datetime
 from typing import Dict, Optional, Any
 
@@ -33,8 +34,11 @@ class SecureSettings(QObject):
         self.logger = logging.getLogger(__name__)
         
         # Determine settings directory
+        env_override = os.getenv("FRD_SETTINGS_DIR")
         if settings_dir:
             self.settings_dir = settings_dir
+        elif env_override:
+            self.settings_dir = Path(env_override).expanduser()
         else:
             # Use user's config directory
             self.settings_dir = Path.home() / ".forensic_report_drafter" / "config"

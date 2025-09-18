@@ -9,6 +9,7 @@ wheels/
 /test_output
 test_output/
 logs/
+.forensic_report_drafter/
 *.log
 debug_summarization_*.log
 
