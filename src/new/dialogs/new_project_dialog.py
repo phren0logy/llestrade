@@ -27,42 +27,13 @@ from PySide6.QtWidgets import (
 )
 
 from src.new.core.project_manager import _ensure_unique_dir, _sanitize_project_folder
+from src.new.core.conversion_helpers import registry, ConversionHelper
 
 
-AVAILABLE_HELPERS: Dict[str, Dict[str, Any]] = {
-    "default": {
-        "label": "Local extractor (recommended)",
-        "description": (
-            "Uses the built-in converters for PDFs, Word documents, and text files. "
-            "Keeps lightweight markdown with a front-matter header."
-        ),
-        "options": [
-            {
-                "key": "include_pdf_front_matter",
-                "label": "Include PDF metadata header",
-                "type": "checkbox",
-                "default": True,
-                "tooltip": "Keeps a YAML header with title/source information in converted PDFs.",
-            }
-        ],
-    },
-    "text_only": {
-        "label": "Text-only output",
-        "description": (
-            "Generates bare markdown files without front-matter headers. Useful when downstream "
-            "tools expect raw text."
-        ),
-        "options": [
-            {
-                "key": "preserve_page_markers",
-                "label": "Preserve PDF page markers",
-                "type": "checkbox",
-                "default": False,
-                "tooltip": "Adds simple page break markers (--- Page N ---) to the output.",
-            }
-        ],
-    },
-}
+
+
+def _available_helpers() -> List[ConversionHelper]:
+    return registry().list_helpers()
 
 
 @dataclass(frozen=True)
@@ -357,10 +328,10 @@ class NewProjectDialog(QDialog):
 
     def _on_helper_changed(self, index: int) -> None:
         helper_key = self._helper_combo.itemData(index)
-        if helper_key is None:
-            helper_key = "default"
-        helper_info = AVAILABLE_HELPERS.get(helper_key, {})
-        self._helper_description_label.setText(helper_info.get("description", ""))
+        helper = registry().get(helper_key) if helper_key else None
+        if helper is None:
+            helper = registry().default_helper()
+        self._helper_description_label.setText(helper.description)
 
         while self._helper_options_container.count():
             item = self._helper_options_container.takeAt(0)
@@ -370,7 +341,7 @@ class NewProjectDialog(QDialog):
         self._helper_option_widgets.clear()
         self._helper_options_state.clear()
 
-        options = helper_info.get("options", [])
+        options = helper.options
         if not options:
             placeholder = QLabel("No additional settings for this helper.")
             placeholder.setStyleSheet("color: #777;")
@@ -378,22 +349,22 @@ class NewProjectDialog(QDialog):
             return
 
         for option in options:
-            if option.get("type") == "checkbox":
-                checkbox = QCheckBox(option.get("label", option["key"]))
-                checked = option.get("default", False)
+            if option.option_type == "checkbox":
+                checkbox = QCheckBox(option.label)
+                checked = bool(option.default)
                 checkbox.setChecked(checked)
-                if option.get("tooltip"):
-                    checkbox.setToolTip(option["tooltip"])
+                if option.tooltip:
+                    checkbox.setToolTip(option.tooltip)
                 checkbox.stateChanged.connect(
-                    lambda state, key=option["key"]: self._on_option_changed(
+                    lambda state, key=option.key: self._on_option_changed(
                         key, state == Qt.CheckState.Checked.value
                     )
                 )
-                self._helper_option_widgets[option["key"]] = checkbox
-                self._helper_options_state[option["key"]] = checked
+                self._helper_option_widgets[option.key] = checkbox
+                self._helper_options_state[option.key] = checked
                 self._helper_options_container.addWidget(checkbox)
             else:
-                unsupported = QLabel(f"Unsupported option type: {option.get('type')}")
+                unsupported = QLabel(f"Unsupported option type: {option.option_type}")
                 unsupported.setStyleSheet("color: #b26a00;")
                 self._helper_options_container.addWidget(unsupported)
 
@@ -403,7 +374,8 @@ class NewProjectDialog(QDialog):
     def _current_helper_key(self) -> str:
         index = self._helper_combo.currentIndex()
         helper_key = self._helper_combo.itemData(index)
-        return helper_key if helper_key else "default"
+        helper_key = helper_key or registry().default_helper().helper_id
+        return helper_key
 
     def _current_helper_options(self) -> Dict[str, Any]:
         return dict(self._helper_options_state)
