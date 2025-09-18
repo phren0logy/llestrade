@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from src.new.core.summary_groups import SummaryGroup
 
 from .secure_settings import SecureSettings
+from .file_tracker import DashboardMetrics
 
 
 @dataclass
@@ -211,6 +212,7 @@ class ProjectManager(QObject):
         self.source_state = SourceTreeState()
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
+        self.dashboard_metrics: DashboardMetrics = DashboardMetrics.empty()
         self.version_warning: Optional[str] = None
         
         # Auto-save timer
@@ -267,6 +269,7 @@ class ProjectManager(QObject):
         self.source_state = SourceTreeState()
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
+        self.dashboard_metrics = DashboardMetrics.empty()
         self.version_warning = None
         
         # Save initial project file
@@ -321,6 +324,7 @@ class ProjectManager(QObject):
             self.source_state = SourceTreeState.from_dict(data.get("source", {}))
             self.conversion_settings = ConversionSettings.from_dict(data.get("conversion", {}))
             self.dashboard_state = DashboardState.from_dict(data.get("dashboard_state", {}))
+            self.dashboard_metrics = DashboardMetrics.from_dict(data.get("dashboard_metrics"))
 
             # Update recent projects
             settings = SecureSettings()
@@ -368,6 +372,7 @@ class ProjectManager(QObject):
                 "source": self.source_state.to_dict(),
                 "conversion": self.conversion_settings.to_dict(),
                 "dashboard_state": self.dashboard_state.to_dict(),
+                "dashboard_metrics": self.dashboard_metrics.to_dict() if self.dashboard_metrics else None,
             }
             
             # Write to temporary file first
@@ -462,6 +467,36 @@ class ProjectManager(QObject):
             self._file_tracker = FileTracker(self.project_dir)
             self._file_tracker.load()
         return self._file_tracker
+
+    def get_dashboard_metrics(self, refresh: bool = False) -> DashboardMetrics:
+        """Return dashboard-friendly file metrics, optionally refreshing first."""
+        tracker = self.get_file_tracker()
+
+        if not refresh and self.dashboard_metrics and self.dashboard_metrics.last_scan:
+            return self.dashboard_metrics
+
+        snapshot = tracker.snapshot if not refresh else None
+        if snapshot is None:
+            if tracker.snapshot and not refresh:
+                snapshot = tracker.snapshot
+            else:
+                snapshot = tracker.scan()
+                self.update_source_state(last_scan=snapshot.timestamp.isoformat())
+
+        if snapshot:
+            metrics = snapshot.to_dashboard_metrics()
+        else:
+            metrics = DashboardMetrics.empty()
+
+        self._store_dashboard_metrics(metrics, mark_modified=refresh or metrics.last_scan is not None)
+        return self.dashboard_metrics
+
+    def _store_dashboard_metrics(self, metrics: DashboardMetrics, *, mark_modified: bool = True) -> None:
+        if self.dashboard_metrics == metrics:
+            return
+        self.dashboard_metrics = metrics
+        if mark_modified:
+            self.mark_modified()
 
     # ------------------------------------------------------------------
     # Summary group helpers
@@ -659,6 +694,7 @@ class ProjectManager(QObject):
             'source': self.source_state.to_dict(),
             'conversion': self.conversion_settings.to_dict(),
             'dashboard_state': self.dashboard_state.to_dict(),
+            'dashboard_metrics': self.dashboard_metrics.to_dict() if self.dashboard_metrics else None,
         }
     
     @property
@@ -688,6 +724,8 @@ class ProjectManager(QObject):
         self.source_state = SourceTreeState()
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
+        self.dashboard_metrics = DashboardMetrics.empty()
+        self._file_tracker = None
         self._modified = False
 
         self.logger.info("Closed project")

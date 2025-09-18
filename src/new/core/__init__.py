@@ -7,6 +7,7 @@ from .project_manager import ProjectManager, ProjectMetadata, ProjectCosts, Work
 from .workspace_controller import WorkspaceController
 from .summary_groups import SummaryGroup
 from .feature_flags import FeatureFlags
+from .file_tracker import DashboardMetrics
 
 __all__ = [
     'SecureSettings',
@@ -16,5 +17,6 @@ __all__ = [
     'WorkflowState',
     'WorkspaceController',
     'SummaryGroup',
-    'FeatureFlags'
+    'FeatureFlags',
+    'DashboardMetrics'
 ]

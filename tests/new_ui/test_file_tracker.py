@@ -1,9 +1,17 @@
+import importlib.util
 import json
 from pathlib import Path
+import sys
 
 import pytest
 
-from src.new.core.file_tracker import FileTracker
+MODULE_PATH = Path(__file__).resolve().parents[2] / "src" / "new" / "core" / "file_tracker.py"
+_SPEC = importlib.util.spec_from_file_location("file_tracker_module", MODULE_PATH)
+assert _SPEC and _SPEC.loader
+_MODULE = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _MODULE
+_SPEC.loader.exec_module(_MODULE)
+FileTracker = _MODULE.FileTracker
 
 
 @pytest.fixture

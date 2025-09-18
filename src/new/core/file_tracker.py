@@ -44,6 +44,10 @@ class FileTrackerSnapshot:
             return None
         return self.processed_count / self.imported_count
 
+    def to_dashboard_metrics(self) -> "DashboardMetrics":
+        """Translate the snapshot into lightweight dashboard metrics."""
+        return DashboardMetrics.from_snapshot(self)
+
     def to_json(self) -> Dict[str, object]:
         return {
             "timestamp": self.timestamp.isoformat(),
@@ -70,6 +74,81 @@ class FileTrackerSnapshot:
             version=str(payload.get("version", TRACKER_VERSION)),
         )
 
+
+@dataclass(frozen=True)
+class DashboardMetrics:
+    """Aggregated counts surfaced to the dashboard and welcome views."""
+
+    last_scan: Optional[datetime]
+    imported_total: int = 0
+    processed_total: int = 0
+    summaries_total: int = 0
+    pending_processing: int = 0
+    pending_summaries: int = 0
+    notes: Dict[str, str] = field(default_factory=dict)
+    snapshot_version: str = TRACKER_VERSION
+
+    @classmethod
+    def empty(cls) -> "DashboardMetrics":
+        return cls(
+            last_scan=None,
+            imported_total=0,
+            processed_total=0,
+            summaries_total=0,
+            pending_processing=0,
+            pending_summaries=0,
+            notes={},
+            snapshot_version=TRACKER_VERSION,
+        )
+
+    @classmethod
+    def from_snapshot(cls, snapshot: FileTrackerSnapshot) -> "DashboardMetrics":
+        return cls(
+            last_scan=snapshot.timestamp,
+            imported_total=snapshot.imported_count,
+            processed_total=snapshot.processed_count,
+            summaries_total=snapshot.summaries_count,
+            pending_processing=len(snapshot.missing.get("processed_missing", [])),
+            pending_summaries=len(snapshot.missing.get("summaries_missing", [])),
+            notes=dict(snapshot.notes),
+            snapshot_version=snapshot.version,
+        )
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "last_scan": self.last_scan.isoformat() if self.last_scan else None,
+            "imported_total": self.imported_total,
+            "processed_total": self.processed_total,
+            "summaries_total": self.summaries_total,
+            "pending_processing": self.pending_processing,
+            "pending_summaries": self.pending_summaries,
+            "notes": dict(self.notes),
+            "snapshot_version": self.snapshot_version,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Dict[str, object] | None) -> "DashboardMetrics":
+        if not payload:
+            return cls.empty()
+        last_scan_value = payload.get("last_scan") if isinstance(payload, dict) else None
+        last_scan: Optional[datetime]
+        if isinstance(last_scan_value, str):
+            try:
+                last_scan = datetime.fromisoformat(last_scan_value)
+            except ValueError:
+                last_scan = None
+        else:
+            last_scan = None
+        return cls(
+            last_scan=last_scan,
+            imported_total=int(payload.get("imported_total", 0)),
+            processed_total=int(payload.get("processed_total", 0)),
+            summaries_total=int(payload.get("summaries_total", 0)),
+            pending_processing=int(payload.get("pending_processing", 0)),
+            pending_summaries=int(payload.get("pending_summaries", 0)),
+            notes=dict(payload.get("notes", {})),
+            snapshot_version=str(payload.get("snapshot_version", TRACKER_VERSION)),
+        )
 
 class FileTracker:
     """Track files within a project directory.
@@ -165,4 +244,4 @@ class FileTracker:
             LOGGER.error("Failed to persist file tracker snapshot: %s", exc)
 
 
-__all__ = ["FileTracker", "FileTrackerSnapshot"]
+__all__ = ["FileTracker", "FileTrackerSnapshot", "DashboardMetrics"]

@@ -2,25 +2,20 @@
 
 from __future__ import annotations
 
+import importlib.util
 from pathlib import Path
 from typing import Any, Dict
-
-import importlib.util
 import sys
-
-ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import pytest
 
-_FEATURE_FLAGS_PATH = ROOT / "src" / "new" / "core" / "feature_flags.py"
-_spec = importlib.util.spec_from_file_location("feature_flags", _FEATURE_FLAGS_PATH)
-assert _spec and _spec.loader
-_module = importlib.util.module_from_spec(_spec)
-sys.modules[_spec.name] = _module
-_spec.loader.exec_module(_module)
-FeatureFlags = _module.FeatureFlags
+MODULE_PATH = Path(__file__).resolve().parents[2] / "src" / "new" / "core" / "feature_flags.py"
+_SPEC = importlib.util.spec_from_file_location("feature_flags_module", MODULE_PATH)
+assert _SPEC and _SPEC.loader
+_MODULE = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _MODULE
+_SPEC.loader.exec_module(_MODULE)
+FeatureFlags = _MODULE.FeatureFlags
 
 
 class _StubSettings:
