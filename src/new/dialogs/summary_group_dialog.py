@@ -25,7 +25,6 @@ from PySide6.QtWidgets import (
 
 from src.config.app_config import get_available_providers_and_models
 from src.new.core.summary_groups import SummaryGroup
-from src.new.core.file_tracker import FileTracker
 
 
 class SummaryGroupDialog(QDialog):
@@ -163,32 +162,34 @@ class SummaryGroupDialog(QDialog):
     # ------------------------------------------------------------------
     def _populate_file_tree(self) -> None:
         self.file_tree.clear()
-        self._processed_files: List[str] = []
         if not self._project_dir:
             notice = QTreeWidgetItem(["No project directory available."])
             notice.setFlags(Qt.NoItemFlags)
             self.file_tree.addTopLevelItem(notice)
             return
 
-        try:
-            tracker = FileTracker(self._project_dir)
-            snapshot = tracker.scan()
-            self._processed_files = snapshot.files.get("processed", [])
-        except Exception as exc:  # pragma: no cover - UI feedback only
-            notice = QTreeWidgetItem([f"Scan failed: {exc}"])
+        converted_root = self._project_dir / "converted_documents"
+        if not converted_root.exists():
+            notice = QTreeWidgetItem(["No converted documents found. Run conversion first."])
             notice.setFlags(Qt.NoItemFlags)
             self.file_tree.addTopLevelItem(notice)
             return
 
-        if not self._processed_files:
-            notice = QTreeWidgetItem(["No processed documents found. Add files to processed_documents/ first."])
+        converted_files = sorted(
+            path.relative_to(converted_root).as_posix()
+            for path in converted_root.rglob("*")
+            if path.is_file()
+        )
+
+        if not converted_files:
+            notice = QTreeWidgetItem(["Converted folder is empty. Run conversion first."])
             notice.setFlags(Qt.NoItemFlags)
             self.file_tree.addTopLevelItem(notice)
             return
 
         self._tree_nodes = {}
         self._block_tree_signal = True
-        for path in sorted(self._processed_files):
+        for path in converted_files:
             self._add_path_to_tree(path)
         self.file_tree.expandAll()
         self._block_tree_signal = False
@@ -210,9 +211,9 @@ class SummaryGroupDialog(QDialog):
 
             item = QTreeWidgetItem(parent_item, [part])
             item.setData(0, Qt.UserRole, ("file" if is_file else "dir", current_path))
-            flags = item.flags() | Qt.ItemIsUserCheckable
+            flags = item.flags() | Qt.ItemFlag.ItemIsUserCheckable
             if not is_file:
-                flags |= Qt.ItemIsTristate
+                flags |= Qt.ItemFlag.ItemIsAutoTristate
             item.setFlags(flags)
             item.setCheckState(0, Qt.Unchecked)
 

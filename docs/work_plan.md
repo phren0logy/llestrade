@@ -89,10 +89,10 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Display `X of Y` counts from FileTracker for files converted vs. pending (including converted_documents)
   - [x] Keep batch operations non-blocking and track in-flight conversions to avoid duplicate submissions
 - [ ] Bulk Analysis Tab
-  - [ ] List bulk analysis groups with `X of Y` document coverage using FileTracker data
-  - [ ] Reuse folder tree with greyed-out (tooltip: "Enable in Documents → Sources") entries for folders not selected for conversion
+  - [x] List bulk analysis groups with `X of Y` document coverage using FileTracker data
+  - [x] Reuse folder tree with greyed-out (tooltip: "Enable in Documents → Sources") entries for folders not selected for conversion *(simplified to converted_documents tree only)*
   - [ ] Offer system/user prompt file pickers per group (stored as relative paths)
-  - [ ] Provide run/stop controls that enqueue work on the shared worker pool and surface concise logs
+  - [x] Provide run/stop controls that enqueue work on the shared worker pool and surface concise logs *(stubbed with simulated runs; replace with real workers later)*
 - [ ] Progress Tab
   - [ ] Combined log from all operations
   - [ ] Simple cancel button for current operation

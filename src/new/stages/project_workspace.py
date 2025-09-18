@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Sequence
 
-from PySide6.QtCore import Qt, QThreadPool, QUrl
+from PySide6.QtCore import Qt, QThreadPool, QUrl, QTimer
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -52,6 +52,7 @@ class ProjectWorkspace(QWidget):
         self._conversion_running = False
         self._conversion_total = 0
         self._missing_root_prompted = False
+        self._running_groups: dict[str, QTimer] = {}
 
         self._build_ui()
         if project_manager:
@@ -136,15 +137,21 @@ class ProjectWorkspace(QWidget):
         create_button.clicked.connect(self._show_create_group_dialog)
         header_layout.addWidget(create_button)
         refresh_button = QPushButton("Refresh")
-        refresh_button.clicked.connect(self._refresh_summary_groups)
+        refresh_button.clicked.connect(self.refresh)
         header_layout.addWidget(refresh_button)
         layout.addLayout(header_layout)
 
         self._summary_info_label = QLabel("No summary groups yet.")
         layout.addWidget(self._summary_info_label)
 
-        self._summary_table = QTableWidget(0, 4)
-        self._summary_table.setHorizontalHeaderLabels(["Group", "Files", "Updated", "Actions"])
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(12)
+
+        table_container = QVBoxLayout()
+        table_container.setSpacing(6)
+
+        self._summary_table = QTableWidget(0, 5)
+        self._summary_table.setHorizontalHeaderLabels(["Group", "Coverage", "Updated", "Status", "Actions"])
         self._summary_table.verticalHeader().setVisible(False)
         self._summary_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._summary_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -154,13 +161,33 @@ class ProjectWorkspace(QWidget):
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-        layout.addWidget(self._summary_table)
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+        table_container.addWidget(self._summary_table)
 
         self._summary_empty_label = QLabel("No summary groups created yet.")
         self._summary_empty_label.setAlignment(Qt.AlignCenter)
         self._summary_empty_label.setStyleSheet("color: #666; padding: 20px;")
-        layout.addWidget(self._summary_empty_label)
+        table_container.addWidget(self._summary_empty_label)
         self._summary_empty_label.hide()
+
+        content_layout.addLayout(table_container, 2)
+
+        tree_container = QVBoxLayout()
+        tree_container.setSpacing(4)
+        tree_label = QLabel("Folder coverage (read-only)")
+        tree_label.setStyleSheet("color: #666; font-size: 11px;")
+        tree_container.addWidget(tree_label)
+
+        self._group_source_tree = QTreeWidget()
+        self._group_source_tree.setHeaderHidden(True)
+        self._group_source_tree.setUniformRowHeights(True)
+        self._group_source_tree.setSelectionMode(QAbstractItemView.NoSelection)
+        self._group_source_tree.setFocusPolicy(Qt.NoFocus)
+        tree_container.addWidget(self._group_source_tree)
+
+        content_layout.addLayout(tree_container, 1)
+
+        layout.addLayout(content_layout)
 
         return self._summary_tab
 
@@ -174,6 +201,7 @@ class ProjectWorkspace(QWidget):
     def set_project(self, project_manager: ProjectManager) -> None:
         """Attach the workspace to a project manager."""
         self._project_manager = project_manager
+        self._running_groups.clear()
         project_dir = project_manager.project_dir
         project_path = Path(project_dir).resolve() if project_dir else None
         self._project_path_label.setText(
@@ -192,6 +220,7 @@ class ProjectWorkspace(QWidget):
         self._update_source_root_label()
         self._update_last_scan_label()
         self._refresh_file_tracker()
+        self._prune_running_groups()
         self._refresh_summary_groups()
 
     def begin_initial_conversion(self) -> None:
@@ -410,6 +439,7 @@ class ProjectWorkspace(QWidget):
         if self._project_manager:
             self._project_manager.update_source_state(warnings=self._current_warnings)
         self._update_source_root_label()
+        self._populate_group_source_tree()
 
     def _iter_directories(self, root_path: Path) -> List[str]:
         results: List[str] = []
@@ -421,6 +451,47 @@ class ProjectWorkspace(QWidget):
                     continue
                 results.append(rel)
         return results
+
+    def _populate_group_source_tree(self) -> None:
+        if not hasattr(self, "_group_source_tree"):
+            return
+        self._group_source_tree.clear()
+
+        if not self._project_manager:
+            placeholder = QTreeWidgetItem(["Open a project to view folders."])
+            placeholder.setFlags(Qt.NoItemFlags)
+            self._group_source_tree.addTopLevelItem(placeholder)
+            return
+
+        root_path = self._resolve_source_root()
+        if not root_path or not root_path.exists():
+            placeholder = QTreeWidgetItem(["Source folder not set."])
+            placeholder.setFlags(Qt.NoItemFlags)
+            self._group_source_tree.addTopLevelItem(placeholder)
+            return
+
+        directories = sorted(self._iter_directories(root_path))
+        if not directories:
+            placeholder = QTreeWidgetItem(["No subfolders available."])
+            placeholder.setFlags(Qt.NoItemFlags)
+            self._group_source_tree.addTopLevelItem(placeholder)
+            return
+
+        self._group_source_tree.setUpdatesEnabled(False)
+        for relative_path in directories:
+            parts = relative_path.split("/")
+            parent = self._group_source_tree.invisibleRootItem()
+            path_so_far: List[str] = []
+            for part in parts:
+                path_so_far.append(part)
+                rel_key = "/".join(path_so_far)
+                child = self._find_child(parent, part)
+                if child is None:
+                    child = QTreeWidgetItem([part])
+                    parent.addChild(child)
+                parent = child
+        self._group_source_tree.expandAll()
+        self._group_source_tree.setUpdatesEnabled(True)
 
     def _find_child(self, parent: QTreeWidgetItem, name: str) -> Optional[QTreeWidgetItem]:
         for index in range(parent.childCount()):
@@ -603,7 +674,8 @@ class ProjectWorkspace(QWidget):
             return
 
         groups = self._project_manager.list_summary_groups()
-        total_docs = self._processed_total or self._imported_total or 0
+        total_docs = self._imported_total or 0
+        self._prune_running_groups({group.group_id for group in groups})
 
         self._summary_table.setRowCount(0)
         if not groups:
@@ -626,8 +698,8 @@ class ProjectWorkspace(QWidget):
 
         resolved_files = self._resolve_group_files(group)
         files_count = len(resolved_files)
-        total = total_docs if total_docs else max(files_count, 1)
-        files_item = QTableWidgetItem(f"{files_count} of {total}")
+        coverage_text = f"{files_count} of {total_docs}" if total_docs else str(files_count)
+        files_item = QTableWidgetItem(coverage_text)
         files_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 1, files_item)
 
@@ -636,10 +708,25 @@ class ProjectWorkspace(QWidget):
         updated_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 2, updated_item)
 
+        status_text = "Running…" if group.group_id in self._running_groups else ("Ready" if files_count else "No converted files")
+        status_item = QTableWidgetItem(status_text)
+        status_item.setTextAlignment(Qt.AlignCenter)
+        self._summary_table.setItem(row, 3, status_item)
+
         action_widget = QWidget()
         action_layout = QHBoxLayout(action_widget)
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(6)
+
+        run_button = QPushButton("Run")
+        run_button.setEnabled(files_count > 0 and group.group_id not in self._running_groups)
+        run_button.clicked.connect(lambda _, g=group: self._start_group_run(g))
+        action_layout.addWidget(run_button)
+
+        cancel_button = QPushButton("Cancel")
+        cancel_button.setEnabled(group.group_id in self._running_groups)
+        cancel_button.clicked.connect(lambda _, g=group: self._cancel_group_run(g))
+        action_layout.addWidget(cancel_button)
 
         open_button = QPushButton("Open Folder")
         open_button.clicked.connect(lambda _, g=group: self._open_group_folder(g))
@@ -649,7 +736,7 @@ class ProjectWorkspace(QWidget):
         delete_button.clicked.connect(lambda _, g=group: self._confirm_delete_group(g))
         action_layout.addWidget(delete_button)
 
-        self._summary_table.setCellWidget(row, 3, action_widget)
+        self._summary_table.setCellWidget(row, 4, action_widget)
 
         tooltip_parts = []
         if description:
@@ -662,6 +749,7 @@ class ProjectWorkspace(QWidget):
         if tooltip_parts:
             name_item.setToolTip("\n".join(tooltip_parts))
             files_item.setToolTip("\n".join(tooltip_parts))
+            status_item.setToolTip("\n".join(tooltip_parts))
 
     def _show_create_group_dialog(self) -> None:
         if not self._project_manager or not self._project_manager.project_dir:
@@ -694,6 +782,7 @@ class ProjectWorkspace(QWidget):
             if not self._project_manager.delete_summary_group(group.group_id):
                 QMessageBox.warning(self, "Delete Failed", "Could not delete the summary group.")
             else:
+                self._cancel_group_run(group)
                 self.refresh()
 
     def _open_group_folder(self, group: SummaryGroup) -> None:
@@ -703,20 +792,78 @@ class ProjectWorkspace(QWidget):
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
-    def _resolve_group_files(self, group: SummaryGroup) -> set[str]:
-        processed = set()
-        if self._latest_snapshot:
-            processed = set(self._latest_snapshot.files.get("processed", []))
+    def _start_group_run(self, group: SummaryGroup) -> None:
+        if group.group_id in self._running_groups:
+            QMessageBox.information(
+                self,
+                "Already Running",
+                f"Bulk analysis for '{group.name}' is already in progress.",
+            )
+            return
 
-        selected = {path for path in group.files if path in processed or not processed}
+        files = self._resolve_group_files(group)
+        if not files:
+            QMessageBox.warning(
+                self,
+                "No Converted Documents",
+                "This group does not have any converted documents yet. Run conversion first.",
+            )
+            return
+
+        timer = QTimer(self)
+        timer.setSingleShot(True)
+        timer.timeout.connect(lambda gid=group.group_id: self._on_group_run_finished(gid))
+        timer.start(2000)
+        self._running_groups[group.group_id] = timer
+        self._summary_info_label.setText("Running bulk analysis…")
+        self._refresh_summary_groups()
+
+    def _cancel_group_run(self, group: SummaryGroup) -> None:
+        timer = self._running_groups.pop(group.group_id, None)
+        if timer:
+            timer.stop()
+            timer.deleteLater()
+        self._refresh_summary_groups()
+
+    def _on_group_run_finished(self, group_id: str) -> None:
+        timer = self._running_groups.pop(group_id, None)
+        if timer:
+            timer.deleteLater()
+        QMessageBox.information(self, "Bulk Analysis", "Bulk analysis completed for the selected group.")
+        self._refresh_summary_groups()
+
+    def _resolve_group_files(self, group: SummaryGroup) -> set[str]:
+        converted = set()
+        if self._latest_snapshot:
+            converted = set(self._latest_snapshot.files.get("imported", []))
+
+        if not converted:
+            return set()
+
+        selected = {path for path in group.files if path in converted}
 
         for directory in group.directories:
             normalised = directory.strip("/")
             if not normalised:
-                selected.update(processed)
+                selected.update(converted)
                 continue
             prefix = normalised + "/"
-            for path in processed:
+            for path in converted:
                 if path == normalised or path.startswith(prefix):
                     selected.add(path)
         return selected
+
+    def _prune_running_groups(self, valid_ids: Optional[set[str]] = None) -> None:
+        if valid_ids is None:
+            valid_ids = set()
+            if self._project_manager:
+                try:
+                    valid_ids = {group.group_id for group in self._project_manager.list_summary_groups()}
+                except Exception:
+                    valid_ids = set()
+        stale = [gid for gid in list(self._running_groups.keys()) if gid not in valid_ids]
+        for gid in stale:
+            timer = self._running_groups.pop(gid, None)
+            if timer:
+                timer.stop()
+                timer.deleteLater()

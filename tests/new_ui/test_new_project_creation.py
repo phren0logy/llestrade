@@ -15,6 +15,7 @@ _ = PySide6
 from src.new.core.conversion_manager import ConversionJob
 from src.new.core.project_manager import ProjectManager, ProjectMetadata
 from src.new.dialogs.new_project_dialog import NewProjectDialog
+from src.new.dialogs.summary_group_dialog import SummaryGroupDialog
 from src.new.workers.conversion_worker import ConversionWorker
 from src.new.core.file_tracker import FileTracker
 from src.new.stages.project_workspace import ProjectWorkspace
@@ -151,3 +152,27 @@ def test_workspace_prompts_for_missing_source(monkeypatch: pytest.MonkeyPatch, t
     assert prompt_called["count"] == 1
     assert manager.source_state.warnings
     assert "Source folder" in manager.source_state.warnings[0]
+
+
+def test_summary_group_dialog_lists_converted_documents(tmp_path: Path, qt_app: QApplication) -> None:
+    assert qt_app is not None
+
+    projects_root = tmp_path / "projects"
+    projects_root.mkdir()
+    manager = ProjectManager()
+    manager.create_project(projects_root, ProjectMetadata(case_name="Converted Demo"))
+
+    converted_root = manager.project_dir / "converted_documents" / "folder"
+    converted_root.mkdir(parents=True)
+    (converted_root / "doc.md").write_text("content")
+
+    dialog = SummaryGroupDialog(manager.project_dir)
+    try:
+        tree = dialog.file_tree
+        top_labels = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]
+        assert "folder" in top_labels
+        folder_item = next(tree.topLevelItem(i) for i in range(tree.topLevelItemCount()) if tree.topLevelItem(i).text(0) == "folder")
+        child_names = [folder_item.child(i).text(0) for i in range(folder_item.childCount())]
+        assert "doc.md" in child_names
+    finally:
+        dialog.deleteLater()

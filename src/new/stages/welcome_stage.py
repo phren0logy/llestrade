@@ -9,8 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List
 
-from PySide6.QtCore import Qt, QTimer, Signal, QSize
-from PySide6.QtGui import QFont, QIcon
+from PySide6.QtCore import Qt, QTimer, Signal, QSize, QUrl
+from PySide6.QtGui import QFont, QIcon, QDesktopServices
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -124,6 +124,7 @@ class WelcomeStage(QWidget):
         card.setCursor(Qt.PointingHandCursor)
 
         layout = QVBoxLayout(card)
+        layout.setSpacing(8)
         name = QLabel(project_info.get("name", "Untitled Project"))
         font = QFont(name.font())
         font.setBold(True)
@@ -149,17 +150,46 @@ class WelcomeStage(QWidget):
 
         project_path = Path(project_info.get("path", "")).expanduser()
 
-        def _open(_event) -> None:
-            if project_path.exists():
-                self.project_opened.emit(project_path)
-            else:
-                QMessageBox.warning(
-                    self,
-                    "Project Missing",
-                    f"The project path could not be found:\n{project_path}",
-                )
+        stats_label = QLabel(self._project_stats_text(project_path))
+        stats_label.setWordWrap(True)
+        stats_label.setStyleSheet("color: #555; font-size: 11px;")
+        layout.addWidget(stats_label)
 
-        card.mousePressEvent = _open  # type: ignore[assignment]
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        button_row.setSpacing(8)
+
+        open_project_btn = QPushButton("Open")
+        open_project_btn.setMinimumHeight(28)
+        open_project_btn.clicked.connect(lambda _, path=project_path: self._open_project_path(path))
+        button_row.addWidget(open_project_btn)
+
+        open_folder_btn = QPushButton("Open Folder")
+        open_folder_btn.setMinimumHeight(28)
+        open_folder_btn.clicked.connect(lambda _, path=project_path: self._open_project_folder(path))
+        button_row.addWidget(open_folder_btn)
+
+        delete_btn = QPushButton("Delete")
+        delete_btn.setMinimumHeight(28)
+        delete_btn.setStyleSheet("QPushButton { color: #d32f2f; }")
+        delete_btn.clicked.connect(lambda _, path=project_path: self._confirm_delete_project(path))
+        button_row.addWidget(delete_btn)
+
+        button_row.addStretch()
+        layout.addLayout(button_row)
+
+        if not project_path.exists():
+            card.setStyleSheet(
+                "QFrame { border: 1px solid #e57373; border-radius: 8px; background: #fff6f7; padding: 16px; }"
+            )
+            stats_label.setText("Project file missing. Use Delete to remove from list.")
+            open_project_btn.setEnabled(False)
+            open_folder_btn.setEnabled(False)
+        else:
+            def _open(_event) -> None:
+                self.project_opened.emit(project_path)
+
+            card.mousePressEvent = _open  # type: ignore[assignment]
         return card
 
     def _build_side_panel(self) -> QVBoxLayout:
@@ -203,6 +233,90 @@ class WelcomeStage(QWidget):
         layout.addWidget(purge_btn)
 
         return group
+
+    # ------------------------------------------------------------------
+    # Project helpers
+    # ------------------------------------------------------------------
+    def _project_stats_text(self, project_path: Path) -> str:
+        if not project_path.exists():
+            return "Project file not found."
+        project_dir = project_path.parent
+
+        converted = self._count_files(project_dir / "converted_documents")
+        processed = self._count_files(project_dir / "processed_documents")
+        summaries = self._count_files(project_dir / "summaries")
+
+        if converted:
+            return (
+                f"Converted {converted} | Processed {processed}/{converted} | "
+                f"Summaries {summaries}/{converted}"
+            )
+        return "No converted documents yet."
+
+    def _open_project_path(self, project_path: Path) -> None:
+        if project_path.exists():
+            self.project_opened.emit(project_path)
+        else:
+            QMessageBox.warning(
+                self,
+                "Project Missing",
+                f"The project path could not be found:\n{project_path}",
+            )
+
+    def _open_project_folder(self, project_path: Path) -> None:
+        folder = project_path.parent if project_path.suffix == ProjectManager.PROJECT_EXTENSION else project_path
+        if not folder.exists():
+            QMessageBox.warning(
+                self,
+                "Folder Missing",
+                f"The project folder could not be found:\n{folder}",
+            )
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _confirm_delete_project(self, project_path: Path) -> None:
+        if project_path.suffix != ProjectManager.PROJECT_EXTENSION:
+            candidate = project_path / ProjectManager.PROJECT_FILENAME
+            if candidate.exists():
+                project_path = candidate
+        if not project_path.exists():
+            self.settings.remove_recent_project(str(project_path))
+            self._populate_recent_projects()
+            return
+        project_dir = project_path.parent
+        reply = QMessageBox.question(
+            self,
+            "Delete Project",
+            f"Delete project '{project_dir.name}' and all generated files?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+        try:
+            shutil.rmtree(project_dir, ignore_errors=False)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Delete Failed",
+                f"Failed to delete the project folder:\n{exc}",
+            )
+            return
+        self.settings.remove_recent_project(str(project_path))
+        self._populate_recent_projects()
+        QMessageBox.information(self, "Project Deleted", "The project was deleted successfully.")
+
+    def _count_files(self, folder: Path) -> int:
+        if not folder.exists():
+            return 0
+        count = 0
+        try:
+            for path in folder.rglob("*"):
+                if path.is_file():
+                    count += 1
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.debug("Failed counting files in %s: %s", folder, exc)
+        return count
 
     def _build_api_status(self) -> QWidget:
         self._api_group = QGroupBox("Settings")
