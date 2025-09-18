@@ -46,11 +46,11 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Add project statistics calculation
   - [x] Write pytest tests for critical methods
   - [x] Limit initial scope to counts, last-run timestamps, and deterministic reconciliation
-- [ ] Update ProjectManager (`src/new/core/project_manager.py`)
-  - [ ] Persist new project layout (create `<parent>/<project-name>/` folder, sanitize name, keep readable)
-  - [ ] Store source folder configuration as relative paths with include/exclude tree state
-  - [ ] Record selected conversion helper and per-project conversion preferences
-  - [ ] Expose lightweight dashboard state (last opened tab, pending job descriptors) instead of `WorkflowState`
+- [x] Update ProjectManager (`src/new/core/project_manager.py`)
+  - [x] Persist new project layout (create `<parent>/<project-name>/` folder, sanitize name, keep readable)
+  - [x] Store source folder configuration as relative paths with include/exclude tree state
+  - [x] Record selected conversion helper and per-project conversion preferences
+  - [x] Expose lightweight dashboard state (last opened tab, pending job descriptors) instead of `WorkflowState`
   - [ ] Surface FileTracker statistics and bulk-analysis metadata for the workspace views
 - [x] Create bulk analysis group system (`src/new/core/summary_groups.py` → to be renamed if needed)
   - [x] Implement SummaryGroup dataclass
@@ -71,9 +71,10 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
     - [ ] Add "Open Folder" action
     - [ ] Test with existing projects (breaking changes OK)
 - [ ] Simplify project creation
-  - [ ] Single-screen setup (name, description, source + output folders, conversion helper)
-  - [ ] Create `<selected folder>/<project-name>/` (spaces → dashes) and call out folder creation to the user
-  - [ ] Remove multi-stage wizard flow; initial import deferred to Documents tab
+  - [x] Single-screen setup (name, source folder, output folder)
+  - [x] Create `<selected folder>/<project-name>/` (spaces → dashes) and call out folder creation to the user
+  - [x] Remove multi-stage wizard flow; initial import deferred to Documents tab
+  - [ ] Capture conversion helper selection in the setup dialog
 
 #### Step 3 - Project Workspace
 
@@ -82,11 +83,11 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [ ] Create Documents, Bulk Analysis, Progress tabs
   - [ ] Default to Bulk Analysis tab on open once setup is complete
 - [ ] Documents Tab
-  - [ ] Source folder picker with tree view checkboxes (folder-level only, default to all selected)
-  - [ ] Store selections as relative paths and surface manual "Re-scan for new files" action with last-scan timestamp
-  - [ ] Warn when files exist in the source root but no folders are selected (conversion requires subfolders)
-  - [ ] Display `X of Y` counts from FileTracker for files converted vs. pending
-  - [ ] Keep batch operations non-blocking and track in-flight conversions to avoid duplicate submissions
+  - [x] Source folder picker with tree view checkboxes (folder-level only, default to all selected)
+  - [x] Store selections as relative paths and surface manual "Re-scan for new files" action with last-scan timestamp
+  - [x] Warn when files exist in the source root but no folders are selected (conversion requires subfolders)
+  - [ ] Display `X of Y` counts from FileTracker for files converted vs. pending (including converted_documents)
+  - [x] Keep batch operations non-blocking and track in-flight conversions to avoid duplicate submissions
 - [ ] Bulk Analysis Tab
   - [ ] List bulk analysis groups with `X of Y` document coverage using FileTracker data
   - [ ] Reuse folder tree with greyed-out (tooltip: "Enable in Documents → Sources") entries for folders not selected for conversion
@@ -99,13 +100,13 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Step 4 - Automated Conversion & Bulk Analysis
 
-- [ ] Extend project metadata to capture project root, source-relative folder selections, and conversion helper choice
-- [ ] Update project creation to gather source folder, output folder, and helper (with warning about root-level files)
-- [ ] On project open (and when "Re-scan" is pressed), detect new/changed files and prompt for conversion + bulk analysis
-- [ ] Implement conversion helper registry that handles PDFs/complex formats while skipping simple markdown/plain-text files
-- [ ] Track in-flight conversions in memory to avoid duplicate submissions during long runs; rely on file existence post-run
+- [x] Extend project metadata to capture project root, source-relative folder selections, and conversion helper choice
+- [x] Update project creation to gather source folder and output folder (warning about root-level files); helper selection pending
+- [x] On project open (and when "Re-scan" is pressed), detect new/changed files and prompt for conversion + bulk analysis
+- [x] Implement conversion helper registry that handles PDFs/complex formats while skipping simple markdown/plain-text files *(default helper in place; additional helpers TBD)*
+- [x] Track in-flight conversions in memory to avoid duplicate submissions during long runs; rely on file existence post-run
 - [ ] After conversion, trigger bulk analysis for eligible groups (folders selected in both tabs) using existing chunking for large files
-- [ ] Provide clear UI to accept/decline runs and surface log output per operation
+- [x] Provide clear UI to accept/decline runs and surface log output per operation
 
 ### Phase 2: Bulk Analysis & Integration
 
@@ -475,11 +476,11 @@ _The wizard-style UI with linear stages has been replaced by the dashboard appro
 
 ## Immediate Next Steps
 
-1. Finish feature flag wiring so legacy launch remains available during dashboard work
-2. Update ProjectManager to persist relative source tree, conversion helper, and UI state
-3. Implement Documents tab tree (scan-on-open + manual re-scan, root-level warnings)
-4. Build Bulk Analysis tab + group dialog (folder gating, prompt file pickers, run flows)
-5. Consolidate worker infrastructure (conversion + bulk analysis) on shared pool with safe shutdown
+1. Surface conversion helper selection in the new project dialog and plumb helper-specific options
+2. Extend Documents tab counts/logging to show converted vs. pending documents after each run
+3. Add automatic hand-off from conversion completion to bulk-analysis job scheduling where configured
+4. Build out the Bulk Analysis tab actions (folder gating, prompt pickers, run + delete flows)
+5. Enhance Welcome Stage with per-project stats/open-folder action and finish legacy cleanup UI polish
 
 ## Notes
 

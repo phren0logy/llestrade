@@ -5,9 +5,9 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Sequence
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QThreadPool, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -27,9 +27,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QHeaderView
 
+from src.new.core.conversion_manager import ConversionJob, build_conversion_jobs
 from src.new.core.project_manager import ProjectManager
 from src.new.core.summary_groups import SummaryGroup
 from src.new.dialogs.summary_group_dialog import SummaryGroupDialog
+from src.new.workers import ConversionWorker
 
 
 class ProjectWorkspace(QWidget):
@@ -44,6 +46,11 @@ class ProjectWorkspace(QWidget):
         self._latest_snapshot = None
         self._updating_tree = False
         self._current_warnings: List[str] = []
+        self._thread_pool = QThreadPool.globalInstance()
+        self._active_workers: List[ConversionWorker] = []
+        self._inflight_sources: set[Path] = set()
+        self._conversion_running = False
+        self._conversion_total = 0
 
         self._build_ui()
         if project_manager:
@@ -87,9 +94,9 @@ class ProjectWorkspace(QWidget):
         self._last_scan_label = QLabel("")
         self._last_scan_label.setStyleSheet("color: #666;")
         header_layout.addWidget(self._last_scan_label)
-        rescan_button = QPushButton("Re-scan")
-        rescan_button.clicked.connect(self._handle_rescan_clicked)
-        header_layout.addWidget(rescan_button)
+        self._rescan_button = QPushButton("Re-scan")
+        self._rescan_button.clicked.connect(lambda: self._trigger_conversion(auto_run=False))
+        header_layout.addWidget(self._rescan_button)
         tab_layout.addLayout(header_layout)
 
         # Tree view for folder selection
@@ -188,7 +195,7 @@ class ProjectWorkspace(QWidget):
 
     def begin_initial_conversion(self) -> None:
         """Trigger an initial scan/conversion after project creation."""
-        self._handle_rescan_clicked()
+        self._trigger_conversion(auto_run=True)
 
     def _refresh_file_tracker(self) -> None:
         if not self._project_manager:
@@ -236,14 +243,38 @@ class ProjectWorkspace(QWidget):
     # ------------------------------------------------------------------
     # Source tree helpers
     # ------------------------------------------------------------------
-    def _handle_rescan_clicked(self) -> None:
+    def _trigger_conversion(self, auto_run: bool) -> None:
         if not self._project_manager:
             return
-        self._populate_source_tree()
-        self._refresh_file_tracker()
-        timestamp = datetime.utcnow().isoformat()
-        self._project_manager.update_source_state(last_scan=timestamp, warnings=self._current_warnings)
-        self._update_last_scan_label()
+        if self._conversion_running:
+            QMessageBox.information(
+                self,
+                "Conversion Running",
+                "Document conversion is already in progress.",
+            )
+            return
+
+        jobs = self._collect_conversion_jobs()
+        if not jobs:
+            if not auto_run:
+                QMessageBox.information(self, "Conversion", "No new files detected.")
+            return
+
+        if not auto_run:
+            reply = QMessageBox.question(
+                self,
+                "Convert Documents",
+                f"Convert {len(jobs)} new document(s) to markdown now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        self._start_conversion(jobs)
+
+    def _handle_rescan_clicked(self) -> None:
+        self._trigger_conversion(auto_run=False)
 
     def _select_source_root(self) -> None:
         if not self._project_manager or not self._project_manager.project_dir:
@@ -382,6 +413,14 @@ class ProjectWorkspace(QWidget):
         selected.sort()
         return selected
 
+    def _collect_conversion_jobs(self) -> List[ConversionJob]:
+        if not self._project_manager:
+            return []
+        jobs = build_conversion_jobs(self._project_manager)
+        if not jobs:
+            return []
+        return [job for job in jobs if job.source_path not in self._inflight_sources]
+
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._updating_tree or column != 0:
             return
@@ -464,6 +503,64 @@ class ProjectWorkspace(QWidget):
         except ValueError:
             rel_str = os.path.relpath(path.resolve(), project_dir)
             return Path(rel_str).as_posix()
+
+    # ------------------------------------------------------------------
+    # Conversion helpers
+    # ------------------------------------------------------------------
+    def _start_conversion(self, jobs: List[ConversionJob]) -> None:
+        if not self._project_manager or not jobs:
+            return
+
+        self._conversion_running = True
+        self._conversion_total = len(jobs)
+        self._conversion_errors: List[str] = []
+        self._rescan_button.setEnabled(False)
+        self._counts_label.setText(f"Converting documents (0/{self._conversion_total})…")
+
+        self._inflight_sources.update(job.source_path for job in jobs)
+
+        worker = ConversionWorker(jobs, helper=self._project_manager.conversion_settings.helper)
+        worker.progress.connect(self._on_conversion_progress)
+        worker.file_failed.connect(self._on_conversion_failed)
+        worker.finished.connect(lambda success, failed, w=worker, js=jobs: self._on_conversion_finished(w, js, success, failed))
+
+        self._active_workers.append(worker)
+        self._thread_pool.start(worker)
+
+    def _on_conversion_progress(self, processed: int, total: int, relative_path: str) -> None:
+        self._counts_label.setText(f"Converting documents ({processed}/{total})… {relative_path}")
+
+    def _on_conversion_failed(self, source_path: str, error: str) -> None:
+        message = f"{Path(source_path).name}: {error}"
+        self._conversion_errors.append(message)
+
+    def _on_conversion_finished(
+        self,
+        worker: ConversionWorker,
+        jobs: Sequence[ConversionJob],
+        successes: int,
+        failures: int,
+    ) -> None:
+        if worker in self._active_workers:
+            self._active_workers.remove(worker)
+        for job in jobs:
+            self._inflight_sources.discard(job.source_path)
+
+        timestamp = datetime.utcnow().isoformat()
+        self._project_manager.update_source_state(last_scan=timestamp, warnings=self._current_warnings)
+        self._update_last_scan_label()
+
+        self._conversion_running = False
+        self._rescan_button.setEnabled(True)
+
+        self._refresh_file_tracker()
+        if failures:
+            error_text = "\n".join(self._conversion_errors) or "Unknown errors"
+            QMessageBox.warning(
+                self,
+                "Conversion Issues",
+                "Some documents failed to convert:\n\n" + error_text,
+            )
 
     def _refresh_summary_groups(self) -> None:
         if not self._project_manager:
