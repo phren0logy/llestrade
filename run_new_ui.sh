@@ -18,6 +18,5 @@ export PHOENIX_PORT=6006
 export PHOENIX_PROJECT=forensic-report-drafter
 export PHOENIX_EXPORT_FIXTURES=false
 
-# Set environment variable and run
-export USE_NEW_UI=true
-uv run main.py --new-ui
+# Run dashboard UI directly
+uv run main_new.py

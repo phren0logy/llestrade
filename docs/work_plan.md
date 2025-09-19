@@ -155,11 +155,10 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [ ] Verify error handling (panel at bottom)
   - [ ] Cost tracking stub (implementation deferred)
 - [ ] Code cleanup
-  - [ ] Archive old UI files to `src/archive/`
-  - [ ] Delete unused stage files
-  - [ ] Remove wizard/linear flow code
-  - [ ] Update main.py and main_new.py
-  - [ ] Freeze legacy maintenance once dashboard feature parity is confirmed
+  - [ ] Archive legacy UI to `src/archive/legacy/`
+  - [ ] Update `main.py` to drop legacy entry points
+  - [ ] Clean settings/tests that reference legacy-only classes
+  - [ ] Document archival status + reference path in README
 
 ### Folder Structure After Refactoring
 
