@@ -78,9 +78,9 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Step 3 - Project Workspace
 
-- [ ] Create tabbed workspace (`src/new/stages/project_workspace.py`)
-  - [ ] Replace linear stages with QTabWidget
-  - [ ] Create Documents and Bulk Analysis tabs *(progress feed handled within Bulk Analysis; separate tab descoped)*
+- [x] Create tabbed workspace (`src/new/stages/project_workspace.py`)
+  - [x] Replace linear stages with QTabWidget
+  - [x] Create Documents and Bulk Analysis tabs *(progress feed handled within Bulk Analysis; separate tab descoped)*
   - [ ] Default to Bulk Analysis tab on open once setup is complete
 - [ ] Documents Tab
   - [x] Source folder picker with tree view checkboxes (folder-level only, default to all selected)
@@ -109,12 +109,12 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Step 4 - Bulk Analysis Groups Implementation
 
-- [ ] Create Bulk Analysis tab scaffolding
-  - [ ] List groups with status chips (`Converted X / Y`, `Bulk Analysis X / Y`)
-  - [ ] "Create Group" launches modal; inline edit deferred for later polish
-  - [ ] Delete action triggers confirmation noting all generated outputs will be removed
-  - [ ] Run button enqueues jobs and streams concise log output
-- [ ] Group dialog (`src/new/dialogs/bulk_analysis_group_dialog.py`)
+- [x] Create Bulk Analysis tab scaffolding
+  - [x] List groups with status chips (`Converted X / Y`, `Bulk Analysis X / Y`)
+  - [x] "Create Group" launches modal; inline edit deferred for later polish
+  - [x] Delete action triggers confirmation noting all generated outputs will be removed
+  - [x] Run button enqueues jobs and streams concise log output
+- [ ] Group dialog (`src/new/dialogs/summary_group_dialog.py`)
   - [ ] Group name input with duplicate-name warning
   - [ ] Folder tree mirrors Documents tab selections (checkboxes only at folder level, greyed-out nodes blocked with tooltip)
   - [ ] System prompt + user prompt file pickers (persisted as relative paths)
@@ -124,8 +124,8 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 #### Step 5 - Integration & Testing
 
 - [ ] Connect bulk analysis workflow to groups
-  - [ ] Modify worker threads to accept group metadata and prompt file paths
-  - [ ] Update output structure to use `bulk_analysis/<group_name>/` directories
+  - [x] Modify worker threads to accept group metadata and prompt file paths
+  - [x] Update output structure to use `bulk_analysis/<group_name>/` directories
   - [ ] Add skip logic for existing analyses (based on timestamp + prompt hash)
   - [ ] Test with multiple groups and overlapping folders
 - [ ] Consolidate worker infrastructure under `src/new/workers/`
@@ -138,13 +138,14 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [ ] Add bulk analysis group context to traces
   - [ ] Use fixture export for test mocks
 - [ ] Business logic testing with pytest
-  - [ ] Test FileTracker functionality
-  - [ ] Test bulk analysis group CRUD operations
+  - [x] Test FileTracker functionality
+  - [x] Test bulk analysis group CRUD operations
   - [ ] Test document conversion with folder preservation
   - [ ] Reuse existing tests where applicable
-  - [ ] Stand up `tests/new_ui/` for dashboard logic (FileTracker, bulk analysis, project lifecycle)
+  - [x] Stand up `tests/new_ui/` for dashboard logic (FileTracker, bulk analysis, project lifecycle)
   - [ ] Add mocked smoke tests driven by recorded fixtures (no live API calls)
   - [ ] Maintain a separate, optional live suite for provider calls using dedicated credentials
+  - [ ] Audit codebase for "summary" terminology and update to "bulk analysis" where appropriate
 
 #### Step 6 - Polish & Cleanup
 
