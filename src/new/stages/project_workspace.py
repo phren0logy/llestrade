@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List, Sequence
 
-from PySide6.QtCore import Qt, QThreadPool, QUrl
+from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -35,7 +35,7 @@ from src.new.core.project_manager import ProjectManager
 from src.new.core.summary_groups import SummaryGroup
 from src.new.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.new.dialogs.summary_group_dialog import SummaryGroupDialog
-from src.new.workers import BulkAnalysisWorker, ConversionWorker
+from src.new.workers import BulkAnalysisWorker, ConversionWorker, get_worker_pool
 
 LOGGER = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ class ProjectWorkspace(QWidget):
         self._edit_metadata_button: QPushButton | None = None
         self._workspace_metrics: WorkspaceMetrics | None = None
         self._current_warnings: List[str] = []
-        self._thread_pool = QThreadPool.globalInstance()
+        self._thread_pool = get_worker_pool()
         self._active_workers: List[ConversionWorker] = []
         self._inflight_sources: set[Path] = set()
         self._conversion_running = False

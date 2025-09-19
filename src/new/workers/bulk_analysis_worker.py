@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QObject, QRunnable, Signal
+from PySide6.QtCore import Signal
 
 from src.common.llm.base import BaseLLMProvider
 from src.common.llm.factory import create_provider
@@ -27,6 +26,7 @@ from src.new.core.bulk_analysis_runner import (
 from src.new.core.project_manager import ProjectMetadata
 from src.new.core.secure_settings import SecureSettings
 from src.new.core.summary_groups import SummaryGroup
+from .base import DashboardWorker
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ class ProviderConfig:
     model: Optional[str]
 
 
-class BulkAnalysisWorker(QObject, QRunnable):
+class BulkAnalysisWorker(DashboardWorker):
     """Run bulk analysis summaries on the thread pool."""
 
     progress = Signal(int, int, str)  # completed, total, relative path
@@ -54,21 +54,18 @@ class BulkAnalysisWorker(QObject, QRunnable):
         metadata: Optional[ProjectMetadata],
         default_provider: Tuple[str, Optional[str]] = ("anthropic", None),
     ) -> None:
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        self.setAutoDelete(True)
+        super().__init__(worker_name="bulk_analysis")
 
         self._project_dir = project_dir
         self._group = group
         self._files = list(files)
         self._metadata = metadata
         self._default_provider = default_provider
-        self._cancel_event = threading.Event()
 
     # ------------------------------------------------------------------
     # QRunnable API
     # ------------------------------------------------------------------
-    def run(self) -> None:  # pragma: no cover - executed in worker thread
+    def _run(self) -> None:  # pragma: no cover - executed in worker thread
         provider: Optional[BaseLLMProvider] = None
         successes = 0
         failures = 0
@@ -89,7 +86,7 @@ class BulkAnalysisWorker(QObject, QRunnable):
                 raise RuntimeError("Bulk analysis provider failed to initialise")
 
             for index, document in enumerate(documents, start=1):
-                if self._cancel_event.is_set():
+                if self.is_cancelled():
                     raise BulkAnalysisCancelled
 
                 try:
@@ -122,7 +119,7 @@ class BulkAnalysisWorker(QObject, QRunnable):
         except BulkAnalysisCancelled:
             self.log_message.emit("Bulk analysis run cancelled.")
         except Exception as exc:  # pragma: no cover - defensive logging
-            LOGGER.exception("Bulk analysis worker crashed: %s", exc)
+            self.logger.exception("Bulk analysis worker crashed: %s", exc)
             self.log_message.emit(f"Bulk analysis worker encountered an error: {exc}")
             failures = max(failures, 1)
         finally:
@@ -131,7 +128,7 @@ class BulkAnalysisWorker(QObject, QRunnable):
             self.finished.emit(successes, failures)
 
     def cancel(self) -> None:
-        self._cancel_event.set()
+        super().cancel()
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -144,7 +141,7 @@ class BulkAnalysisWorker(QObject, QRunnable):
         system_prompt: str,
         document: BulkAnalysisDocument,
     ) -> str:
-        if self._cancel_event.is_set():
+        if self.is_cancelled():
             raise BulkAnalysisCancelled
 
         content = document.source_path.read_text(encoding="utf-8")
@@ -181,7 +178,7 @@ class BulkAnalysisWorker(QObject, QRunnable):
         chunk_summaries: List[str] = []
         total_chunks = len(chunks)
         for idx, chunk in enumerate(chunks, start=1):
-            if self._cancel_event.is_set():
+            if self.is_cancelled():
                 raise BulkAnalysisCancelled
             chunk_prompt = render_user_prompt(
                 bundle,

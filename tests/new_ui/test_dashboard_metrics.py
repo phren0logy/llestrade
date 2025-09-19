@@ -16,6 +16,7 @@ from src.new.core.file_tracker import DashboardMetrics
 from src.new.core.project_manager import ProjectManager, ProjectMetadata
 from src.new.core.summary_groups import SummaryGroup
 from src.new.stages.welcome_stage import WelcomeStage
+from src.new.workers import DashboardWorker, get_worker_pool
 
 
 @pytest.fixture(scope="module")
@@ -232,6 +233,31 @@ def _find_stats_label(stage: WelcomeStage) -> QLabel | None:
                     if "Converted" in label.text():
                         return label
     return None
+
+
+class _DummyWorker(DashboardWorker):
+    def __init__(self) -> None:
+        super().__init__(worker_name="dummy")
+        self.invoked = False
+
+    def _run(self) -> None:
+        self.invoked = True
+
+
+def test_worker_pool_singleton(qt_app: QApplication) -> None:
+    pool_a = get_worker_pool()
+    pool_b = get_worker_pool()
+    assert pool_a is pool_b
+    assert pool_a.maxThreadCount() == 3
+
+
+def test_dashboard_worker_base_helpers() -> None:
+    worker = _DummyWorker()
+    assert not worker.is_cancelled()
+    worker.run()
+    assert worker.invoked
+    worker.cancel()
+    assert worker.is_cancelled()
 
 
 def test_dashboard_metrics_from_dict_accepts_legacy_keys() -> None:

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
-from PySide6.QtCore import QObject, QRunnable, Signal
+from PySide6.QtCore import Signal
 
 from src.core.file_utils import (
     extract_text_from_pdf,
@@ -16,11 +16,12 @@ from src.core.file_utils import (
 from src.new.core.conversion_manager import ConversionJob, copy_existing_markdown
 from src.new.core.conversion_helpers import ConversionHelper, registry
 from src.new.core.secure_settings import SecureSettings
+from .base import DashboardWorker
 
 LOGGER = logging.getLogger(__name__)
 
 
-class ConversionWorker(QObject, QRunnable):
+class ConversionWorker(DashboardWorker):
     """Run conversion jobs on a thread pool."""
 
     progress = Signal(int, int, str)  # completed, total, relative path
@@ -34,35 +35,31 @@ class ConversionWorker(QObject, QRunnable):
         helper: str = "azure_di",
         options: Optional[Dict[str, object]] = None,
     ) -> None:
-        QObject.__init__(self)
-        QRunnable.__init__(self)
-        self.setAutoDelete(True)
+        super().__init__(worker_name="conversion")
         self._jobs: List[ConversionJob] = list(jobs)
         self._helper_id = helper or "azure_di"
-        self._cancelled = False
+        self._options = dict(options or {})
         self._helper_cache: Optional[ConversionHelper] = None
 
-    def run(self) -> None:  # pragma: no cover - executed in worker thread
+    def _run(self) -> None:  # pragma: no cover - executed in worker thread
         total = len(self._jobs)
         successes = 0
         failures = 0
-        for index, job in enumerate(self._jobs, start=1):
-            if self._cancelled:
+        for job in self._jobs:
+            if self.is_cancelled():
+                self.logger.info("Conversion cancelled after %s/%s jobs", successes + failures, total)
                 break
             try:
                 self._execute(job)
             except Exception as exc:  # noqa: BLE001 - propagate via signal
                 failures += 1
-                LOGGER.exception("Conversion failed for %s", job.source_path)
+                self.logger.exception("Conversion failed for %s", job.source_path)
                 self.file_failed.emit(str(job.source_path), str(exc))
             else:
                 successes += 1
             finally:
                 self.progress.emit(successes + failures, total, job.display_name)
         self.finished.emit(successes, failures)
-
-    def cancel(self) -> None:
-        self._cancelled = True
 
     # ------------------------------------------------------------------
     # Internal helpers
