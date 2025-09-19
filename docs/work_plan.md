@@ -80,7 +80,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 - [ ] Create tabbed workspace (`src/new/stages/project_workspace.py`)
   - [ ] Replace linear stages with QTabWidget
-  - [ ] Create Documents, Bulk Analysis, Progress tabs
+  - [ ] Create Documents and Bulk Analysis tabs *(progress feed handled within Bulk Analysis; separate tab descoped)*
   - [ ] Default to Bulk Analysis tab on open once setup is complete
 - [ ] Documents Tab
   - [x] Source folder picker with tree view checkboxes (folder-level only, default to all selected)
@@ -93,10 +93,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Reuse folder tree with greyed-out (tooltip: "Enable in Documents → Sources") entries for folders not selected for conversion *(simplified to converted_documents tree only)*
   - [ ] Offer system/user prompt file pickers per group (stored as relative paths)
   - [x] Provide run/stop controls that enqueue work on the shared worker pool and surface concise logs *(stubbed with simulated runs; replace with real workers later)*
-- [ ] Progress Tab
-  - [ ] Combined log from all operations
-  - [ ] Simple cancel button for current operation
-  - [ ] Error panel at bottom (non-blocking)
+- [ ] Progress Tab *(descoped; future activity feed will live in Bulk Analysis tab)*
 
 #### Step 4 - Automated Conversion & Bulk Analysis
 

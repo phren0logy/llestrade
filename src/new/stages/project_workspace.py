@@ -75,7 +75,6 @@ class ProjectWorkspace(QWidget):
         self._summary_info_label: QLabel | None = None
         self._missing_bulk_label: QLabel | None = None
         self._group_source_tree: QTreeWidget | None = None
-        self._progress_tab: QWidget | None = None
 
         self._build_ui()
         if project_manager:
@@ -91,10 +90,6 @@ class ProjectWorkspace(QWidget):
         if self._feature_flags.summary_groups_enabled:
             self._summary_tab = self._build_summary_groups_tab()
             self._tabs.addTab(self._summary_tab, "Bulk Analysis")
-        if self._feature_flags.progress_tab_enabled:
-            self._progress_tab = self._build_placeholder_tab("Progress")
-            self._tabs.addTab(self._progress_tab, "Progress")
-
         layout.addWidget(self._project_path_label)
         metadata_row = QHBoxLayout()
         metadata_row.setContentsMargins(0, 0, 0, 0)
@@ -225,13 +220,6 @@ class ProjectWorkspace(QWidget):
         layout.addLayout(content_layout)
 
         return self._summary_tab
-
-    def _build_placeholder_tab(self, title: str) -> QWidget:
-        widget = QWidget()
-        tab_layout = QVBoxLayout(widget)
-        tab_layout.addWidget(QLabel(f"{title} dashboard is under construction."))
-        tab_layout.addStretch()
-        return widget
 
     def set_project(self, project_manager: ProjectManager) -> None:
         """Attach the workspace to a project manager."""

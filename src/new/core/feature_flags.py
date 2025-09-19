@@ -31,13 +31,11 @@ class FeatureFlags:
 
     dashboard_workspace_enabled: bool = True
     summary_groups_enabled: bool = True
-    progress_tab_enabled: bool = False
     auto_run_conversion_on_create: bool = True
 
     ENV_MAPPING: ClassVar[Mapping[str, str]] = {
         "dashboard_workspace_enabled": "FRD_ENABLE_DASHBOARD_WORKSPACE",
         "summary_groups_enabled": "FRD_ENABLE_SUMMARY_GROUPS",
-        "progress_tab_enabled": "FRD_ENABLE_PROGRESS_TAB",
         "auto_run_conversion_on_create": "FRD_AUTO_RUN_CONVERSION",
     }
 
