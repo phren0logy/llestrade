@@ -89,6 +89,25 @@ def test_dashboard_metrics_persist_across_project_reload(tmp_path: Path, qt_app:
     assert cached_metrics.imported_total == 1
 
 
+def test_read_dashboard_metrics_from_disk(tmp_path: Path, qt_app: QApplication) -> None:
+    assert qt_app is not None
+    manager = ProjectManager()
+    project_path = manager.create_project(tmp_path, ProjectMetadata(case_name="Disk Metrics"))
+
+    converted = manager.project_dir / "converted_documents"
+    converted.mkdir(exist_ok=True)
+    (converted / "doc.md").write_text("data")
+
+    manager.get_dashboard_metrics(refresh=True)
+    manager.save_project()
+
+    metrics = ProjectManager.read_dashboard_metrics_from_disk(project_path)
+
+    assert metrics.imported_total == 1
+    assert metrics.last_scan is not None
+    assert metrics.pending_processing == 1
+    assert metrics.pending_bulk_analysis == 0
+
 def test_workspace_metrics_include_group_coverage(tmp_path: Path, qt_app: QApplication) -> None:
     assert qt_app is not None
     manager = ProjectManager()
@@ -144,6 +163,7 @@ def test_welcome_stage_uses_persisted_metrics(tmp_path: Path, qt_app: QApplicati
 
     assert "Converted 1" in stats_text
     assert "Processed" in stats_text
+    assert "Last scan" in stats_text
 
 
 def test_dashboard_metrics_from_dict_accepts_legacy_keys() -> None:

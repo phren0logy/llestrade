@@ -732,6 +732,28 @@ class ProjectManager(QObject):
         if self.project_dir:
             return self.project_dir.name
         return ""
+
+    @staticmethod
+    def read_dashboard_metrics_from_disk(path: Path) -> DashboardMetrics:
+        """Return persisted dashboard metrics without fully loading the project."""
+        project_file = path
+        if project_file.is_dir():
+            project_file = project_file / PROJECT_FILENAME
+        elif project_file.suffix != ProjectManager.PROJECT_EXTENSION:
+            project_file = project_file / PROJECT_FILENAME
+
+        if not project_file.exists():
+            return DashboardMetrics.empty()
+
+        try:
+            payload = json.loads(project_file.read_text())
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logging.getLogger(__name__).debug(
+                "Failed to read dashboard metrics from %s: %s", project_file, exc
+            )
+            return DashboardMetrics.empty()
+
+        return DashboardMetrics.from_dict(payload.get("dashboard_metrics"))
     
     def close_project(self):
         """Close the current project."""

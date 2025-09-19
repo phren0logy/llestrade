@@ -271,29 +271,21 @@ class WelcomeStage(QWidget):
         return "No converted documents yet."
 
     def _metrics_text(self, project_path: Path) -> str:
-        project_file = project_path
-        if project_file.is_dir():
-            project_file = project_file / "project.frpd"
-        elif project_file.suffix != ProjectManager.PROJECT_EXTENSION:
-            project_file = project_file / "project.frpd"
+        metrics = ProjectManager.read_dashboard_metrics_from_disk(project_path)
 
-        if not project_file.exists():
+        if (
+            metrics.last_scan is None
+            and metrics.imported_total == 0
+            and metrics.processed_total == 0
+            and metrics.bulk_analysis_total == 0
+            and metrics.pending_processing == 0
+            and metrics.pending_bulk_analysis == 0
+        ):
             return ""
 
-        try:
-            data = json.loads(project_file.read_text())
-        except Exception:
-            return ""
-
-        metrics = data.get("dashboard_metrics")
-        if not isinstance(metrics, dict):
-            return ""
-
-        converted = int(metrics.get("imported_total", 0))
-        processed = int(metrics.get("processed_total", 0))
-        bulk_analysis = int(metrics.get("bulk_analysis_total", 0))
-        pending = int(metrics.get("pending_processing", 0))
-        pending_bulk = int(metrics.get("pending_bulk_analysis", 0))
+        converted = metrics.imported_total
+        processed = metrics.processed_total
+        bulk_analysis = metrics.bulk_analysis_total
 
         if converted:
             text = (
@@ -303,21 +295,17 @@ class WelcomeStage(QWidget):
         else:
             text = "No converted documents yet."
 
-        if pending or pending_bulk:
+        if metrics.pending_processing or metrics.pending_bulk_analysis:
             details: List[str] = []
-            if pending:
-                details.append(f"{pending} awaiting processing")
-            if pending_bulk:
-                details.append(f"{pending_bulk} awaiting bulk analysis")
+            if metrics.pending_processing:
+                details.append(f"{metrics.pending_processing} awaiting processing")
+            if metrics.pending_bulk_analysis:
+                details.append(f"{metrics.pending_bulk_analysis} awaiting bulk analysis")
             text += " (" + ", ".join(details) + ")"
 
-        last_scan = metrics.get("last_scan")
-        if isinstance(last_scan, str) and last_scan:
-            try:
-                parsed = datetime.fromisoformat(last_scan)
-                formatted = parsed.strftime("%Y-%m-%d %H:%M")
-            except ValueError:
-                formatted = last_scan
+        last_scan = metrics.last_scan
+        if isinstance(last_scan, datetime):
+            formatted = last_scan.strftime("%Y-%m-%d %H:%M")
             text += f" - Last scan {formatted}"
 
         return text
