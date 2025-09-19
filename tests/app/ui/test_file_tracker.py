@@ -81,3 +81,17 @@ def test_load_reads_previous_snapshot(project_root: Path):
     loaded = FileTracker(project_root).load()
     assert loaded is not None
     assert loaded.counts == tracker.snapshot.counts
+
+
+def test_scan_ignores_bulk_analysis_noise_files(project_root: Path) -> None:
+    write_file(project_root / "converted_documents", "case/doc1.md")
+    write_file(project_root / "bulk_analysis", "case/doc1_analysis.md")
+    write_file(project_root / "bulk_analysis", ".DS_Store", "")
+    write_file(project_root / "bulk_analysis", "case/.DS_Store", "")
+    write_file(project_root / "bulk_analysis", "case/config.json", "{}")
+
+    tracker = FileTracker(project_root)
+    snapshot = tracker.scan()
+
+    assert snapshot.bulk_analysis_count == 1
+    assert snapshot.files["bulk_analysis"] == ["case/doc1_analysis.md"]

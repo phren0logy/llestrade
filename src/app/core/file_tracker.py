@@ -219,6 +219,9 @@ class FileTracker:
         processed = self._gather_files("processed_documents")
         bulk_analysis = self._gather_files("bulk_analysis")
 
+        processed = self._filter_processed_files(processed)
+        bulk_analysis = self._filter_bulk_analysis_files(bulk_analysis)
+
         counts = {
             "imported": len(imported),
             "processed": len(processed),
@@ -263,6 +266,32 @@ class FileTracker:
             if path.is_file():
                 collected.add(path.relative_to(folder).as_posix())
         return collected
+
+    def _filter_processed_files(self, files: set[str]) -> set[str]:
+        """Return processed-document paths that should be counted."""
+
+        if not files:
+            return files
+        return {path for path in files if not path.endswith("/.DS_Store") and path.split("/")[-1] != ".DS_Store"}
+
+    def _filter_bulk_analysis_files(self, files: set[str]) -> set[str]:
+        """Return bulk-analysis output paths that should be counted."""
+
+        if not files:
+            return files
+
+        filtered: set[str] = set()
+        for path in files:
+            parts = path.split("/")
+            if not parts:
+                continue
+            leaf = parts[-1]
+            if leaf == ".DS_Store":
+                continue
+            if leaf == "config.json":
+                continue
+            filtered.add(path)
+        return filtered
 
     def _write_snapshot(self, snapshot: FileTrackerSnapshot) -> None:
         tracker_path = self._tracker_file()

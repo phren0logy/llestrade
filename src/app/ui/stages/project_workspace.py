@@ -35,7 +35,12 @@ from src.app.core.project_manager import ProjectManager
 from src.app.core.summary_groups import SummaryGroup
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
-from src.app.workers import BulkAnalysisWorker, ConversionWorker, get_worker_pool
+from src.app.workers import (
+    BulkAnalysisWorker,
+    ConversionWorker,
+    WorkerCoordinator,
+    get_worker_pool,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -59,12 +64,12 @@ class ProjectWorkspace(QWidget):
         self._workspace_metrics: WorkspaceMetrics | None = None
         self._current_warnings: List[str] = []
         self._thread_pool = get_worker_pool()
-        self._active_workers: List[ConversionWorker] = []
+        self._workers = WorkerCoordinator(self._thread_pool)
         self._inflight_sources: set[Path] = set()
         self._conversion_running = False
         self._conversion_total = 0
         self._missing_root_prompted = False
-        self._running_groups: Dict[str, BulkAnalysisWorker] = {}
+        self._running_groups: set[str] = set()
         self._bulk_progress: Dict[str, tuple[int, int]] = {}
         self._bulk_failures: Dict[str, List[str]] = {}
         self._cancelling_groups: set[str] = set()
@@ -224,6 +229,7 @@ class ProjectWorkspace(QWidget):
         """Attach the workspace to a project manager."""
         self._project_manager = project_manager
         self._running_groups.clear()
+        self._workers.clear()
         self._workspace_metrics = None
         project_dir = project_manager.project_dir
         project_path = Path(project_dir).resolve() if project_dir else None
@@ -683,10 +689,14 @@ class ProjectWorkspace(QWidget):
         worker = ConversionWorker(jobs, helper=helper, options=options)
         worker.progress.connect(self._on_conversion_progress)
         worker.file_failed.connect(self._on_conversion_failed)
-        worker.finished.connect(lambda success, failed, w=worker, js=jobs: self._on_conversion_finished(w, js, success, failed))
+        worker.finished.connect(
+            lambda success, failed, w=worker, js=jobs: self._on_conversion_finished(
+                w, js, success, failed
+            )
+        )
 
-        self._active_workers.append(worker)
-        self._thread_pool.start(worker)
+       
+        self._workers.start(self._conversion_key(), worker)
 
     def _on_conversion_progress(self, processed: int, total: int, relative_path: str) -> None:
         self._counts_label.setText(f"Converting documents ({processed}/{total})… {relative_path}")
@@ -702,8 +712,11 @@ class ProjectWorkspace(QWidget):
         successes: int,
         failures: int,
     ) -> None:
-        if worker in self._active_workers:
-            self._active_workers.remove(worker)
+        stored = self._workers.pop(self._conversion_key())
+        if stored and stored is not worker:
+            stored.deleteLater()
+        if worker is stored:
+            worker.deleteLater()
         for job in jobs:
             self._inflight_sources.discard(job.source_path)
 
@@ -944,19 +957,21 @@ class ProjectWorkspace(QWidget):
         worker.finished.connect(lambda success, failed, gid=group.group_id: self._on_bulk_finished(gid, success, failed))
         worker.log_message.connect(lambda message, gid=group.group_id: self._on_bulk_log(gid, message))
 
-        self._running_groups[group.group_id] = worker
+        key = self._bulk_key(group.group_id)
+        self._running_groups.add(group.group_id)
         self._bulk_progress[group.group_id] = (0, len(files))
         self._bulk_failures[group.group_id] = []
         self._cancelling_groups.discard(group.group_id)
         if self._summary_info_label:
             self._summary_info_label.setText("Running bulk analysis…")
         self._refresh_summary_groups()
-        self._thread_pool.start(worker)
+        self._workers.start(key, worker)
 
     def _cancel_group_run(self, group: SummaryGroup) -> None:
         if not self._feature_flags.summary_groups_enabled:
             return
-        worker = self._running_groups.get(group.group_id)
+        key = self._bulk_key(group.group_id)
+        worker = self._workers.get(key)
         if worker:
             worker.cancel()
             self._cancelling_groups.add(group.group_id)
@@ -988,7 +1003,9 @@ class ProjectWorkspace(QWidget):
         LOGGER.info("[BulkAnalysis][%s] %s", group_id, message)
 
     def _on_bulk_finished(self, group_id: str, successes: int, failures: int) -> None:
-        worker = self._running_groups.pop(group_id, None)
+        key = self._bulk_key(group_id)
+        worker = self._workers.pop(key)
+        self._running_groups.discard(group_id)
         if worker:
             worker.deleteLater()
         self._bulk_progress.pop(group_id, None)
@@ -1024,15 +1041,28 @@ class ProjectWorkspace(QWidget):
             valid_ids = set()
             if self._project_manager:
                 try:
-                    valid_ids = {group.group_id for group in self._project_manager.list_summary_groups()}
+                    valid_ids = {
+                        group.group_id for group in self._project_manager.list_summary_groups()
+                    }
                 except Exception:
                     valid_ids = set()
-        stale = [gid for gid in list(self._running_groups.keys()) if gid not in valid_ids]
+        stale = [gid for gid in list(self._running_groups) if gid not in valid_ids]
         for gid in stale:
-            worker = self._running_groups.pop(gid, None)
+            key = self._bulk_key(gid)
+            worker = self._workers.pop(key)
             if worker:
                 worker.cancel()
                 worker.deleteLater()
+            self._running_groups.discard(gid)
             self._bulk_progress.pop(gid, None)
             self._bulk_failures.pop(gid, None)
             self._cancelling_groups.discard(gid)
+
+    # ------------------------------------------------------------------
+    # Worker coordination helpers
+    # ------------------------------------------------------------------
+    def _conversion_key(self) -> str:
+        return "conversion:active"
+
+    def _bulk_key(self, group_id: str) -> str:
+        return f"bulk:{group_id}"
