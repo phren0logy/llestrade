@@ -30,6 +30,7 @@ from PySide6.QtWidgets import QHeaderView
 
 from src.new.core.conversion_manager import ConversionJob, build_conversion_jobs
 from src.new.core.feature_flags import FeatureFlags
+from src.new.core.file_tracker import WorkspaceMetrics, WorkspaceGroupMetrics
 from src.new.core.project_manager import ProjectManager
 from src.new.core.summary_groups import SummaryGroup
 from src.new.dialogs.project_metadata_dialog import ProjectMetadataDialog
@@ -55,9 +56,7 @@ class ProjectWorkspace(QWidget):
         self._project_path_label = QLabel()
         self._metadata_label: QLabel | None = None
         self._edit_metadata_button: QPushButton | None = None
-        self._processed_total = 0
-        self._imported_total = 0
-        self._latest_snapshot = None
+        self._workspace_metrics: WorkspaceMetrics | None = None
         self._current_warnings: List[str] = []
         self._thread_pool = QThreadPool.globalInstance()
         self._active_workers: List[ConversionWorker] = []
@@ -225,6 +224,7 @@ class ProjectWorkspace(QWidget):
         """Attach the workspace to a project manager."""
         self._project_manager = project_manager
         self._running_groups.clear()
+        self._workspace_metrics = None
         project_dir = project_manager.project_dir
         project_path = Path(project_dir).resolve() if project_dir else None
         self._project_path_label.setText(
@@ -244,7 +244,6 @@ class ProjectWorkspace(QWidget):
     def refresh(self) -> None:
         self._populate_source_tree()
         self._update_source_root_label()
-        self._update_last_scan_label()
         self._refresh_file_tracker()
         if self._feature_flags.summary_groups_enabled:
             self._prune_running_groups()
@@ -293,9 +292,7 @@ class ProjectWorkspace(QWidget):
         if not self._project_manager:
             return
         try:
-            metrics = self._project_manager.get_dashboard_metrics(refresh=True)
-            tracker = self._project_manager.get_file_tracker()
-            snapshot = tracker.snapshot
+            self._workspace_metrics = self._project_manager.get_workspace_metrics(refresh=True)
         except Exception as exc:
             self._counts_label.setText("Scan failed")
             self._missing_processed_label.setText(str(exc))
@@ -303,12 +300,7 @@ class ProjectWorkspace(QWidget):
                 self._missing_bulk_label.setText("")
             return
 
-        if snapshot is None:
-            snapshot = self._project_manager.get_file_tracker().load()
-
-        self._latest_snapshot = snapshot
-        self._imported_total = metrics.imported_total
-        self._processed_total = metrics.processed_total
+        metrics = self._workspace_metrics.dashboard
 
         if metrics.imported_total:
             counts_text = (
@@ -321,14 +313,11 @@ class ProjectWorkspace(QWidget):
                 "Converted: 0 | "
                 f"Processed: {metrics.processed_total} | "
                 f"Bulk analysis: {metrics.bulk_analysis_total}"
-            )
+        )
         self._counts_label.setText(counts_text)
 
-        processed_missing = []
-        bulk_missing = []
-        if snapshot:
-            processed_missing = snapshot.missing.get("processed_missing", [])
-            bulk_missing = snapshot.missing.get("bulk_analysis_missing", [])
+        processed_missing = list(self._workspace_metrics.processed_missing)
+        bulk_missing = list(self._workspace_metrics.bulk_missing)
 
         self._missing_processed_label.setText(
             "Processed missing: " + (", ".join(processed_missing) if processed_missing else "None")
@@ -428,7 +417,11 @@ class ProjectWorkspace(QWidget):
         if not self._project_manager:
             self._last_scan_label.setText("")
             return
-        metrics = self._project_manager.dashboard_metrics
+        metrics = None
+        if self._workspace_metrics:
+            metrics = self._workspace_metrics.dashboard
+        elif self._project_manager.dashboard_metrics:
+            metrics = self._project_manager.dashboard_metrics
         last_scan = metrics.last_scan if metrics else None
         if not last_scan and self._project_manager.source_state.last_scan:
             try:
@@ -741,7 +734,11 @@ class ProjectWorkspace(QWidget):
             return
 
         groups = self._project_manager.list_summary_groups()
-        total_docs = self._imported_total or 0
+        total_docs = 0
+        group_metrics_map: Dict[str, WorkspaceGroupMetrics] = {}
+        if self._workspace_metrics:
+            total_docs = self._workspace_metrics.dashboard.imported_total
+            group_metrics_map = self._workspace_metrics.groups
         self._prune_running_groups({group.group_id for group in groups})
 
         self._summary_table.setRowCount(0)
@@ -755,9 +752,16 @@ class ProjectWorkspace(QWidget):
 
         self._summary_table.setRowCount(len(groups))
         for row, group in enumerate(groups):
-            self._populate_group_row(row, group, total_docs)
+            group_metrics = group_metrics_map.get(group.group_id)
+            self._populate_group_row(row, group, total_docs, group_metrics)
 
-    def _populate_group_row(self, row: int, group: SummaryGroup, total_docs: int) -> None:
+    def _populate_group_row(
+        self,
+        row: int,
+        group: SummaryGroup,
+        total_docs: int,
+        metrics: WorkspaceGroupMetrics | None,
+    ) -> None:
         if not self._feature_flags.summary_groups_enabled:
             return
         if not self._summary_table:
@@ -768,9 +772,8 @@ class ProjectWorkspace(QWidget):
         name_item.setToolTip(description)
         self._summary_table.setItem(row, 0, name_item)
 
-        resolved_files = self._resolve_group_files(group)
-        files_count = len(resolved_files)
-        coverage_text = f"{files_count} of {total_docs}" if total_docs else str(files_count)
+        converted_count = metrics.converted_count if metrics else 0
+        coverage_text = f"{converted_count} of {total_docs}" if total_docs else str(converted_count)
         files_item = QTableWidgetItem(coverage_text)
         files_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 1, files_item)
@@ -790,7 +793,14 @@ class ProjectWorkspace(QWidget):
                 else:
                     status_text = "Running…"
         else:
-            status_text = "Ready" if files_count else "No converted files"
+            if not converted_count:
+                status_text = "No converted files"
+            elif metrics and metrics.pending_bulk_analysis:
+                status_text = f"Pending bulk ({metrics.pending_bulk_analysis})"
+            elif metrics and metrics.pending_processing:
+                status_text = f"Pending processing ({metrics.pending_processing})"
+            else:
+                status_text = "Ready"
         status_item = QTableWidgetItem(status_text)
         status_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 3, status_item)
@@ -801,7 +811,7 @@ class ProjectWorkspace(QWidget):
         action_layout.setSpacing(6)
 
         run_button = QPushButton("Run")
-        run_button.setEnabled(files_count > 0 and group.group_id not in self._running_groups)
+        run_button.setEnabled(converted_count > 0 and group.group_id not in self._running_groups)
         run_button.clicked.connect(lambda _, g=group: self._start_group_run(g))
         action_layout.addWidget(run_button)
 
@@ -828,6 +838,10 @@ class ProjectWorkspace(QWidget):
         extra_files = sorted(set(group.files))
         if extra_files:
             tooltip_parts.append("Files: " + ", ".join(extra_files))
+        if metrics and metrics.converted_files:
+            tooltip_parts.append(
+                "Converted files (" + str(metrics.converted_count) + "): " + ", ".join(metrics.converted_files)
+            )
         if tooltip_parts:
             name_item.setToolTip("\n".join(tooltip_parts))
             files_item.setToolTip("\n".join(tooltip_parts))
@@ -891,7 +905,17 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        files = sorted(self._resolve_group_files(group))
+        if not self._workspace_metrics and self._project_manager:
+            try:
+                self._workspace_metrics = self._project_manager.get_workspace_metrics()
+            except Exception:
+                self._workspace_metrics = None
+
+        group_metrics = None
+        if self._workspace_metrics:
+            group_metrics = self._workspace_metrics.groups.get(group.group_id)
+
+        files = sorted(group_metrics.converted_files) if group_metrics else []
         if not files:
             QMessageBox.warning(
                 self,
@@ -992,29 +1016,6 @@ class ProjectWorkspace(QWidget):
 
         self._refresh_file_tracker()
         self._refresh_summary_groups()
-
-    def _resolve_group_files(self, group: SummaryGroup) -> set[str]:
-        if not self._feature_flags.summary_groups_enabled:
-            return set()
-        converted = set()
-        if self._latest_snapshot:
-            converted = set(self._latest_snapshot.files.get("imported", []))
-
-        if not converted:
-            return set()
-
-        selected = {path for path in group.files if path in converted}
-
-        for directory in group.directories:
-            normalised = directory.strip("/")
-            if not normalised:
-                selected.update(converted)
-                continue
-            prefix = normalised + "/"
-            for path in converted:
-                if path == normalised or path.startswith(prefix):
-                    selected.add(path)
-        return selected
 
     def _prune_running_groups(self, valid_ids: Optional[set[str]] = None) -> None:
         if not self._feature_flags.summary_groups_enabled:

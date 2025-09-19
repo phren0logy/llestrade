@@ -13,6 +13,7 @@ _ = PySide6
 
 from src.new.core.file_tracker import DashboardMetrics
 from src.new.core.project_manager import ProjectManager, ProjectMetadata
+from src.new.core.summary_groups import SummaryGroup
 from src.new.stages.welcome_stage import WelcomeStage
 
 
@@ -86,6 +87,41 @@ def test_dashboard_metrics_persist_across_project_reload(tmp_path: Path, qt_app:
     cached_metrics = reloaded.get_dashboard_metrics()
     assert cached_metrics == reloaded.dashboard_metrics
     assert cached_metrics.imported_total == 1
+
+
+def test_workspace_metrics_include_group_coverage(tmp_path: Path, qt_app: QApplication) -> None:
+    assert qt_app is not None
+    manager = ProjectManager()
+    manager.create_project(tmp_path, ProjectMetadata(case_name="Workspace Coverage"))
+
+    converted_dir = manager.project_dir / "converted_documents" / "folder"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    (converted_dir / "doc1.md").write_text("converted")
+    (converted_dir / "doc2.md").write_text("converted")
+
+    processed_dir = manager.project_dir / "processed_documents" / "folder"
+    processed_dir.mkdir(parents=True, exist_ok=True)
+    (processed_dir / "doc1.md").write_text("processed")
+
+    group = SummaryGroup.create(name="Case Files", directories=["folder"])
+    manager.save_summary_group(group)
+
+    outputs_dir = manager.project_dir / "bulk_analysis" / group.slug / "outputs" / "folder"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    (outputs_dir / "doc1.md").write_text("analysis")
+
+    metrics = manager.get_workspace_metrics(refresh=True)
+
+    assert metrics.dashboard.imported_total == 2
+    assert metrics.dashboard.processed_total == 1
+
+    group_metrics = metrics.groups[group.group_id]
+    assert group_metrics.converted_count == 2
+    assert group_metrics.processed_count == 1
+    assert group_metrics.bulk_analysis_total == 1
+    assert group_metrics.pending_processing == 1
+    assert group_metrics.pending_bulk_analysis == 1
+    assert set(group_metrics.converted_files) == {"folder/doc1.md", "folder/doc2.md"}
 
 
 def test_welcome_stage_uses_persisted_metrics(tmp_path: Path, qt_app: QApplication) -> None:

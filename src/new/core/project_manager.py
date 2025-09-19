@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from src.new.core.summary_groups import SummaryGroup
 
 from .secure_settings import SecureSettings
-from .file_tracker import DashboardMetrics
+from .file_tracker import DashboardMetrics, WorkspaceMetrics, build_workspace_metrics
 
 
 @dataclass
@@ -213,6 +213,7 @@ class ProjectManager(QObject):
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
         self.dashboard_metrics: DashboardMetrics = DashboardMetrics.empty()
+        self.workspace_metrics: Optional[WorkspaceMetrics] = None
         self.version_warning: Optional[str] = None
         
         # Auto-save timer
@@ -270,6 +271,7 @@ class ProjectManager(QObject):
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
         self.dashboard_metrics = DashboardMetrics.empty()
+        self.workspace_metrics = None
         self.version_warning = None
         
         # Save initial project file
@@ -325,6 +327,7 @@ class ProjectManager(QObject):
             self.conversion_settings = ConversionSettings.from_dict(data.get("conversion", {}))
             self.dashboard_state = DashboardState.from_dict(data.get("dashboard_state", {}))
             self.dashboard_metrics = DashboardMetrics.from_dict(data.get("dashboard_metrics"))
+            self.workspace_metrics = None
 
             # Update recent projects
             settings = SecureSettings()
@@ -495,8 +498,30 @@ class ProjectManager(QObject):
         if self.dashboard_metrics == metrics:
             return
         self.dashboard_metrics = metrics
+        self.workspace_metrics = None
         if mark_modified:
             self.mark_modified()
+
+    def get_workspace_metrics(self, refresh: bool = False) -> WorkspaceMetrics:
+        """Return combined dashboard and group metrics for workspace views."""
+        if not refresh and self.workspace_metrics is not None:
+            return self.workspace_metrics
+
+        dashboard = self.get_dashboard_metrics(refresh=refresh)
+        tracker = self.get_file_tracker()
+        snapshot = tracker.snapshot or tracker.load()
+        summary_groups = self.list_summary_groups()
+
+        metrics = build_workspace_metrics(
+            snapshot=snapshot,
+            dashboard=dashboard,
+            summary_groups=summary_groups,
+        )
+        self._store_workspace_metrics(metrics)
+        return metrics
+
+    def _store_workspace_metrics(self, metrics: WorkspaceMetrics) -> None:
+        self.workspace_metrics = metrics
 
     # ------------------------------------------------------------------
     # Summary group helpers
@@ -509,6 +534,7 @@ class ProjectManager(QObject):
             return []
         groups = load_summary_groups(self.project_dir)
         self.summary_groups = {group.group_id: group for group in groups}
+        self.workspace_metrics = None
         return groups
 
     def list_summary_groups(self) -> List["SummaryGroup"]:
@@ -525,6 +551,7 @@ class ProjectManager(QObject):
         group.directories = sorted({path.strip("/").strip() for path in group.directories if path.strip("/").strip()})
         saved = save_summary_group(self.project_dir, group)
         self.summary_groups[saved.group_id] = saved
+        self.workspace_metrics = None
         self.mark_modified()
         return saved
 
@@ -536,6 +563,7 @@ class ProjectManager(QObject):
             return False
         delete_summary_group(self.project_dir, group)
         self.summary_groups.pop(group_id, None)
+        self.workspace_metrics = None
         self.mark_modified()
         return True
     
@@ -638,6 +666,7 @@ class ProjectManager(QObject):
             self.source_state.warnings = warnings
         if last_scan is not None:
             self.source_state.last_scan = last_scan
+        self.workspace_metrics = None
         self.mark_modified()
         self._write_sources_state()
 
@@ -725,6 +754,7 @@ class ProjectManager(QObject):
         self.conversion_settings = ConversionSettings()
         self.dashboard_state = DashboardState()
         self.dashboard_metrics = DashboardMetrics.empty()
+        self.workspace_metrics = None
         self._file_tracker = None
         self._modified = False
 

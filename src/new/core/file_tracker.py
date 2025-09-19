@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.new.core.summary_groups import SummaryGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -268,4 +272,166 @@ class FileTracker:
             LOGGER.error("Failed to persist file tracker snapshot: %s", exc)
 
 
-__all__ = ["FileTracker", "FileTrackerSnapshot", "DashboardMetrics"]
+@dataclass(frozen=True)
+class WorkspaceGroupMetrics:
+    """Coverage details for a single bulk-analysis group.
+
+    `converted_files` contains the converted-document relative paths that the group may
+    operate on. Counts are derived from these files so callers do not need to re-run
+    filtering logic in the UI layer.
+    """
+
+    group_id: str
+    name: str
+    slug: str
+    converted_files: tuple[str, ...]
+    converted_count: int
+    processed_count: int
+    bulk_analysis_total: int
+    pending_processing: int
+    pending_bulk_analysis: int
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "group_id": self.group_id,
+            "name": self.name,
+            "slug": self.slug,
+            "converted_files": list(self.converted_files),
+            "converted_count": self.converted_count,
+            "processed_count": self.processed_count,
+            "bulk_analysis_total": self.bulk_analysis_total,
+            "pending_processing": self.pending_processing,
+            "pending_bulk_analysis": self.pending_bulk_analysis,
+        }
+
+
+@dataclass(frozen=True)
+class WorkspaceMetrics:
+    """Aggregated dashboard + group metrics for workspace consumption."""
+
+    dashboard: "DashboardMetrics"
+    processed_missing: tuple[str, ...]
+    bulk_missing: tuple[str, ...]
+    groups: Dict[str, WorkspaceGroupMetrics]
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "dashboard": self.dashboard.to_dict(),
+            "processed_missing": list(self.processed_missing),
+            "bulk_missing": list(self.bulk_missing),
+            "groups": {group_id: metrics.to_dict() for group_id, metrics in self.groups.items()},
+        }
+
+
+def build_workspace_metrics(
+    *,
+    snapshot: "FileTrackerSnapshot | None",
+    dashboard: "DashboardMetrics",
+    summary_groups: Sequence["SummaryGroup"],
+) -> WorkspaceMetrics:
+    """Translate raw tracker data into workspace-friendly metrics."""
+
+    if snapshot is None:
+        processed_missing: tuple[str, ...] = tuple()
+        bulk_missing: tuple[str, ...] = tuple()
+        groups: Dict[str, WorkspaceGroupMetrics] = {}
+        return WorkspaceMetrics(
+            dashboard=dashboard,
+            processed_missing=processed_missing,
+            bulk_missing=bulk_missing,
+            groups=groups,
+        )
+
+    converted_files = set(snapshot.files.get("imported", []))
+    processed_files = set(snapshot.files.get("processed", []))
+    bulk_files = set(snapshot.files.get("bulk_analysis", []))
+
+    processed_missing = tuple(snapshot.missing.get("processed_missing", []))
+    bulk_missing = tuple(snapshot.missing.get("bulk_analysis_missing", []))
+
+    bulk_outputs_by_group: Dict[str, set[str]] = defaultdict(set)
+    for relative_path in bulk_files:
+        if not relative_path:
+            continue
+        parts = relative_path.split("/", 1)
+        slug = parts[0]
+        remainder = parts[1] if len(parts) > 1 else ""
+        if not slug or not remainder:
+            continue
+        if not remainder.startswith("outputs/"):
+            continue
+        output_relative = remainder[len("outputs/") :]
+        if not output_relative:
+            continue
+        bulk_outputs_by_group[slug].add(output_relative)
+
+    group_metrics: Dict[str, WorkspaceGroupMetrics] = {}
+    for group in summary_groups:
+        slug = getattr(group, "slug", None) or group.folder_name
+        converted_subset = _resolve_group_converted_paths(group, converted_files)
+        processed_subset = {path for path in converted_subset if path in processed_files}
+        group_outputs = bulk_outputs_by_group.get(slug, set())
+        bulk_subset = {path for path in converted_subset if path in group_outputs}
+
+        pending_processing = len(converted_subset) - len(processed_subset)
+        pending_bulk = len(converted_subset) - len(bulk_subset)
+
+        metrics = WorkspaceGroupMetrics(
+            group_id=group.group_id,
+            name=group.name,
+            slug=slug,
+            converted_files=tuple(sorted(converted_subset)),
+            converted_count=len(converted_subset),
+            processed_count=len(processed_subset),
+            bulk_analysis_total=len(bulk_subset),
+            pending_processing=max(pending_processing, 0),
+            pending_bulk_analysis=max(pending_bulk, 0),
+        )
+        group_metrics[group.group_id] = metrics
+
+    return WorkspaceMetrics(
+        dashboard=dashboard,
+        processed_missing=processed_missing,
+        bulk_missing=bulk_missing,
+        groups=group_metrics,
+    )
+
+
+def _resolve_group_converted_paths(
+    group: "SummaryGroup",
+    converted_paths: set[str],
+) -> set[str]:
+    """Return the converted-document paths covered by the supplied group."""
+
+    if not converted_paths:
+        return set()
+
+    selected: set[str] = set()
+    normalised_converted = {path.strip("/") for path in converted_paths}
+
+    for path in group.files:
+        candidate = path.strip("/")
+        if candidate and candidate in normalised_converted:
+            selected.add(candidate)
+
+    for directory in group.directories:
+        normalised = directory.strip("/")
+        if not normalised:
+            selected.update(normalised_converted)
+            continue
+        prefix = normalised + "/"
+        for path in normalised_converted:
+            if path == normalised or path.startswith(prefix):
+                selected.add(path)
+
+    return selected
+
+
+__all__ = [
+    "FileTracker",
+    "FileTrackerSnapshot",
+    "DashboardMetrics",
+    "WorkspaceMetrics",
+    "WorkspaceGroupMetrics",
+    "build_workspace_metrics",
+]
