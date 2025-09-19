@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QShowEvent
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea
 
 _ = PySide6
 
@@ -143,8 +144,11 @@ def test_workspace_metrics_include_group_coverage(tmp_path: Path, qt_app: QAppli
     assert set(group_metrics.converted_files) == {"folder/doc1.md", "folder/doc2.md"}
 
 
-def test_welcome_stage_uses_persisted_metrics(tmp_path: Path, qt_app: QApplication) -> None:
+def test_welcome_stage_uses_persisted_metrics(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
     assert qt_app is not None
+    monkeypatch.setenv("FRD_SETTINGS_DIR", str(tmp_path / "settings"))
     manager = ProjectManager()
     project_path = manager.create_project(tmp_path, ProjectMetadata(case_name="Welcome Metrics"))
 
@@ -157,6 +161,7 @@ def test_welcome_stage_uses_persisted_metrics(tmp_path: Path, qt_app: QApplicati
 
     stage = WelcomeStage()
     try:
+        stage.showEvent(QShowEvent())
         stats_text = stage._project_stats_text(manager.project_path)
     finally:
         stage.deleteLater()
@@ -164,6 +169,69 @@ def test_welcome_stage_uses_persisted_metrics(tmp_path: Path, qt_app: QApplicati
     assert "Converted 1" in stats_text
     assert "Processed" in stats_text
     assert "Last scan" in stats_text
+
+
+def test_welcome_stage_refreshes_on_show_event(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    assert qt_app is not None
+    monkeypatch.setenv("FRD_SETTINGS_DIR", str(tmp_path / "settings_refresh"))
+    manager = ProjectManager()
+    manager.create_project(tmp_path, ProjectMetadata(case_name="Refresh Metrics"))
+
+    converted_dir = manager.project_dir / "converted_documents"
+    converted_dir.mkdir(exist_ok=True)
+    (converted_dir / "doc.md").write_text("data")
+
+    manager.get_dashboard_metrics(refresh=True)
+    manager.save_project()
+
+    stage = WelcomeStage()
+    try:
+        stage.showEvent(QShowEvent())
+        qt_app.processEvents()
+
+        stats_label = _find_stats_label(stage)
+        assert stats_label is not None
+        initial_text = stats_label.text()
+        assert "Processed 0/1" in initial_text
+
+        processed_dir = manager.project_dir / "processed_documents"
+        processed_dir.mkdir(exist_ok=True)
+        (processed_dir / "doc.md").write_text("processed")
+
+        manager.get_dashboard_metrics(refresh=True)
+        manager.save_project()
+
+        stage.showEvent(QShowEvent())
+        qt_app.processEvents()
+
+        updated_label = _find_stats_label(stage)
+        assert updated_label is not None
+        assert "Processed 1/1" in updated_label.text()
+    finally:
+        stage.deleteLater()
+
+
+def _find_stats_label(stage: WelcomeStage) -> QLabel | None:
+    for index in range(stage._recent_projects_layout.count()):
+        item = stage._recent_projects_layout.itemAt(index)
+        widget = item.widget()
+        if isinstance(widget, QScrollArea):
+            container = widget.widget()
+            if not container:
+                continue
+            layout = container.layout()
+            if not layout:
+                continue
+            for row in range(layout.count()):
+                card = layout.itemAt(row).widget()
+                if card is None:
+                    continue
+                for label in card.findChildren(QLabel):
+                    if "Converted" in label.text():
+                        return label
+    return None
 
 
 def test_dashboard_metrics_from_dict_accepts_legacy_keys() -> None:

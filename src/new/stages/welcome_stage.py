@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Dict, List
 
 from PySide6.QtCore import Qt, QTimer, Signal, QSize, QUrl
-from PySide6.QtGui import QFont, QIcon, QDesktopServices
+from PySide6.QtGui import QFont, QIcon, QDesktopServices, QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -313,12 +313,15 @@ class WelcomeStage(QWidget):
     def _open_project_path(self, project_path: Path) -> None:
         if project_path.exists():
             self.project_opened.emit(project_path)
+            self._populate_recent_projects()
         else:
             QMessageBox.warning(
                 self,
                 "Project Missing",
                 f"The project path could not be found:\n{project_path}",
             )
+            self.settings.remove_recent_project(str(project_path))
+            self._populate_recent_projects()
 
     def _open_project_folder(self, project_path: Path) -> None:
         folder = project_path.parent if project_path.suffix == ProjectManager.PROJECT_EXTENSION else project_path
@@ -411,6 +414,11 @@ class WelcomeStage(QWidget):
         )
         if file_path:
             self.project_opened.emit(Path(file_path))
+            self._populate_recent_projects()
+
+    def showEvent(self, event: QShowEvent) -> None:  # pragma: no cover - Qt lifecycle
+        super().showEvent(event)
+        self._populate_recent_projects()
 
     def _remove_legacy_projects(self) -> None:
         recent = self.settings.get_recent_projects()
