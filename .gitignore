@@ -6,9 +6,10 @@ dist/
 wheels/
 *.egg-info
 
-/test_output
-test_output/
-logs/
+/var/
+!var/.gitkeep
+!var/logs/.gitkeep
+!var/test_output/.gitkeep
 .forensic_report_drafter/
 *.log
 debug_summarization_*.log

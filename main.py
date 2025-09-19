@@ -2,13 +2,13 @@
 """Entry point for the Forensic Report Drafter dashboard UI."""
 
 
-def main() -> None:
-    """Launch the new dashboard UI."""
-    from main_new import main as new_main
+def main() -> int:
+    """Launch the dashboard UI."""
+    from src.app import run
 
     print("Starting Forensic Report Drafter (Dashboard UI)...")
-    return new_main()
+    return run()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

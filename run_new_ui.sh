@@ -19,4 +19,4 @@ export PHOENIX_PROJECT=forensic-report-drafter
 export PHOENIX_EXPORT_FIXTURES=false
 
 # Run dashboard UI directly
-uv run main_new.py
+uv run -m src.app

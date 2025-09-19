@@ -91,7 +91,7 @@ forensic-report-drafter/
 ├── tests/                    # Test suite
 ├── scripts/                  # Utility scripts
 │   └── setup_env.py         # Environment setup
-└── prompt_templates/         # LLM prompt templates
+└── src/app/resources/       # Bundled prompts/templates for packaging
 ```
 
 ## Architecture Overview
@@ -146,7 +146,7 @@ forensic-report-drafter/
      - All inherit from `QThread` for non-blocking operations
 
 5. **Prompt Management** (`src/core/prompt_manager.py`)
-   - Loads prompts from `prompt_templates/` directory
+   - Loads prompts from `src/app/resources/prompts/`
    - Key prompts: `document_summary_prompt.md`, `document_analysis_system_prompt.md`, `integrated_analysis_prompt.md`
    - `get_template()`: Returns single prompt string with variable substitution
    - `get_prompt_template()`: Returns dict with separate system/user prompts for complex templates

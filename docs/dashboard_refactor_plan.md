@@ -7,8 +7,8 @@ Move the active dashboard UI code out of `src/new/` into a clean top-level packa
 ## Detailed Steps
 
 ### 1. Create `src/app/` package
-- [ ] Introduce a new `src/app/__init__.py` that re-exports the primary dashboard interfaces (e.g., `SecureSettings`, `ProjectManager`, etc.).
-- [ ] Move modules from `src/new/` into `src/app/` with the following structure:
+- [x] Introduce a new `src/app/__init__.py` that re-exports the primary dashboard interfaces (e.g., `SecureSettings`, `ProjectManager`, etc.).
+- [x] Move modules from `src/new/` into `src/app/` with the following structure:
   - `src/app/core/` → domain/business logic (`project_manager.py`, `file_tracker.py`, `summary_groups.py`, `feature_flags.py`, `workspace_controller.py`, etc.)
   - `src/app/services/` → optional layer for conversion/bulk runners if further separation is desired (`conversion_manager.py`, `bulk_analysis_runner.py`, helper registries).
   - `src/app/ui/`
@@ -16,26 +16,26 @@ Move the active dashboard UI code out of `src/new/` into a clean top-level packa
     - `ui/dialogs/` → formerly `src/new/dialogs/`
     - `ui/widgets/` → formerly `src/new/widgets/`
   - `src/app/workers/` → formerly `src/new/workers/`
-- [ ] Update all relative imports inside the moved modules to reflect the new package layout (`from src.new...` → `from src.app...`).
+- [x] Update all relative imports inside the moved modules to reflect the new package layout (`from src.new...` → `from src.app...`).
 
 ### 2. Normalize entry points
-- [ ] Fold `main_new.py` into the package:
+- [x] Fold `main_new.py` into the package:
   - Extract the main window code into `src/app/main_window.py` (or similar) and expose a `run()` helper from `src/app/__init__.py`.
   - Optionally add `src/app/__main__.py` so `python -m src.app` launches the dashboard directly.
-- [ ] Simplify `main.py` so it just imports and executes the `src.app` entry point (no `sys.path` manipulation).
-- [ ] Update shell scripts (`run_app.sh`, `run_new_ui.sh`, `run_debug.sh`) to reference the new module path.
+- [x] Simplify `main.py` so it just imports and executes the `src.app` entry point (no `sys.path` manipulation).
+- [x] Update shell scripts (`run_app.sh`, `run_new_ui.sh`, `run_debug.sh`) to reference the new module path.
 
 ### 3. Align tests with the new package
-- [ ] Rename test packages to mirror `src/app`:
+- [x] Rename test packages to mirror `src/app`:
   - `tests/new_ui/` → `tests/app/ui/`
   - `tests/new_workers/` → `tests/app/workers/`
   - Any other `tests/new_*` → matching `tests/app/...`
-- [ ] Update import paths inside tests and fixtures from `src.new...` to `src.app...`.
-- [ ] Verify pytest discovery still works (`uv run -m pytest tests/app/...`).
+- [x] Update import paths inside tests and fixtures from `src.new...` to `src.app...`.
+- [x] Verify pytest discovery still works (`uv run -m pytest tests/app/...`).
 
 ### 4. Resource & configuration cleanup
-- [ ] Evaluate `templates/` and `prompt_templates/` – move dashboard-specific resources under `src/app/resources/` (or leave if shared).
-- [ ] Ensure `app_settings.json`, `logs/`, `test_output/` are either gitignored or moved under a `var/` directory for clarity.
+- [x] Evaluate `templates/` and `prompt_templates/` – move dashboard-specific resources under `src/app/resources/`.
+- [x] Ensure runtime artefacts (`var/app_settings.json`, `var/logs/`, `var/test_output/`) live under `var/` with gitignored contents.
 - [ ] Document the new layout in README and any developer onboarding docs.
 
 ### 5. Tooling and documentation updates

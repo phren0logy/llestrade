@@ -103,38 +103,48 @@ The original tabbed UI has been removed from the repository as of commit 6401a40
 
 ```
 forensic-report-drafter/
-├── main.py                    # Application entry point
+├── main.py                    # Application entry point (launches src.app)
 ├── src/
-│   ├── config/               # Configuration modules
-│   │   ├── app_config.py    # LLM provider configuration
-│   │   ├── config.py        # App constants
-│   │   ├── logging_config.py # Centralized logging
-│   │   └── startup_config.py # Startup configuration
-│   └── core/                 # Core utilities
-│       ├── exception_handler.py # Global exception handling
-│       ├── file_utils.py    # File operations
-│       ├── ingest_markdown.py # Markdown processing
-│       ├── pdf_utils.py     # PDF processing
-│       └── prompt_manager.py # Prompt template management
-├── llm/                      # LLM provider package
-│   ├── base.py              # Base provider class
-│   ├── providers/           # Provider implementations
-│   ├── chunking.py          # Document chunking
-│   ├── tokens.py            # Token counting
-│   └── factory.py           # Provider factory
-├── ui/                       # User interface
-│   ├── workers/             # Worker threads
-│   └── components/          # Reusable UI components
+│   ├── app/
+│   │   ├── __init__.py      # Re-exports ProjectManager, SecureSettings, etc.
+│   │   ├── core/            # Dashboard-specific domain logic
+│   │   ├── ui/
+│   │   │   ├── dialogs/
+│   │   │   ├── stages/
+│   │   │   └── widgets/
+│   │   ├── workers/         # QRunnable-based background jobs
+│   │   └── resources/
+│   │       ├── prompts/
+│   │       └── templates/
+│   ├── config/               # Application configuration modules
+│   │   ├── app_config.py
+│   │   ├── config.py
+│   │   ├── logging_config.py
+│   │   └── startup_config.py
+│   ├── core/                 # Shared utilities reused by the dashboard
+│   │   ├── exception_handler.py
+│   │   ├── file_utils.py
+│   │   ├── ingest_markdown.py
+│   │   ├── pdf_utils.py
+│   │   └── prompt_manager.py
+│   └── common/llm/           # LLM provider abstractions and helpers
+│       ├── base.py
+│       ├── providers/
+│       ├── chunking.py
+│       ├── tokens.py
+│       └── factory.py
 ├── tests/                    # Test suite
 ├── scripts/                  # Utility scripts
-└── prompt_templates/         # LLM prompt templates
+├── var/                      # Runtime artefacts (gitignored contents)
+│   ├── logs/
+│   └── test_output/
 ```
 
 ## Configuration
 
 ### Application Settings
 
-The application stores settings in `app_settings.json`:
+The application stores settings in `var/app_settings.json` (created on first run):
 ```json
 {
   "selected_llm_provider_id": "anthropic",

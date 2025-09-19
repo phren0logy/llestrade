@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from dotenv import load_dotenv
@@ -12,7 +13,7 @@ load_dotenv()
 from src.common.llm.factory import create_provider
 from src.common.llm.base import BaseLLMProvider
 
-SETTINGS_FILE = "app_settings.json"
+SETTINGS_FILE = Path("var/app_settings.json")
 DEFAULT_SETTINGS = {
     "selected_llm_provider_id": "anthropic",
     "llm_provider_configs": {
@@ -79,12 +80,13 @@ def get_available_providers_and_models() -> list[dict[str, str]]:
 
 def load_app_settings() -> dict:
     """Loads application settings from SETTINGS_FILE, creates it with defaults if not found."""
-    if not os.path.exists(SETTINGS_FILE):
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if not SETTINGS_FILE.exists():
         logging.info(f"'{SETTINGS_FILE}' not found. Creating with default settings.")
         save_app_settings(DEFAULT_SETTINGS)
         return DEFAULT_SETTINGS.copy()
     try:
-        with open(SETTINGS_FILE, 'r') as f:
+        with SETTINGS_FILE.open('r', encoding='utf-8') as f:
             settings = json.load(f)
             
         # Override Azure deployment name from environment if available
@@ -101,7 +103,8 @@ def load_app_settings() -> dict:
 def save_app_settings(settings: dict):
     """Saves the provided settings dictionary to SETTINGS_FILE."""
     try:
-        with open(SETTINGS_FILE, 'w') as f:
+        SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with SETTINGS_FILE.open('w', encoding='utf-8') as f:
             json.dump(settings, f, indent=2)
         logging.info(f"Settings saved to '{SETTINGS_FILE}'.")
     except IOError as e:
@@ -170,7 +173,7 @@ def get_configured_llm_provider(
     if selected_provider_id == "azure_openai":
         # Try to get Azure settings from SecureSettings if available
         try:
-            from src.new.core import SecureSettings
+            from src.app.core import SecureSettings
             secure_settings = SecureSettings()
             azure_settings = secure_settings.get("azure_openai_settings", {})
             
