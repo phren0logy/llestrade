@@ -95,6 +95,10 @@ This will:
    - Use the Prompts tab to generate final report sections
    - Apply templates for standardized formatting
 
+## Legacy UI Reference
+
+The original tabbed UI has been removed from the repository as of commit 6401a40cd1c4fead93e72b4e7dbfda916bf1cb99. If you need to inspect that implementation for historical reference, check out that revision (or any earlier one) and review the `src/legacy/` package in that commit.
+
 ## Project Structure
 
 ```

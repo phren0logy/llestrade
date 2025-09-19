@@ -68,7 +68,6 @@ class ApplicationLogger:
         module_configs = {
             'src.common.llm': logging.DEBUG if debug else logging.INFO,
             'src.common.llm.providers': logging.DEBUG if debug else logging.INFO,
-            'src.legacy.ui.workers': logging.DEBUG if debug else logging.INFO,
             'app_config': logging.INFO,
             'prompt_manager': logging.INFO,
         }
