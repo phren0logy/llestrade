@@ -148,12 +148,10 @@ class ProjectWorkspace(QWidget):
         tab_layout.addWidget(self._root_warning_label)
         self._root_warning_label.hide()
 
-        self._missing_processed_label = QLabel("Processed missing: —")
         self._missing_bulk_label = QLabel("Bulk analysis missing: —")
 
-        for label in (self._missing_processed_label, self._missing_bulk_label):
-            label.setWordWrap(True)
-            tab_layout.addWidget(label)
+        self._missing_bulk_label.setWordWrap(True)
+        tab_layout.addWidget(self._missing_bulk_label)
 
         tab_layout.addStretch()
         return widget
@@ -301,7 +299,6 @@ class ProjectWorkspace(QWidget):
             self._workspace_metrics = self._project_manager.get_workspace_metrics(refresh=True)
         except Exception as exc:
             self._counts_label.setText("Scan failed")
-            self._missing_processed_label.setText(str(exc))
             if getattr(self, "_missing_bulk_label", None):
                 self._missing_bulk_label.setText("")
             return
@@ -311,23 +308,14 @@ class ProjectWorkspace(QWidget):
         if metrics.imported_total:
             counts_text = (
                 f"Converted: {metrics.imported_total} | "
-                f"Processed: {metrics.processed_total} of {metrics.imported_total} | "
                 f"Bulk analysis: {metrics.bulk_analysis_total} of {metrics.imported_total}"
             )
         else:
-            counts_text = (
-                "Converted: 0 | "
-                f"Processed: {metrics.processed_total} | "
-                f"Bulk analysis: {metrics.bulk_analysis_total}"
-        )
+            counts_text = "Converted: 0 | Bulk analysis: 0"
         self._counts_label.setText(counts_text)
 
-        processed_missing = list(self._workspace_metrics.processed_missing)
         bulk_missing = list(self._workspace_metrics.bulk_missing)
 
-        self._missing_processed_label.setText(
-            "Processed missing: " + (", ".join(processed_missing) if processed_missing else "None")
-        )
         if getattr(self, "_missing_bulk_label", None):
             self._missing_bulk_label.setText(
                 "Bulk analysis missing: " + (", ".join(bulk_missing) if bulk_missing else "None")
@@ -810,8 +798,6 @@ class ProjectWorkspace(QWidget):
                 status_text = "No converted files"
             elif metrics and metrics.pending_bulk_analysis:
                 status_text = f"Pending bulk ({metrics.pending_bulk_analysis})"
-            elif metrics and metrics.pending_processing:
-                status_text = f"Pending processing ({metrics.pending_processing})"
             else:
                 status_text = "Ready"
         status_item = QTableWidgetItem(status_text)

@@ -29,14 +29,12 @@ def test_scan_empty_project_creates_tracker(project_root: Path):
     snapshot = tracker.scan()
 
     assert snapshot.imported_count == 0
-    assert snapshot.processed_count == 0
     assert snapshot.bulk_analysis_count == 0
-    assert snapshot.missing["processed_missing"] == []
     assert snapshot.missing["bulk_analysis_missing"] == []
 
     stored = load_tracker_snapshot(project_root)
-    assert stored["counts"] == {"imported": 0, "processed": 0, "bulk_analysis": 0}
-    assert stored["files"] == {"imported": [], "processed": [], "bulk_analysis": []}
+    assert stored["counts"] == {"imported": 0, "bulk_analysis": 0}
+    assert stored["files"] == {"imported": [], "bulk_analysis": []}
 
 
 def test_scan_detects_missing_processed_and_bulk_outputs(project_root: Path):
@@ -47,10 +45,8 @@ def test_scan_detects_missing_processed_and_bulk_outputs(project_root: Path):
     snapshot = tracker.scan()
 
     assert snapshot.imported_count == 1
-    assert snapshot.processed_count == 1
-    assert snapshot.files["processed"] == ["case/doc2.md"]
-    assert snapshot.missing["processed_missing"] == ["case/doc1.md"]
-    assert snapshot.missing["bulk_analysis_missing"] == ["case/doc2.md"]
+    assert snapshot.bulk_analysis_count == 0
+    assert snapshot.missing["bulk_analysis_missing"] == ["case/doc1.md"]
 
 
 def test_scan_updates_when_new_files_added(project_root: Path):

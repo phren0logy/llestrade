@@ -35,10 +35,6 @@ class FileTrackerSnapshot:
         return self.counts.get("imported", 0)
 
     @property
-    def processed_count(self) -> int:
-        return self.counts.get("processed", 0)
-
-    @property
     def bulk_analysis_count(self) -> int:
         return self.counts.get("bulk_analysis", 0)
 
@@ -46,12 +42,6 @@ class FileTrackerSnapshot:
     def summaries_count(self) -> int:
         """Compatibility alias for legacy callers."""
         return self.bulk_analysis_count
-
-    @property
-    def processed_ratio(self) -> Optional[float]:
-        if self.imported_count == 0:
-            return None
-        return self.processed_count / self.imported_count
 
     def to_dashboard_metrics(self) -> "DashboardMetrics":
         """Translate the snapshot into lightweight dashboard metrics."""
@@ -101,9 +91,7 @@ class DashboardMetrics:
 
     last_scan: Optional[datetime]
     imported_total: int = 0
-    processed_total: int = 0
     bulk_analysis_total: int = 0
-    pending_processing: int = 0
     pending_bulk_analysis: int = 0
     notes: Dict[str, str] = field(default_factory=dict)
     snapshot_version: str = TRACKER_VERSION
@@ -113,9 +101,7 @@ class DashboardMetrics:
         return cls(
             last_scan=None,
             imported_total=0,
-            processed_total=0,
             bulk_analysis_total=0,
-            pending_processing=0,
             pending_bulk_analysis=0,
             notes={},
             snapshot_version=TRACKER_VERSION,
@@ -126,9 +112,7 @@ class DashboardMetrics:
         return cls(
             last_scan=snapshot.timestamp,
             imported_total=snapshot.imported_count,
-            processed_total=snapshot.processed_count,
             bulk_analysis_total=snapshot.bulk_analysis_count,
-            pending_processing=len(snapshot.missing.get("processed_missing", [])),
             pending_bulk_analysis=len(snapshot.missing.get("bulk_analysis_missing", [])),
             notes=dict(snapshot.notes),
             snapshot_version=snapshot.version,
@@ -138,9 +122,7 @@ class DashboardMetrics:
         return {
             "last_scan": self.last_scan.isoformat() if self.last_scan else None,
             "imported_total": self.imported_total,
-            "processed_total": self.processed_total,
             "bulk_analysis_total": self.bulk_analysis_total,
-            "pending_processing": self.pending_processing,
             "pending_bulk_analysis": self.pending_bulk_analysis,
             "notes": dict(self.notes),
             "snapshot_version": self.snapshot_version,
@@ -170,9 +152,7 @@ class DashboardMetrics:
         return cls(
             last_scan=last_scan,
             imported_total=int(payload.get("imported_total", 0)),
-            processed_total=int(payload.get("processed_total", 0)),
             bulk_analysis_total=int(bulk_total or 0),
-            pending_processing=int(payload.get("pending_processing", 0)),
             pending_bulk_analysis=int(pending_bulk or 0),
             notes=dict(payload.get("notes", {})),
             snapshot_version=str(payload.get("snapshot_version", TRACKER_VERSION)),
@@ -216,27 +196,22 @@ class FileTracker:
         imported = self._gather_files("converted_documents")
         if not imported:
             imported = self._gather_files("imported_documents")
-        processed = self._gather_files("processed_documents")
         bulk_analysis = self._gather_files("bulk_analysis")
 
-        processed = self._filter_processed_files(processed)
         bulk_analysis = self._filter_bulk_analysis_files(bulk_analysis)
 
         counts = {
             "imported": len(imported),
-            "processed": len(processed),
             "bulk_analysis": len(bulk_analysis),
         }
 
         files = {
             "imported": sorted(imported),
-            "processed": sorted(processed),
             "bulk_analysis": sorted(bulk_analysis),
         }
 
         missing = {
-            "processed_missing": sorted(imported - processed),
-            "bulk_analysis_missing": sorted(processed - bulk_analysis),
+            "bulk_analysis_missing": sorted(imported - bulk_analysis),
         }
 
         snapshot = FileTrackerSnapshot(
@@ -266,13 +241,6 @@ class FileTracker:
             if path.is_file():
                 collected.add(path.relative_to(folder).as_posix())
         return collected
-
-    def _filter_processed_files(self, files: set[str]) -> set[str]:
-        """Return processed-document paths that should be counted."""
-
-        if not files:
-            return files
-        return {path for path in files if not path.endswith("/.DS_Store") and path.split("/")[-1] != ".DS_Store"}
 
     def _filter_bulk_analysis_files(self, files: set[str]) -> set[str]:
         """Return bulk-analysis output paths that should be counted."""
@@ -315,9 +283,7 @@ class WorkspaceGroupMetrics:
     slug: str
     converted_files: tuple[str, ...]
     converted_count: int
-    processed_count: int
     bulk_analysis_total: int
-    pending_processing: int
     pending_bulk_analysis: int
 
     def to_dict(self) -> Dict[str, object]:
@@ -327,9 +293,7 @@ class WorkspaceGroupMetrics:
             "slug": self.slug,
             "converted_files": list(self.converted_files),
             "converted_count": self.converted_count,
-            "processed_count": self.processed_count,
             "bulk_analysis_total": self.bulk_analysis_total,
-            "pending_processing": self.pending_processing,
             "pending_bulk_analysis": self.pending_bulk_analysis,
         }
 
@@ -339,14 +303,12 @@ class WorkspaceMetrics:
     """Aggregated dashboard + group metrics for workspace consumption."""
 
     dashboard: "DashboardMetrics"
-    processed_missing: tuple[str, ...]
     bulk_missing: tuple[str, ...]
     groups: Dict[str, WorkspaceGroupMetrics]
 
     def to_dict(self) -> Dict[str, object]:
         return {
             "dashboard": self.dashboard.to_dict(),
-            "processed_missing": list(self.processed_missing),
             "bulk_missing": list(self.bulk_missing),
             "groups": {group_id: metrics.to_dict() for group_id, metrics in self.groups.items()},
         }
@@ -361,52 +323,36 @@ def build_workspace_metrics(
     """Translate raw tracker data into workspace-friendly metrics."""
 
     if snapshot is None:
-        processed_missing: tuple[str, ...] = tuple()
         bulk_missing: tuple[str, ...] = tuple()
         groups: Dict[str, WorkspaceGroupMetrics] = {}
         return WorkspaceMetrics(
             dashboard=dashboard,
-            processed_missing=processed_missing,
             bulk_missing=bulk_missing,
             groups=groups,
         )
 
     converted_files = set(snapshot.files.get("imported", []))
-    processed_files = set(snapshot.files.get("processed", []))
     bulk_files = set(snapshot.files.get("bulk_analysis", []))
 
-    processed_missing = tuple(snapshot.missing.get("processed_missing", []))
-    bulk_missing = tuple(snapshot.missing.get("bulk_analysis_missing", []))
-
+    normalized_bulk_files: set[str] = set()
     bulk_outputs_by_group: Dict[str, set[str]] = defaultdict(set)
     for relative_path in bulk_files:
-        if not relative_path:
+        parsed = _parse_bulk_output_entry(relative_path)
+        if not parsed:
             continue
-        parts = relative_path.split("/", 1)
-        slug = parts[0]
-        remainder = parts[1] if len(parts) > 1 else ""
-        if not slug or not remainder:
-            continue
-        if remainder.startswith("outputs/"):
-            remainder = remainder[len("outputs/") :]
-        if not remainder:
-            continue
-
-        normalized = remainder
-        if remainder.endswith(".md") and remainder[:-3].endswith("_analysis"):
-            normalized = remainder[:-12] + ".md"
-
+        slug, normalized = parsed
+        normalized_bulk_files.add(normalized)
         bulk_outputs_by_group[slug].add(normalized)
+
+    bulk_missing = tuple(sorted(converted_files - normalized_bulk_files))
 
     group_metrics: Dict[str, WorkspaceGroupMetrics] = {}
     for group in summary_groups:
         slug = getattr(group, "slug", None) or group.folder_name
         converted_subset = _resolve_group_converted_paths(group, converted_files)
-        processed_subset = {path for path in converted_subset if path in processed_files}
         group_outputs = bulk_outputs_by_group.get(slug, set())
         bulk_subset = {path for path in converted_subset if path in group_outputs}
 
-        pending_processing = len(converted_subset) - len(processed_subset)
         pending_bulk = len(converted_subset) - len(bulk_subset)
 
         metrics = WorkspaceGroupMetrics(
@@ -415,16 +361,13 @@ def build_workspace_metrics(
             slug=slug,
             converted_files=tuple(sorted(converted_subset)),
             converted_count=len(converted_subset),
-            processed_count=len(processed_subset),
             bulk_analysis_total=len(bulk_subset),
-            pending_processing=max(pending_processing, 0),
             pending_bulk_analysis=max(pending_bulk, 0),
         )
         group_metrics[group.group_id] = metrics
 
     return WorkspaceMetrics(
         dashboard=dashboard,
-        processed_missing=processed_missing,
         bulk_missing=bulk_missing,
         groups=group_metrics,
     )
@@ -458,6 +401,29 @@ def _resolve_group_converted_paths(
                 selected.add(path)
 
     return selected
+
+
+def _parse_bulk_output_entry(relative_path: str) -> tuple[str, str] | None:
+    """Return (group_slug, normalized_path) for a bulk output entry."""
+
+    if not relative_path:
+        return None
+    parts = relative_path.split("/", 1)
+    if len(parts) != 2:
+        return None
+    slug, remainder = parts
+    if not slug or not remainder:
+        return None
+    if remainder.startswith("outputs/"):
+        remainder = remainder[len("outputs/") :]
+    if not remainder:
+        return None
+
+    normalized = remainder
+    if remainder.endswith(".md") and remainder[:-3].endswith("_analysis"):
+        normalized = remainder[:-12] + ".md"
+
+    return slug, normalized
 
 
 __all__ = [

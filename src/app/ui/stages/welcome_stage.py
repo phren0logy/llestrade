@@ -260,14 +260,10 @@ class WelcomeStage(QWidget):
         project_dir = project_path.parent
 
         converted = self._count_files(project_dir / "converted_documents")
-        processed = self._count_files(project_dir / "processed_documents")
         bulk_outputs = self._count_files(project_dir / "bulk_analysis")
 
         if converted:
-            return (
-                f"Converted {converted} | Processed {processed}/{converted} | "
-                f"Bulk analysis {bulk_outputs}/{converted}"
-            )
+            return f"Converted {converted} | Bulk analysis {bulk_outputs}/{converted}"
         return "No converted documents yet."
 
     def _metrics_text(self, project_path: Path) -> str:
@@ -276,29 +272,21 @@ class WelcomeStage(QWidget):
         if (
             metrics.last_scan is None
             and metrics.imported_total == 0
-            and metrics.processed_total == 0
             and metrics.bulk_analysis_total == 0
-            and metrics.pending_processing == 0
             and metrics.pending_bulk_analysis == 0
         ):
             return ""
 
         converted = metrics.imported_total
-        processed = metrics.processed_total
         bulk_analysis = metrics.bulk_analysis_total
 
         if converted:
-            text = (
-                f"Converted {converted} | Processed {processed}/{converted}"
-                f" | Bulk analysis {bulk_analysis}/{converted}"
-            )
+            text = f"Converted {converted} | Bulk analysis {bulk_analysis}/{converted}"
         else:
             text = "No converted documents yet."
 
-        if metrics.pending_processing or metrics.pending_bulk_analysis:
+        if metrics.pending_bulk_analysis:
             details: List[str] = []
-            if metrics.pending_processing:
-                details.append(f"{metrics.pending_processing} awaiting processing")
             if metrics.pending_bulk_analysis:
                 details.append(f"{metrics.pending_bulk_analysis} awaiting bulk analysis")
             text += " (" + ", ".join(details) + ")"

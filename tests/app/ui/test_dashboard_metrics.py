@@ -35,9 +35,7 @@ def test_get_dashboard_metrics_scans_when_missing(tmp_path: Path, qt_app: QAppli
     metrics = manager.get_dashboard_metrics()
 
     assert metrics.imported_total == 0
-    assert metrics.processed_total == 0
     assert metrics.bulk_analysis_total == 0
-    assert metrics.pending_processing == 0
     assert metrics.pending_bulk_analysis == 0
     assert metrics.last_scan is not None
     assert manager.dashboard_metrics == metrics
@@ -54,17 +52,11 @@ def test_dashboard_metrics_refresh_counts_files(tmp_path: Path, qt_app: QApplica
     (converted / "doc1.md").write_text("converted")
     (converted / "doc2.md").write_text("converted")
 
-    processed = manager.project_dir / "processed_documents" / "folder"
-    processed.mkdir(parents=True, exist_ok=True)
-    (processed / "doc1.md").write_text("processed")
-
     metrics = manager.get_dashboard_metrics(refresh=True)
 
     assert metrics.imported_total == 2
-    assert metrics.processed_total == 1
     assert metrics.bulk_analysis_total == 0
-    assert metrics.pending_processing == 1  # doc2.md still pending processing
-    assert metrics.pending_bulk_analysis == 1  # doc1.md awaits bulk analysis
+    assert metrics.pending_bulk_analysis == 2
     assert manager.dashboard_metrics == metrics
 
 
@@ -107,8 +99,7 @@ def test_read_dashboard_metrics_from_disk(tmp_path: Path, qt_app: QApplication) 
 
     assert metrics.imported_total == 1
     assert metrics.last_scan is not None
-    assert metrics.pending_processing == 1
-    assert metrics.pending_bulk_analysis == 0
+    assert metrics.pending_bulk_analysis == 1
 
 def test_workspace_metrics_include_group_coverage(tmp_path: Path, qt_app: QApplication) -> None:
     assert qt_app is not None
@@ -120,10 +111,6 @@ def test_workspace_metrics_include_group_coverage(tmp_path: Path, qt_app: QAppli
     (converted_dir / "doc1.md").write_text("converted")
     (converted_dir / "doc2.md").write_text("converted")
 
-    processed_dir = manager.project_dir / "processed_documents" / "folder"
-    processed_dir.mkdir(parents=True, exist_ok=True)
-    (processed_dir / "doc1.md").write_text("processed")
-
     group = SummaryGroup.create(name="Case Files", directories=["folder"])
     manager.save_summary_group(group)
 
@@ -134,13 +121,10 @@ def test_workspace_metrics_include_group_coverage(tmp_path: Path, qt_app: QAppli
     metrics = manager.get_workspace_metrics(refresh=True)
 
     assert metrics.dashboard.imported_total == 2
-    assert metrics.dashboard.processed_total == 1
 
     group_metrics = metrics.groups[group.group_id]
     assert group_metrics.converted_count == 2
-    assert group_metrics.processed_count == 1
     assert group_metrics.bulk_analysis_total == 1
-    assert group_metrics.pending_processing == 1
     assert group_metrics.pending_bulk_analysis == 1
     assert set(group_metrics.converted_files) == {"folder/doc1.md", "folder/doc2.md"}
 
@@ -168,7 +152,7 @@ def test_welcome_stage_uses_persisted_metrics(
         stage.deleteLater()
 
     assert "Converted 1" in stats_text
-    assert "Processed" in stats_text
+    assert "Bulk analysis" in stats_text
     assert "Last scan" in stats_text
 
 
@@ -195,11 +179,11 @@ def test_welcome_stage_refreshes_on_show_event(
         stats_label = _find_stats_label(stage)
         assert stats_label is not None
         initial_text = stats_label.text()
-        assert "Processed 0/1" in initial_text
+        assert "Bulk analysis 0/1" in initial_text
 
-        processed_dir = manager.project_dir / "processed_documents"
-        processed_dir.mkdir(exist_ok=True)
-        (processed_dir / "doc.md").write_text("processed")
+        outputs_dir = manager.project_dir / "bulk_analysis" / "manual" / "outputs"
+        outputs_dir.mkdir(parents=True, exist_ok=True)
+        (outputs_dir / "doc_analysis.md").write_text("analysis")
 
         manager.get_dashboard_metrics(refresh=True)
         manager.save_project()
@@ -209,7 +193,7 @@ def test_welcome_stage_refreshes_on_show_event(
 
         updated_label = _find_stats_label(stage)
         assert updated_label is not None
-        assert "Processed 1/1" in updated_label.text()
+        assert "Bulk analysis 1/1" in updated_label.text()
     finally:
         stage.deleteLater()
 
