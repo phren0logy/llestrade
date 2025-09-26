@@ -245,12 +245,7 @@ class ProjectManager(QObject):
             "bulk_analysis",
             "reports",
             "templates",
-            "logs",
             "backups",
-            # Legacy folders kept for backward compatibility with in-flight code paths
-            "source_documents",
-            "processed_documents",
-            "summaries",
         ]
         for subdir in subdirs:
             (self.project_dir / subdir).mkdir(exist_ok=True)
@@ -705,13 +700,8 @@ class ProjectManager(QObject):
             'bulk_analysis': str(self.project_dir / 'bulk_analysis'),
             'reports': str(self.project_dir / 'reports'),
             'templates': str(self.project_dir / 'templates'),
-            'logs': str(self.project_dir / 'logs'),
             'backups': str(self.project_dir / 'backups'),
         }
-        # Legacy keys kept for compatibility with in-progress refactors
-        base_paths['source_documents'] = str(self.project_dir / 'source_documents')
-        base_paths['processed_documents'] = str(self.project_dir / 'processed_documents')
-        base_paths['summaries'] = str(self.project_dir / 'summaries')
 
         return {
             'paths': base_paths,

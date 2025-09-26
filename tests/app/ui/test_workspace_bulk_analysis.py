@@ -55,10 +55,6 @@ def _create_project_with_group(tmp_path: Path) -> tuple[ProjectManager, SummaryG
     converted_doc.parent.mkdir(parents=True, exist_ok=True)
     converted_doc.write_text("# Heading\nBody", encoding="utf-8")
 
-    processed_doc = manager.project_dir / "processed_documents" / "folder" / "record.md"
-    processed_doc.parent.mkdir(parents=True, exist_ok=True)
-    processed_doc.write_text("Processed", encoding="utf-8")
-
     # Ensure the tracker sees our converted document so the workspace resolves it.
     FileTracker(manager.project_dir).scan()
 

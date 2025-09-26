@@ -7,7 +7,7 @@ from src.app.core.file_tracker import FileTracker
 
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
-    for folder in ("imported_documents", "processed_documents", "bulk_analysis"):
+    for folder in ("converted_documents", "bulk_analysis"):
         (tmp_path / folder).mkdir()
     return tmp_path
 
@@ -37,9 +37,8 @@ def test_scan_empty_project_creates_tracker(project_root: Path):
     assert stored["files"] == {"imported": [], "bulk_analysis": []}
 
 
-def test_scan_detects_missing_processed_and_bulk_outputs(project_root: Path):
-    write_file(project_root / "imported_documents", "case/doc1.md")
-    write_file(project_root / "processed_documents", "case/doc2.md")
+def test_scan_detects_missing_bulk_outputs(project_root: Path):
+    write_file(project_root / "converted_documents", "case/doc1.md")
 
     tracker = FileTracker(project_root)
     snapshot = tracker.scan()
@@ -53,7 +52,7 @@ def test_scan_updates_when_new_files_added(project_root: Path):
     tracker = FileTracker(project_root)
     tracker.scan()
 
-    write_file(project_root / "imported_documents", "doc1.md")
+    write_file(project_root / "converted_documents", "doc1.md")
     snapshot = tracker.scan()
     assert snapshot.imported_count == 1
     assert tracker.snapshot is snapshot

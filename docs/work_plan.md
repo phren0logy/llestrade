@@ -186,8 +186,8 @@ project_dir/
 │       └── outputs/
 │           └── legal_docs/
 │               └── case_summary.md
-└── logs/
-    └── operations.log         # Conversion + bulk analysis events (rotated)
+└── backups/
+    └── 2025-01-01T120000Z/    # Snapshot copies created by the app
 ```
 
 > Original source files remain in their external locations; the project stores only relative references and derived outputs.

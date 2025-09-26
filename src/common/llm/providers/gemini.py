@@ -68,6 +68,21 @@ class GeminiProvider(BaseLLMProvider):
             # Try GEMINI_API_KEY first, then GOOGLE_API_KEY
             gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
             if not gemini_key:
+                try:
+                    from src.app.core.secure_settings import SecureSettings
+
+                    settings = SecureSettings()
+                    gemini_key = settings.get_api_key("gemini")
+                    if gemini_key:
+                        os.environ["GEMINI_API_KEY"] = gemini_key
+                        logger.info("Loaded Gemini API key from SecureSettings")
+                except Exception as exc:  # pragma: no cover - defensive fallback
+                    logger.debug(
+                        "SecureSettings unavailable while loading Gemini key: %s",
+                        exc,
+                    )
+
+            if not gemini_key:
                 logger.error("GEMINI_API_KEY or GOOGLE_API_KEY environment variable not set")
                 self.emit_error("Gemini API key not configured")
                 return

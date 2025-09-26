@@ -38,8 +38,8 @@ def test_both_clients():
     if anthropic_working:
         try:
             logging.info("Testing Anthropic response...")
-            response = anthropic_client.generate_response(
-                prompt_text="What is the capital of France?",
+            response = anthropic_client.generate(
+                prompt="What is the capital of France?",
                 model="claude-3-7-sonnet-20250219",
                 temperature=0.1
             )
@@ -57,8 +57,8 @@ def test_both_clients():
     if gemini_working:
         try:
             logging.info("Testing Gemini response...")
-            response = gemini_client.generate_response(
-                prompt_text="What is the capital of France?",
+            response = gemini_client.generate(
+                prompt="What is the capital of France?",
                 model="gemini-2.5-pro-preview-05-06",
                 temperature=0.1
             )

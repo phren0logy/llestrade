@@ -161,9 +161,8 @@ class DashboardMetrics:
 class FileTracker:
     """Track files within a project directory.
 
-    The tracker inspects three canonical subdirectories:
-    - imported_documents/
-    - processed_documents/
+    The tracker inspects the canonical subdirectories:
+    - converted_documents/
     - bulk_analysis/
 
     Each `scan()` collects counts and missing counterparts, then persists
@@ -194,8 +193,6 @@ class FileTracker:
     def scan(self) -> FileTrackerSnapshot:
         """Walk the project directories and generate a fresh snapshot."""
         imported = self._gather_files("converted_documents")
-        if not imported:
-            imported = self._gather_files("imported_documents")
         bulk_analysis = self._gather_files("bulk_analysis")
 
         bulk_analysis = self._filter_bulk_analysis_files(bulk_analysis)
