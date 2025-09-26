@@ -43,6 +43,10 @@ class FileTrackerSnapshot:
         """Compatibility alias for legacy callers."""
         return self.bulk_analysis_count
 
+    @property
+    def highlights_count(self) -> int:
+        return self.counts.get("highlights", 0)
+
     def to_dashboard_metrics(self) -> "DashboardMetrics":
         """Translate the snapshot into lightweight dashboard metrics."""
         return DashboardMetrics.from_snapshot(self)
@@ -91,7 +95,9 @@ class DashboardMetrics:
 
     last_scan: Optional[datetime]
     imported_total: int = 0
+    highlights_total: int = 0
     bulk_analysis_total: int = 0
+    pending_highlights: int = 0
     pending_bulk_analysis: int = 0
     notes: Dict[str, str] = field(default_factory=dict)
     snapshot_version: str = TRACKER_VERSION
@@ -101,7 +107,9 @@ class DashboardMetrics:
         return cls(
             last_scan=None,
             imported_total=0,
+            highlights_total=0,
             bulk_analysis_total=0,
+            pending_highlights=0,
             pending_bulk_analysis=0,
             notes={},
             snapshot_version=TRACKER_VERSION,
@@ -112,7 +120,9 @@ class DashboardMetrics:
         return cls(
             last_scan=snapshot.timestamp,
             imported_total=snapshot.imported_count,
+            highlights_total=snapshot.highlights_count,
             bulk_analysis_total=snapshot.bulk_analysis_count,
+            pending_highlights=len(snapshot.missing.get("highlights_missing", [])),
             pending_bulk_analysis=len(snapshot.missing.get("bulk_analysis_missing", [])),
             notes=dict(snapshot.notes),
             snapshot_version=snapshot.version,
@@ -122,7 +132,9 @@ class DashboardMetrics:
         return {
             "last_scan": self.last_scan.isoformat() if self.last_scan else None,
             "imported_total": self.imported_total,
+            "highlights_total": self.highlights_total,
             "bulk_analysis_total": self.bulk_analysis_total,
+            "pending_highlights": self.pending_highlights,
             "pending_bulk_analysis": self.pending_bulk_analysis,
             "notes": dict(self.notes),
             "snapshot_version": self.snapshot_version,
@@ -149,10 +161,15 @@ class DashboardMetrics:
         if pending_bulk is None and isinstance(payload, dict):
             pending_bulk = payload.get("pending_summaries")
 
+        highlights_total = payload.get("highlights_total") if isinstance(payload, dict) else None
+        pending_highlights = payload.get("pending_highlights") if isinstance(payload, dict) else None
+
         return cls(
             last_scan=last_scan,
             imported_total=int(payload.get("imported_total", 0)),
+            highlights_total=int(highlights_total or 0),
             bulk_analysis_total=int(bulk_total or 0),
+            pending_highlights=int(pending_highlights or 0),
             pending_bulk_analysis=int(pending_bulk or 0),
             notes=dict(payload.get("notes", {})),
             snapshot_version=str(payload.get("snapshot_version", TRACKER_VERSION)),
@@ -193,22 +210,27 @@ class FileTracker:
     def scan(self) -> FileTrackerSnapshot:
         """Walk the project directories and generate a fresh snapshot."""
         imported = self._gather_files("converted_documents")
-        bulk_analysis = self._gather_files("bulk_analysis")
-
-        bulk_analysis = self._filter_bulk_analysis_files(bulk_analysis)
+        bulk_analysis = self._filter_bulk_analysis_files(
+            self._gather_files("bulk_analysis")
+        )
+        highlights_files = self._gather_files("highlights")
+        highlights_normalized = self._normalize_highlight_files(highlights_files)
 
         counts = {
             "imported": len(imported),
             "bulk_analysis": len(bulk_analysis),
+            "highlights": len(highlights_normalized),
         }
 
         files = {
             "imported": sorted(imported),
             "bulk_analysis": sorted(bulk_analysis),
+            "highlights": sorted(highlights_files),
         }
 
         missing = {
             "bulk_analysis_missing": sorted(imported - bulk_analysis),
+            "highlights_missing": sorted(imported - highlights_normalized),
         }
 
         snapshot = FileTrackerSnapshot(
@@ -258,6 +280,17 @@ class FileTracker:
             filtered.add(path)
         return filtered
 
+    def _normalize_highlight_files(self, files: set[str]) -> set[str]:
+        if not files:
+            return set()
+
+        normalized: set[str] = set()
+        for path in files:
+            normalized_entry = _normalize_highlight_entry(path)
+            if normalized_entry:
+                normalized.add(normalized_entry)
+        return normalized
+
     def _write_snapshot(self, snapshot: FileTrackerSnapshot) -> None:
         tracker_path = self._tracker_file()
         try:
@@ -300,12 +333,14 @@ class WorkspaceMetrics:
     """Aggregated dashboard + group metrics for workspace consumption."""
 
     dashboard: "DashboardMetrics"
+    highlights_missing: tuple[str, ...]
     bulk_missing: tuple[str, ...]
     groups: Dict[str, WorkspaceGroupMetrics]
 
     def to_dict(self) -> Dict[str, object]:
         return {
             "dashboard": self.dashboard.to_dict(),
+            "highlights_missing": list(self.highlights_missing),
             "bulk_missing": list(self.bulk_missing),
             "groups": {group_id: metrics.to_dict() for group_id, metrics in self.groups.items()},
         }
@@ -320,16 +355,25 @@ def build_workspace_metrics(
     """Translate raw tracker data into workspace-friendly metrics."""
 
     if snapshot is None:
+        highlights_missing: tuple[str, ...] = tuple()
         bulk_missing: tuple[str, ...] = tuple()
         groups: Dict[str, WorkspaceGroupMetrics] = {}
         return WorkspaceMetrics(
             dashboard=dashboard,
+            highlights_missing=highlights_missing,
             bulk_missing=bulk_missing,
             groups=groups,
         )
 
     converted_files = set(snapshot.files.get("imported", []))
     bulk_files = set(snapshot.files.get("bulk_analysis", []))
+    highlight_files = set(snapshot.files.get("highlights", []))
+
+    highlights_normalized = {
+        normalized
+        for entry in highlight_files
+        if (normalized := _normalize_highlight_entry(entry)) is not None
+    }
 
     normalized_bulk_files: set[str] = set()
     bulk_outputs_by_group: Dict[str, set[str]] = defaultdict(set)
@@ -341,6 +385,7 @@ def build_workspace_metrics(
         normalized_bulk_files.add(normalized)
         bulk_outputs_by_group[slug].add(normalized)
 
+    highlights_missing = tuple(sorted(converted_files - highlights_normalized))
     bulk_missing = tuple(sorted(converted_files - normalized_bulk_files))
 
     group_metrics: Dict[str, WorkspaceGroupMetrics] = {}
@@ -365,6 +410,7 @@ def build_workspace_metrics(
 
     return WorkspaceMetrics(
         dashboard=dashboard,
+        highlights_missing=highlights_missing,
         bulk_missing=bulk_missing,
         groups=group_metrics,
     )
@@ -398,6 +444,14 @@ def _resolve_group_converted_paths(
                 selected.add(path)
 
     return selected
+
+
+def _normalize_highlight_entry(relative_path: str) -> str | None:
+    suffix = ".highlights.md"
+    if not relative_path.endswith(suffix):
+        return None
+    base = relative_path[: -len(suffix)] + ".md"
+    return base
 
 
 def _parse_bulk_output_entry(relative_path: str) -> tuple[str, str] | None:

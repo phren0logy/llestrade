@@ -7,7 +7,7 @@ from src.app.core.file_tracker import FileTracker
 
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
-    for folder in ("converted_documents", "bulk_analysis"):
+    for folder in ("converted_documents", "bulk_analysis", "highlights"):
         (tmp_path / folder).mkdir()
     return tmp_path
 
@@ -30,11 +30,13 @@ def test_scan_empty_project_creates_tracker(project_root: Path):
 
     assert snapshot.imported_count == 0
     assert snapshot.bulk_analysis_count == 0
+    assert snapshot.highlights_count == 0
     assert snapshot.missing["bulk_analysis_missing"] == []
+    assert snapshot.missing["highlights_missing"] == []
 
     stored = load_tracker_snapshot(project_root)
-    assert stored["counts"] == {"imported": 0, "bulk_analysis": 0}
-    assert stored["files"] == {"imported": [], "bulk_analysis": []}
+    assert stored["counts"] == {"imported": 0, "bulk_analysis": 0, "highlights": 0}
+    assert stored["files"] == {"imported": [], "bulk_analysis": [], "highlights": []}
 
 
 def test_scan_detects_missing_bulk_outputs(project_root: Path):
@@ -46,6 +48,7 @@ def test_scan_detects_missing_bulk_outputs(project_root: Path):
     assert snapshot.imported_count == 1
     assert snapshot.bulk_analysis_count == 0
     assert snapshot.missing["bulk_analysis_missing"] == ["case/doc1.md"]
+    assert snapshot.missing["highlights_missing"] == ["case/doc1.md"]
 
 
 def test_scan_updates_when_new_files_added(project_root: Path):
@@ -56,12 +59,18 @@ def test_scan_updates_when_new_files_added(project_root: Path):
     snapshot = tracker.scan()
     assert snapshot.imported_count == 1
     assert tracker.snapshot is snapshot
+    assert snapshot.missing["highlights_missing"] == ["doc1.md"]
 
     write_file(project_root / "bulk_analysis", "doc1.md")
     snapshot = tracker.scan()
     assert snapshot.bulk_analysis_count == 1
     assert snapshot.files["bulk_analysis"] == ["doc1.md"]
     assert snapshot.missing["bulk_analysis_missing"] == []
+
+    write_file(project_root / "highlights", "doc1.highlights.md")
+    snapshot = tracker.scan()
+    assert snapshot.highlights_count == 1
+    assert snapshot.missing["highlights_missing"] == []
 
 
 def test_load_returns_none_when_no_snapshot(project_root: Path):

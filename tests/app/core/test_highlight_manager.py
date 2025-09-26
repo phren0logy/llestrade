@@ -1,0 +1,103 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import fitz
+
+from src.app.core.highlight_manager import build_highlight_jobs
+from src.app.core.project_manager import ProjectManager, ProjectMetadata, SourceTreeState
+from src.app.workers.highlight_worker import HighlightWorker
+
+
+def _create_pdf(path: Path, text: str, *, highlight: bool) -> None:
+    doc = fitz.open()
+    page = doc.new_page()
+    page.insert_text((72, 100), text, fontsize=12)
+    if highlight:
+        rects = page.search_for(text)
+        for rect in rects:
+            annot = page.add_highlight_annot(rect)
+            annot.update()
+    doc.save(path)
+    doc.close()
+
+
+def _setup_manager(tmp_path: Path) -> tuple[ProjectManager, Path, Path]:
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    (project_root / "converted_documents").mkdir()
+
+    sources_root = tmp_path / "sources"
+    (sources_root / "folder").mkdir(parents=True)
+
+    manager = ProjectManager()
+    manager.project_dir = project_root
+    manager.project_path = project_root / "project.frpd"
+    manager.metric_path = None
+    manager.source_state = SourceTreeState(
+        root=str(sources_root),
+        selected_folders=["folder"],
+        include_root_files=False,
+    )
+    manager.metadata = ProjectMetadata(case_name="Highlight Demo")
+
+    return manager, project_root, sources_root
+
+
+def test_build_highlight_jobs(tmp_path: Path) -> None:
+    manager, project_root, sources_root = _setup_manager(tmp_path)
+
+    pdf_path = sources_root / "folder" / "doc.pdf"
+    _create_pdf(pdf_path, "Important", highlight=True)
+    converted_path = project_root / "converted_documents" / "folder" / "doc.md"
+    converted_path.parent.mkdir(parents=True, exist_ok=True)
+    converted_path.write_text("content", encoding="utf-8")
+
+    jobs = build_highlight_jobs(manager)
+    assert len(jobs) == 1
+    job = jobs[0]
+    assert job.source_pdf == pdf_path
+    assert job.converted_relative == "folder/doc.md"
+    assert job.highlight_output == project_root / "highlights" / "folder/doc.highlights.md"
+
+
+def test_highlight_worker_creates_output(tmp_path: Path) -> None:
+    manager, project_root, sources_root = _setup_manager(tmp_path)
+
+    pdf_path = sources_root / "folder" / "doc.pdf"
+    _create_pdf(pdf_path, "Annotated", highlight=True)
+    converted_path = project_root / "converted_documents" / "folder" / "doc.md"
+    converted_path.parent.mkdir(parents=True, exist_ok=True)
+    converted_path.write_text("content", encoding="utf-8")
+
+    jobs = build_highlight_jobs(manager)
+    assert jobs
+    job = jobs[0]
+
+    worker = HighlightWorker([job])
+    worker._process_job(job)
+
+    assert job.highlight_output.exists()
+    content = job.highlight_output.read_text(encoding="utf-8")
+    assert "Annotated" in content
+
+
+def test_highlight_worker_creates_placeholder_when_no_highlights(tmp_path: Path) -> None:
+    manager, project_root, sources_root = _setup_manager(tmp_path)
+
+    pdf_path = sources_root / "folder" / "doc.pdf"
+    _create_pdf(pdf_path, "Plain", highlight=False)
+    converted_path = project_root / "converted_documents" / "folder" / "doc.md"
+    converted_path.parent.mkdir(parents=True, exist_ok=True)
+    converted_path.write_text("content", encoding="utf-8")
+
+    jobs = build_highlight_jobs(manager)
+    assert jobs
+    job = jobs[0]
+
+    worker = HighlightWorker([job])
+    worker._process_job(job)
+
+    assert job.highlight_output.exists()
+    content = job.highlight_output.read_text(encoding="utf-8")
+    assert "No highlights found" in content

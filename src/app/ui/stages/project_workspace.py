@@ -38,6 +38,7 @@ from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
 from src.app.workers import (
     BulkAnalysisWorker,
     ConversionWorker,
+    HighlightWorker,
     WorkerCoordinator,
     get_worker_pool,
 )
@@ -79,6 +80,11 @@ class ProjectWorkspace(QWidget):
         self._summary_info_label: QLabel | None = None
         self._missing_bulk_label: QLabel | None = None
         self._group_source_tree: QTreeWidget | None = None
+        self._extract_highlights_button: QPushButton | None = None
+        self._highlight_running = False
+        self._highlight_total = 0
+        self._highlight_errors: List[str] = []
+        self._missing_highlights_label: QLabel | None = None
 
         self._build_ui()
         if project_manager:
@@ -131,6 +137,10 @@ class ProjectWorkspace(QWidget):
         self._last_scan_label = QLabel("")
         self._last_scan_label.setStyleSheet("color: #666;")
         header_layout.addWidget(self._last_scan_label)
+        self._extract_highlights_button = QPushButton("Extract highlights")
+        self._extract_highlights_button.setEnabled(False)
+        self._extract_highlights_button.clicked.connect(self._trigger_highlight_extraction)
+        header_layout.addWidget(self._extract_highlights_button)
         self._rescan_button = QPushButton("Re-scan")
         self._rescan_button.clicked.connect(lambda: self._trigger_conversion(auto_run=False))
         header_layout.addWidget(self._rescan_button)
@@ -147,6 +157,10 @@ class ProjectWorkspace(QWidget):
         self._root_warning_label.setStyleSheet("color: #b26a00;")
         tab_layout.addWidget(self._root_warning_label)
         self._root_warning_label.hide()
+
+        self._missing_highlights_label = QLabel("Highlights missing: —")
+        self._missing_highlights_label.setWordWrap(True)
+        tab_layout.addWidget(self._missing_highlights_label)
 
         self._missing_bulk_label = QLabel("Bulk analysis missing: —")
 
@@ -236,6 +250,8 @@ class ProjectWorkspace(QWidget):
         )
         if self._edit_metadata_button:
             self._edit_metadata_button.setEnabled(True)
+        if self._extract_highlights_button:
+            self._extract_highlights_button.setEnabled(True)
         self._update_metadata_label()
         self._populate_source_tree()
         self._update_source_root_label()
@@ -299,6 +315,8 @@ class ProjectWorkspace(QWidget):
             self._workspace_metrics = self._project_manager.get_workspace_metrics(refresh=True)
         except Exception as exc:
             self._counts_label.setText("Scan failed")
+            if getattr(self, "_missing_highlights_label", None):
+                self._missing_highlights_label.setText("")
             if getattr(self, "_missing_bulk_label", None):
                 self._missing_bulk_label.setText("")
             return
@@ -308,13 +326,20 @@ class ProjectWorkspace(QWidget):
         if metrics.imported_total:
             counts_text = (
                 f"Converted: {metrics.imported_total} | "
+                f"Highlights: {metrics.highlights_total} of {metrics.imported_total} | "
                 f"Bulk analysis: {metrics.bulk_analysis_total} of {metrics.imported_total}"
             )
         else:
-            counts_text = "Converted: 0 | Bulk analysis: 0"
+            counts_text = "Converted: 0 | Highlights: 0 | Bulk analysis: 0"
         self._counts_label.setText(counts_text)
 
         bulk_missing = list(self._workspace_metrics.bulk_missing)
+        highlights_missing = list(self._workspace_metrics.highlights_missing)
+
+        if getattr(self, "_missing_highlights_label", None):
+            self._missing_highlights_label.setText(
+                "Highlights missing: " + (", ".join(highlights_missing) if highlights_missing else "None")
+            )
 
         if getattr(self, "_missing_bulk_label", None):
             self._missing_bulk_label.setText(
@@ -669,6 +694,8 @@ class ProjectWorkspace(QWidget):
         self._conversion_errors: List[str] = []
         self._rescan_button.setEnabled(False)
         self._counts_label.setText(f"Converting documents (0/{self._conversion_total})…")
+        if self._extract_highlights_button:
+            self._extract_highlights_button.setEnabled(False)
 
         self._inflight_sources.update(job.source_path for job in jobs)
 
@@ -714,6 +741,8 @@ class ProjectWorkspace(QWidget):
 
         self._conversion_running = False
         self._rescan_button.setEnabled(True)
+        if self._extract_highlights_button and not self._highlight_running:
+            self._extract_highlights_button.setEnabled(True)
 
         self._refresh_file_tracker()
         if failures:
@@ -722,6 +751,78 @@ class ProjectWorkspace(QWidget):
                 self,
                 "Conversion Issues",
                 "Some documents failed to convert:\n\n" + error_text,
+            )
+
+    # ------------------------------------------------------------------
+    # Highlight extraction helpers
+    # ------------------------------------------------------------------
+    def _highlight_key(self) -> str:
+        return "highlights:run"
+
+    def _trigger_highlight_extraction(self) -> None:
+        if not self._project_manager:
+            return
+        if self._highlight_running:
+            QMessageBox.information(
+                self,
+                "Highlights",
+                "Highlight extraction is already in progress.",
+            )
+            return
+
+        jobs = self._project_manager.build_highlight_jobs()
+        if not jobs:
+            QMessageBox.information(
+                self,
+                "Highlights",
+                "No converted PDFs are ready for highlight extraction.",
+            )
+            return
+
+        self._start_highlight_worker(jobs)
+
+    def _start_highlight_worker(self, jobs) -> None:
+        self._highlight_running = True
+        self._highlight_total = len(jobs)
+        self._highlight_errors = []
+        self._counts_label.setText(f"Extracting highlights (0/{self._highlight_total})…")
+        if self._extract_highlights_button:
+            self._extract_highlights_button.setEnabled(False)
+        worker = HighlightWorker(jobs)
+        worker.progress.connect(self._on_highlight_progress)
+        worker.file_failed.connect(self._on_highlight_failed)
+        worker.finished.connect(
+            lambda success, failed, w=worker: self._on_highlight_finished(w, success, failed)
+        )
+        self._workers.start(self._highlight_key(), worker)
+
+    def _on_highlight_progress(self, processed: int, total: int, relative_path: str) -> None:
+        self._counts_label.setText(
+            f"Extracting highlights ({processed}/{total})… {relative_path}"
+        )
+
+    def _on_highlight_failed(self, source_path: str, error: str) -> None:
+        self._highlight_errors.append(f"{Path(source_path).name}: {error}")
+
+    def _on_highlight_finished(self, worker: HighlightWorker, successes: int, failures: int) -> None:
+        stored = self._workers.pop(self._highlight_key())
+        if stored and stored is not worker:
+            stored.deleteLater()
+        if worker is stored:
+            worker.deleteLater()
+
+        self._highlight_running = False
+        if self._extract_highlights_button and not self._conversion_running:
+            self._extract_highlights_button.setEnabled(True)
+
+        self._refresh_file_tracker()
+
+        if failures:
+            message = "\n".join(self._highlight_errors) or "Unknown errors"
+            QMessageBox.warning(
+                self,
+                "Highlight Extraction Issues",
+                "Some highlights could not be extracted:\n\n" + message,
             )
 
     def _refresh_summary_groups(self) -> None:

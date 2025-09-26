@@ -466,6 +466,12 @@ class ProjectManager(QObject):
             self._file_tracker.load()
         return self._file_tracker
 
+    def build_highlight_jobs(self):
+        """Return highlight extraction jobs for the current project."""
+        from .highlight_manager import build_highlight_jobs
+
+        return build_highlight_jobs(self)
+
     def get_dashboard_metrics(self, refresh: bool = False) -> DashboardMetrics:
         """Return dashboard-friendly file metrics, optionally refreshing first."""
         tracker = self.get_file_tracker()
