@@ -323,11 +323,18 @@ class ProjectWorkspace(QWidget):
 
         metrics = self._workspace_metrics.dashboard
 
-        if metrics.imported_total:
+        converted_total = metrics.imported_total
+        if converted_total:
+            highlight_text = f"Highlights: {metrics.highlights_total} of {converted_total}"
+            if metrics.pending_highlights:
+                highlight_text += f" (pending {metrics.pending_highlights})"
+            bulk_text = f"Bulk analysis: {metrics.bulk_analysis_total} of {converted_total}"
+            if metrics.pending_bulk_analysis:
+                bulk_text += f" (pending {metrics.pending_bulk_analysis})"
             counts_text = (
-                f"Converted: {metrics.imported_total} | "
-                f"Highlights: {metrics.highlights_total} of {metrics.imported_total} | "
-                f"Bulk analysis: {metrics.bulk_analysis_total} of {metrics.imported_total}"
+                f"Converted: {converted_total} | "
+                f"{highlight_text} | "
+                f"{bulk_text}"
             )
         else:
             counts_text = "Converted: 0 | Highlights: 0 | Bulk analysis: 0"

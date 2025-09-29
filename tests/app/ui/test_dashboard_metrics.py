@@ -151,8 +151,9 @@ def test_welcome_stage_uses_persisted_metrics(
     finally:
         stage.deleteLater()
 
-    assert "Converted 1" in stats_text
-    assert "Bulk analysis" in stats_text
+    assert "Converted: 1" in stats_text
+    assert "Highlights: 0 of 1 (pending 1)" in stats_text
+    assert "Bulk analysis: 0 of 1 (pending 1)" in stats_text
     assert "Last scan" in stats_text
 
 
@@ -179,7 +180,8 @@ def test_welcome_stage_refreshes_on_show_event(
         stats_label = _find_stats_label(stage)
         assert stats_label is not None
         initial_text = stats_label.text()
-        assert "Bulk analysis 0/1" in initial_text
+        assert "Highlights: 0 of 1 (pending 1)" in initial_text
+        assert "Bulk analysis: 0 of 1 (pending 1)" in initial_text
 
         outputs_dir = manager.project_dir / "bulk_analysis" / "manual" / "outputs"
         outputs_dir.mkdir(parents=True, exist_ok=True)
@@ -193,7 +195,8 @@ def test_welcome_stage_refreshes_on_show_event(
 
         updated_label = _find_stats_label(stage)
         assert updated_label is not None
-        assert "Bulk analysis 1/1" in updated_label.text()
+        updated_text = updated_label.text()
+        assert "Bulk analysis: 1 of 1" in updated_text
     finally:
         stage.deleteLater()
 

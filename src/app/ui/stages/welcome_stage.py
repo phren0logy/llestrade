@@ -26,7 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.app.core import SecureSettings, ProjectManager
+from src.app.core import ProjectManager, SecureSettings
+from src.app.core.file_tracker import DashboardMetrics, FileTracker
 
 LOGGER = logging.getLogger(__name__)
 
@@ -257,13 +258,10 @@ class WelcomeStage(QWidget):
 
         if not project_path.exists():
             return "Project file not found."
-        project_dir = project_path.parent
 
-        converted = self._count_files(project_dir / "converted_documents")
-        bulk_outputs = self._count_files(project_dir / "bulk_analysis")
-
-        if converted:
-            return f"Converted {converted} | Bulk analysis {bulk_outputs}/{converted}"
+        fallback_metrics = self._tracker_metrics(project_path.parent)
+        if fallback_metrics.imported_total:
+            return self._format_metrics(fallback_metrics)
         return "No converted documents yet."
 
     def _metrics_text(self, project_path: Path) -> str:
@@ -276,27 +274,44 @@ class WelcomeStage(QWidget):
             and metrics.pending_bulk_analysis == 0
         ):
             return ""
+        return self._format_metrics(metrics)
 
+    def _format_metrics(self, metrics: DashboardMetrics) -> str:
         converted = metrics.imported_total
-        bulk_analysis = metrics.bulk_analysis_total
-
-        if converted:
-            text = f"Converted {converted} | Bulk analysis {bulk_analysis}/{converted}"
+        if not converted:
+            summary = "Converted: 0 | Highlights: 0 | Bulk analysis: 0"
         else:
-            text = "No converted documents yet."
-
-        if metrics.pending_bulk_analysis:
-            details: List[str] = []
+            highlight_text = f"Highlights: {metrics.highlights_total} of {converted}"
+            if metrics.pending_highlights:
+                highlight_text += f" (pending {metrics.pending_highlights})"
+            bulk_text = f"Bulk analysis: {metrics.bulk_analysis_total} of {converted}"
             if metrics.pending_bulk_analysis:
-                details.append(f"{metrics.pending_bulk_analysis} awaiting bulk analysis")
-            text += " (" + ", ".join(details) + ")"
+                bulk_text += f" (pending {metrics.pending_bulk_analysis})"
+            summary = f"Converted: {converted} | {highlight_text} | {bulk_text}"
 
         last_scan = metrics.last_scan
         if isinstance(last_scan, datetime):
-            formatted = last_scan.strftime("%Y-%m-%d %H:%M")
-            text += f" - Last scan {formatted}"
+            try:
+                formatted = last_scan.astimezone().strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                formatted = last_scan.strftime("%Y-%m-%d %H:%M")
+            summary += f" - Last scan {formatted}"
+        return summary
 
-        return text
+    def _tracker_metrics(self, project_dir: Path) -> DashboardMetrics:
+        tracker = FileTracker(project_dir)
+        snapshot = tracker.load()
+        if snapshot is None:
+            try:
+                snapshot = tracker.scan()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                LOGGER.debug("Failed to scan tracker metrics for %s: %s", project_dir, exc)
+                return DashboardMetrics.empty()
+        try:
+            return snapshot.to_dashboard_metrics()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            LOGGER.debug("Failed to translate tracker snapshot for %s: %s", project_dir, exc)
+            return DashboardMetrics.empty()
 
     def _open_project_path(self, project_path: Path) -> None:
         if project_path.exists():
@@ -353,18 +368,6 @@ class WelcomeStage(QWidget):
         self.settings.remove_recent_project(str(project_path))
         self._populate_recent_projects()
         QMessageBox.information(self, "Project Deleted", "The project was deleted successfully.")
-
-    def _count_files(self, folder: Path) -> int:
-        if not folder.exists():
-            return 0
-        count = 0
-        try:
-            for path in folder.rglob("*"):
-                if path.is_file():
-                    count += 1
-        except Exception as exc:  # pragma: no cover - defensive logging
-            LOGGER.debug("Failed counting files in %s: %s", folder, exc)
-        return count
 
     def _build_api_status(self) -> QWidget:
         self._api_group = QGroupBox("Settings")
