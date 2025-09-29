@@ -16,7 +16,12 @@ LOGGER = logging.getLogger(__name__)
 
 CONFIG_FILENAME = "config.json"
 BULK_ANALYSIS_FOLDER = "bulk_analysis"
-SUMMARY_GROUP_VERSION = "1"
+SUMMARY_GROUP_VERSION = "2"
+
+
+class InvalidSummaryGroupFormat(Exception):
+    """Raised when a summary group's config format is invalid/unsupported."""
+    pass
 
 
 def _utcnow() -> datetime:
@@ -62,6 +67,23 @@ class SummaryGroup:
     updated_at: datetime = field(default_factory=_utcnow)
     slug: Optional[str] = None
     version: str = SUMMARY_GROUP_VERSION
+
+    # Operation type and combined-operation fields
+    # operation: "per_document" applies prompts to each doc individually (map)
+    # operation: "combined" merges selected inputs then applies a single prompt once (reduce)
+    operation: str = "per_document"
+
+    # Combined operation inputs (project-relative paths)
+    combine_converted_files: List[str] = field(default_factory=list)
+    combine_converted_directories: List[str] = field(default_factory=list)
+    combine_map_groups: List[str] = field(default_factory=list)  # slugs
+    combine_map_files: List[str] = field(default_factory=list)   # group_slug/rel/path.md
+    combine_map_directories: List[str] = field(default_factory=list)
+
+    # Combined options
+    combine_order: str = "path"  # or "mtime"
+    combine_output_template: str = "combined_{timestamp}.md"
+    use_reasoning: bool = False
 
     @classmethod
     def create(
@@ -112,10 +134,25 @@ class SummaryGroup:
             "updated_at": self.updated_at.isoformat(),
             "slug": self.slug,
             "version": self.version,
+            "operation": self.operation,
+            "combine_converted_files": self.combine_converted_files,
+            "combine_converted_directories": self.combine_converted_directories,
+            "combine_map_groups": self.combine_map_groups,
+            "combine_map_files": self.combine_map_files,
+            "combine_map_directories": self.combine_map_directories,
+            "combine_order": self.combine_order,
+            "combine_output_template": self.combine_output_template,
+            "use_reasoning": self.use_reasoning,
         }
 
     @classmethod
     def from_dict(cls, payload: Dict[str, object]) -> "SummaryGroup":
+        version = str(payload.get("version", SUMMARY_GROUP_VERSION))
+        if version != SUMMARY_GROUP_VERSION:
+            raise InvalidSummaryGroupFormat(
+                f"Unsupported summary group version {version} (expected {SUMMARY_GROUP_VERSION})"
+            )
+
         return cls(
             group_id=str(payload.get("id")),
             name=str(payload.get("name", "Untitled Group")),
@@ -130,7 +167,16 @@ class SummaryGroup:
             created_at=_parse_datetime(payload.get("created_at")),
             updated_at=_parse_datetime(payload.get("updated_at")),
             slug=payload.get("slug"),
-            version=str(payload.get("version", SUMMARY_GROUP_VERSION)),
+            version=version,
+            operation=str(payload.get("operation", "per_document")),
+            combine_converted_files=list(payload.get("combine_converted_files", [])),
+            combine_converted_directories=list(payload.get("combine_converted_directories", [])),
+            combine_map_groups=list(payload.get("combine_map_groups", [])),
+            combine_map_files=list(payload.get("combine_map_files", [])),
+            combine_map_directories=list(payload.get("combine_map_directories", [])),
+            combine_order=str(payload.get("combine_order", "path")),
+            combine_output_template=str(payload.get("combine_output_template", "combined_{timestamp}.md")),
+            use_reasoning=bool(payload.get("use_reasoning", False)),
         )
 
     # Convenience properties
@@ -167,6 +213,13 @@ def load_summary_groups(project_dir: Path) -> List[SummaryGroup]:
             if not group.slug:
                 group.slug = child.name
             groups.append(group)
+        except InvalidSummaryGroupFormat as exc:
+            LOGGER.warning(
+                "Invalid or unsupported summary group format at %s: %s",
+                config_path,
+                exc,
+            )
+            # Skip invalid groups; UI can provide messaging elsewhere if needed.
         except Exception as exc:  # pragma: no cover - defensive logging
             LOGGER.warning("Failed to load summary group from %s: %s", config_path, exc)
     return groups
@@ -199,4 +252,5 @@ __all__ = [
     "load_summary_groups",
     "save_summary_group",
     "delete_summary_group",
+    "InvalidSummaryGroupFormat",
 ]
