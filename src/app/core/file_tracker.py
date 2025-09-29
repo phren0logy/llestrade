@@ -210,27 +210,41 @@ class FileTracker:
     def scan(self) -> FileTrackerSnapshot:
         """Walk the project directories and generate a fresh snapshot."""
         imported = self._gather_files("converted_documents")
+        converted_root = self.project_path / "converted_documents"
         bulk_analysis = self._filter_bulk_analysis_files(
             self._gather_files("bulk_analysis")
         )
         highlights_files = self._gather_files("highlights")
         highlights_normalized = self._normalize_highlight_files(highlights_files)
 
+        # Determine which converted files originated from PDFs (eligible for highlights)
+        imported_pdf: set[str] = set()
+        for rel in imported:
+            try:
+                if _converted_is_pdf(converted_root / rel):
+                    imported_pdf.add(rel)
+            except Exception:
+                # Defensive: treat unreadable entries as non-PDF
+                continue
+
         counts = {
             "imported": len(imported),
+            "imported_pdf": len(imported_pdf),
             "bulk_analysis": len(bulk_analysis),
             "highlights": len(highlights_normalized),
         }
 
         files = {
             "imported": sorted(imported),
+            "imported_pdf": sorted(imported_pdf),
             "bulk_analysis": sorted(bulk_analysis),
             "highlights": sorted(highlights_files),
         }
 
         missing = {
             "bulk_analysis_missing": sorted(imported - bulk_analysis),
-            "highlights_missing": sorted(imported - highlights_normalized),
+            # Only PDFs are eligible for highlights; compute missing accordingly
+            "highlights_missing": sorted(imported_pdf - highlights_normalized),
         }
 
         snapshot = FileTrackerSnapshot(
@@ -378,6 +392,7 @@ def build_workspace_metrics(
         )
 
     converted_files = set(snapshot.files.get("imported", []))
+    converted_pdf_files = set(snapshot.files.get("imported_pdf", [])) or converted_files
     bulk_files = set(snapshot.files.get("bulk_analysis", []))
     highlight_files = set(snapshot.files.get("highlights", []))
 
@@ -397,7 +412,8 @@ def build_workspace_metrics(
         normalized_bulk_files.add(normalized)
         bulk_outputs_by_group[slug].add(normalized)
 
-    highlights_missing = tuple(sorted(converted_files - highlights_normalized))
+    # Only PDFs are eligible for highlights; prefer imported_pdf if available
+    highlights_missing = tuple(sorted(converted_pdf_files - highlights_normalized))
     bulk_missing = tuple(sorted(converted_files - normalized_bulk_files))
 
     group_metrics: Dict[str, WorkspaceGroupMetrics] = {}
@@ -616,6 +632,32 @@ def _normalize_highlight_entry(relative_path: str) -> str | None:
         return None
     base = relative_path[: -len(suffix)] + ".md"
     return base
+
+
+def _converted_is_pdf(path: Path) -> bool:
+    """Return True if the converted markdown at `path` originated from a PDF.
+
+    Heuristic: inspect the YAML front-matter inserted by the converter and
+    look for a line `source_format: pdf`. Reads only the first ~200 lines.
+    """
+    try:
+        # Read a small portion of the file; YAML header is at the top
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            first = fh.readline()
+            if not first.startswith("---"):
+                return False
+            for _ in range(0, 200):
+                line = fh.readline()
+                if not line:
+                    break
+                if line.strip() == "---":
+                    break
+                # Cheap check without YAML parser
+                if line.strip().lower().startswith("source_format:"):
+                    return line.strip().lower().endswith("pdf")
+    except Exception:
+        return False
+    return False
 
 
 def _parse_bulk_output_entry(relative_path: str) -> tuple[str, str] | None:

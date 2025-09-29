@@ -327,7 +327,8 @@ class ProjectWorkspace(QWidget):
 
         converted_total = metrics.imported_total
         if converted_total:
-            highlight_text = f"Highlights: {metrics.highlights_total} of {converted_total}"
+            pdf_total = metrics.highlights_total + metrics.pending_highlights
+            highlight_text = f"Highlights: {metrics.highlights_total} of {pdf_total}"
             if metrics.pending_highlights:
                 highlight_text += f" (pending {metrics.pending_highlights})"
             bulk_text = f"Bulk analysis: {metrics.bulk_analysis_total} of {converted_total}"

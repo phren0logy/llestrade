@@ -281,7 +281,8 @@ class WelcomeStage(QWidget):
         if not converted:
             summary = "Converted: 0 | Highlights: 0 | Bulk analysis: 0"
         else:
-            highlight_text = f"Highlights: {metrics.highlights_total} of {converted}"
+            pdf_total = metrics.highlights_total + metrics.pending_highlights
+            highlight_text = f"Highlights: {metrics.highlights_total} of {pdf_total}"
             if metrics.pending_highlights:
                 highlight_text += f" (pending {metrics.pending_highlights})"
             bulk_text = f"Bulk analysis: {metrics.bulk_analysis_total} of {converted}"
