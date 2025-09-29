@@ -37,6 +37,7 @@ from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
 from src.app.workers import (
     BulkAnalysisWorker,
+    BulkReduceWorker,
     ConversionWorker,
     HighlightWorker,
     WorkerCoordinator,
@@ -881,8 +882,13 @@ class ProjectWorkspace(QWidget):
         name_item.setToolTip(description)
         self._summary_table.setItem(row, 0, name_item)
 
+        op_type = getattr(metrics, "operation", "per_document") if metrics else "per_document"
         converted_count = metrics.converted_count if metrics else 0
-        coverage_text = f"{converted_count} of {total_docs}" if total_docs else str(converted_count)
+        if op_type == "combined":
+            input_count = getattr(metrics, "combined_input_count", 0)
+            coverage_text = f"Combined – Inputs: {input_count}"
+        else:
+            coverage_text = f"{converted_count} of {total_docs}" if total_docs else str(converted_count)
         files_item = QTableWidgetItem(coverage_text)
         files_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 1, files_item)
@@ -902,12 +908,20 @@ class ProjectWorkspace(QWidget):
                 else:
                     status_text = "Running…"
         else:
-            if not converted_count:
-                status_text = "No converted files"
-            elif metrics and metrics.pending_bulk_analysis:
-                status_text = f"Pending bulk ({metrics.pending_bulk_analysis})"
+            if op_type == "combined":
+                if metrics and getattr(metrics, "combined_input_count", 0) == 0:
+                    status_text = "No inputs"
+                elif metrics and getattr(metrics, "combined_is_stale", False):
+                    status_text = "Stale"
+                else:
+                    status_text = "Ready"
             else:
-                status_text = "Ready"
+                if not converted_count:
+                    status_text = "No converted files"
+                elif metrics and metrics.pending_bulk_analysis:
+                    status_text = f"Pending bulk ({metrics.pending_bulk_analysis})"
+                else:
+                    status_text = "Ready"
         status_item = QTableWidgetItem(status_text)
         status_item.setTextAlignment(Qt.AlignCenter)
         self._summary_table.setItem(row, 3, status_item)
@@ -917,9 +931,15 @@ class ProjectWorkspace(QWidget):
         action_layout.setContentsMargins(0, 0, 0, 0)
         action_layout.setSpacing(6)
 
-        run_button = QPushButton("Run")
-        run_button.setEnabled(converted_count > 0 and group.group_id not in self._running_groups)
-        run_button.clicked.connect(lambda _, g=group: self._start_group_run(g))
+        if op_type == "combined":
+            run_button = QPushButton("Run Combined")
+            run_enabled = (metrics and getattr(metrics, "combined_input_count", 0) > 0) and group.group_id not in self._running_groups
+            run_button.setEnabled(bool(run_enabled))
+            run_button.clicked.connect(lambda _, g=group: self._start_combined_run(g))
+        else:
+            run_button = QPushButton("Run")
+            run_button.setEnabled(converted_count > 0 and group.group_id not in self._running_groups)
+            run_button.clicked.connect(lambda _, g=group: self._start_group_run(g))
         action_layout.addWidget(run_button)
 
         cancel_button = QPushButton("Cancel")
@@ -927,9 +947,17 @@ class ProjectWorkspace(QWidget):
         cancel_button.clicked.connect(lambda _, g=group: self._cancel_group_run(g))
         action_layout.addWidget(cancel_button)
 
-        open_button = QPushButton("Open Folder")
-        open_button.clicked.connect(lambda _, g=group: self._open_group_folder(g))
-        action_layout.addWidget(open_button)
+        if op_type == "combined":
+            open_latest = QPushButton("Open Latest")
+            open_latest.clicked.connect(lambda _, g=group: self._open_latest_combined(g))
+            action_layout.addWidget(open_latest)
+            open_button = QPushButton("Open Folder")
+            open_button.clicked.connect(lambda _, g=group: self._open_group_folder(g))
+            action_layout.addWidget(open_button)
+        else:
+            open_button = QPushButton("Open Folder")
+            open_button.clicked.connect(lambda _, g=group: self._open_group_folder(g))
+            action_layout.addWidget(open_button)
 
         delete_button = QPushButton("Delete")
         delete_button.clicked.connect(lambda _, g=group: self._confirm_delete_group(g))
@@ -1001,6 +1029,30 @@ class ProjectWorkspace(QWidget):
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
+    def _open_latest_combined(self, group: SummaryGroup) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
+        if not self._project_manager or not self._project_manager.project_dir:
+            return
+        folder = self._project_manager.project_dir / "bulk_analysis" / group.folder_name / "reduce"
+        if not folder.exists():
+            QMessageBox.information(self, "No Outputs", "No combined outputs found for this operation.")
+            return
+        latest = None
+        latest_m = None
+        for f in folder.glob("combined_*.md"):
+            try:
+                m = f.stat().st_mtime
+            except OSError:
+                continue
+            if latest is None or m > (latest_m or 0):
+                latest = f
+                latest_m = m
+        if latest is None:
+            QMessageBox.information(self, "No Outputs", "No combined outputs found for this operation.")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(latest)))
+
     def _start_group_run(self, group: SummaryGroup) -> None:
         if not self._feature_flags.summary_groups_enabled:
             return
@@ -1059,6 +1111,34 @@ class ProjectWorkspace(QWidget):
         if self._summary_info_label:
             self._summary_info_label.setText("Running bulk analysis…")
         self._refresh_summary_groups()
+        self._workers.start(key, worker)
+
+    def _start_combined_run(self, group: SummaryGroup) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
+        if group.group_id in self._running_groups:
+            QMessageBox.information(self, "Already Running", f"Combined operation for '{group.name}' is already in progress.")
+            return
+        if not self._project_manager or not self._project_manager.project_dir:
+            QMessageBox.warning(self, "Missing Project", "The project directory is not available.")
+            return
+        worker = BulkReduceWorker(
+            project_dir=self._project_manager.project_dir,
+            group=group,
+            metadata=self._project_manager.metadata,
+        )
+        gid = group.group_id
+        key = f"combine:{gid}"
+        self._running_groups.add(gid)
+        self._bulk_progress[gid] = (0, 1)
+        self._bulk_failures[gid] = []
+        self._cancelling_groups.discard(gid)
+        if self._summary_info_label:
+            self._summary_info_label.setText("Running combined operation…")
+        worker.progress.connect(lambda done, total, msg, g=gid: self._on_bulk_progress(g, done, total, msg))
+        worker.file_failed.connect(lambda rel, err, g=gid: self._on_bulk_failed(g, rel, err))
+        worker.log_message.connect(lambda message, g=gid: self._on_bulk_log(g, message))
+        worker.finished.connect(lambda success, failed, g=gid: self._on_bulk_finished(g, success, failed))
         self._workers.start(key, worker)
 
     def _cancel_group_run(self, group: SummaryGroup) -> None:

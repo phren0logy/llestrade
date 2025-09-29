@@ -517,6 +517,7 @@ class ProjectManager(QObject):
             snapshot=snapshot,
             dashboard=dashboard,
             summary_groups=summary_groups,
+            project_dir=self.project_dir,
         )
         self._store_workspace_metrics(metrics)
         return metrics

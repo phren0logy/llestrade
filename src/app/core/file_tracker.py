@@ -315,6 +315,12 @@ class WorkspaceGroupMetrics:
     converted_count: int
     bulk_analysis_total: int
     pending_bulk_analysis: int
+    # Operation type and combined-operation metrics
+    operation: str = "per_document"
+    combined_input_count: int = 0
+    combined_latest_path: str | None = None
+    combined_latest_at: datetime | None = None
+    combined_is_stale: bool = False
 
     def to_dict(self) -> Dict[str, object]:
         return {
@@ -325,6 +331,11 @@ class WorkspaceGroupMetrics:
             "converted_count": self.converted_count,
             "bulk_analysis_total": self.bulk_analysis_total,
             "pending_bulk_analysis": self.pending_bulk_analysis,
+            "operation": self.operation,
+            "combined_input_count": self.combined_input_count,
+            "combined_latest_path": self.combined_latest_path,
+            "combined_latest_at": self.combined_latest_at.isoformat() if self.combined_latest_at else None,
+            "combined_is_stale": self.combined_is_stale,
         }
 
 
@@ -351,6 +362,7 @@ def build_workspace_metrics(
     snapshot: "FileTrackerSnapshot | None",
     dashboard: "DashboardMetrics",
     summary_groups: Sequence["SummaryGroup"],
+    project_dir: Path | None = None,
 ) -> WorkspaceMetrics:
     """Translate raw tracker data into workspace-friendly metrics."""
 
@@ -397,6 +409,19 @@ def build_workspace_metrics(
 
         pending_bulk = len(converted_subset) - len(bulk_subset)
 
+        # Defaults for combined fields
+        op_type = getattr(group, "operation", "per_document") or "per_document"
+        combined_input_count = 0
+        combined_latest_path: str | None = None
+        combined_latest_at: datetime | None = None
+        combined_is_stale = False
+
+        # If the group represents a combined operation, compute inputs and status.
+        if op_type == "combined" and project_dir is not None:
+            combined_input_count, combined_latest_path, combined_latest_at, combined_is_stale = (
+                _compute_combined_status(project_dir, group)
+            )
+
         metrics = WorkspaceGroupMetrics(
             group_id=group.group_id,
             name=group.name,
@@ -405,6 +430,11 @@ def build_workspace_metrics(
             converted_count=len(converted_subset),
             bulk_analysis_total=len(bulk_subset),
             pending_bulk_analysis=max(pending_bulk, 0),
+            operation=op_type,
+            combined_input_count=combined_input_count,
+            combined_latest_path=combined_latest_path,
+            combined_latest_at=combined_latest_at,
+            combined_is_stale=combined_is_stale,
         )
         group_metrics[group.group_id] = metrics
 
@@ -414,6 +444,140 @@ def build_workspace_metrics(
         bulk_missing=bulk_missing,
         groups=group_metrics,
     )
+
+
+def _iter_project_files(root: Path, rel_dirs: Sequence[str]) -> set[str]:
+    selected: set[str] = set()
+    normalized_rel = {d.strip("/") for d in rel_dirs}
+    for rel in list(normalized_rel):
+        base = (root / rel).resolve()
+        if not base.exists():
+            continue
+        if base.is_file():
+            selected.add(rel)
+            continue
+        for path in base.rglob("*.md"):
+            try:
+                selected.add(path.relative_to(root).as_posix())
+            except ValueError:
+                # Path not under root; skip
+                continue
+    return selected
+
+
+def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[int, str | None, datetime | None, bool]:
+    # Build selection from converted_documents
+    conv_root = project_dir / "converted_documents"
+    converted_selected: set[str] = set()
+    for rel in group.combine_converted_files or []:
+        rel = rel.strip("/")
+        if rel:
+            converted_selected.add(rel)
+    converted_selected |= _iter_project_files(conv_root, group.combine_converted_directories or [])
+
+    # Build selection from per-document outputs under bulk_analysis
+    ba_root = project_dir / "bulk_analysis"
+    map_selected: set[str] = set()
+    # Entire groups
+    for slug in group.combine_map_groups or []:
+        outputs = ba_root / slug / "outputs"
+        if outputs.exists():
+            for f in outputs.rglob("*.md"):
+                map_selected.add(f"{slug}/" + f.relative_to(outputs).as_posix())
+    # Directories
+    for rel in group.combine_map_directories or []:
+        rel = rel.strip("/")
+        if not rel:
+            continue
+        parts = rel.split("/", 1)
+        if len(parts) != 2:
+            continue
+        slug, remainder = parts
+        base = ba_root / slug / "outputs" / remainder
+        if base.exists():
+            for f in base.rglob("*.md"):
+                map_selected.add(f"{slug}/" + f.relative_to(ba_root / slug / "outputs").as_posix())
+    # Files
+    for rel in group.combine_map_files or []:
+        rel = rel.strip("/")
+        if rel:
+            map_selected.add(rel)
+
+    # Latest combined artifact under reduce/
+    reduce_dir = ba_root / (getattr(group, "slug", None) or group.folder_name) / "reduce"
+    latest_path: Path | None = None
+    latest_mtime: float | None = None
+    if reduce_dir.exists():
+        for f in reduce_dir.glob("combined_*.md"):
+            try:
+                mtime = f.stat().st_mtime
+            except OSError:
+                continue
+            if latest_mtime is None or mtime > latest_mtime:
+                latest_mtime = mtime
+                latest_path = f
+
+    latest_ts: datetime | None = None
+    latest_rel: str | None = None
+    if latest_path is not None:
+        try:
+            latest_ts = datetime.fromtimestamp(int(latest_mtime or 0))
+            latest_rel = latest_path.relative_to(project_dir).as_posix()
+        except Exception:
+            latest_ts = None
+            latest_rel = None
+
+    # Staleness: if no artifact and there are inputs → stale
+    inputs_count = len(converted_selected) + len(map_selected)
+    if inputs_count == 0:
+        return 0, latest_rel, latest_ts, False
+    if latest_path is None:
+        return inputs_count, latest_rel, latest_ts, True
+
+    # Compare mtimes with manifest if present; else fallback to simple mtime comparison
+    manifest = latest_path.with_suffix(".manifest.json")
+    recorded: dict[str, float] = {}
+    if manifest.exists():
+        try:
+            payload = json.loads(manifest.read_text())
+            for entry in payload.get("inputs", []):
+                path = entry.get("path")
+                mtime = entry.get("mtime")
+                if isinstance(path, str) and isinstance(mtime, (int, float)):
+                    recorded[path] = float(mtime)
+        except Exception:
+            recorded = {}
+
+    def _current_mtime(path: Path) -> float:
+        try:
+            return float(path.stat().st_mtime)
+        except OSError:
+            return 0.0
+
+    stale = False
+    # Converted inputs: key namespace "converted/" for manifest paths
+    for rel in converted_selected:
+        key = f"converted/{rel}"
+        current = _current_mtime(conv_root / rel)
+        recorded_m = recorded.get(key, 0.0)
+        if current > recorded_m:
+            stale = True
+            break
+
+    if not stale:
+        for rel in map_selected:
+            # rel is "slug/relative.md"
+            key = f"map/{rel}"
+            parts = rel.split("/", 1)
+            slug = parts[0]
+            remainder = parts[1] if len(parts) == 2 else ""
+            current = _current_mtime(ba_root / slug / "outputs" / remainder)
+            recorded_m = recorded.get(key, 0.0)
+            if current > recorded_m:
+                stale = True
+                break
+
+    return inputs_count, latest_rel, latest_ts, stale
 
 
 def _resolve_group_converted_paths(

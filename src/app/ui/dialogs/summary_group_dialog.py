@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QHeaderView,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
@@ -21,6 +22,9 @@ from PySide6.QtWidgets import (
     QComboBox,
     QTreeWidget,
     QTreeWidgetItem,
+    QLabel,
+    QGroupBox,
+    QCheckBox,
 )
 
 from src.config.app_config import get_available_providers_and_models
@@ -41,6 +45,7 @@ class SummaryGroupDialog(QDialog):
         self.setModal(True)
         self._build_ui()
         self._populate_file_tree()
+        self._populate_map_outputs_tree()
 
     # ------------------------------------------------------------------
     # Public API
@@ -66,12 +71,29 @@ class SummaryGroupDialog(QDialog):
         self.description_edit.setFixedHeight(60)
         form.addRow("Description", self.description_edit)
 
+        # Operation selector
+        self.operation_combo = QComboBox()
+        self.operation_combo.addItem("Per-document", "per_document")
+        self.operation_combo.addItem("Combined", "combined")
+        self.operation_combo.currentIndexChanged.connect(self._on_operation_changed)
+        form.addRow("Operation", self.operation_combo)
+
         self.file_tree = QTreeWidget()
         self.file_tree.setHeaderHidden(True)
         self.file_tree.setUniformRowHeights(True)
         self.file_tree.itemChanged.connect(self._on_tree_item_changed)
         self._block_tree_signal = False
         form.addRow("Documents", self.file_tree)
+
+        # Map outputs tree group (visible for Combined)
+        self.map_tree_group = QGroupBox("Per-document Outputs (optional)")
+        map_layout = QVBoxLayout(self.map_tree_group)
+        self.map_tree = QTreeWidget()
+        self.map_tree.setHeaderHidden(True)
+        self.map_tree.setUniformRowHeights(True)
+        self.map_tree.itemChanged.connect(self._on_map_tree_item_changed)
+        map_layout.addWidget(self.map_tree)
+        form.addRow(self.map_tree_group)
 
         self.manual_files_edit = QPlainTextEdit()
         self.manual_files_edit.setPlaceholderText("Additional files (one per line, optional)")
@@ -93,12 +115,29 @@ class SummaryGroupDialog(QDialog):
         self.model_combo = self._build_model_combo()
         form.addRow("Model", self.model_combo)
 
+        # Combined options
+        self.order_combo = QComboBox()
+        self.order_combo.addItem("By path", "path")
+        self.order_combo.addItem("By modified time", "mtime")
+        form.addRow("Combined Order", self.order_combo)
+
+        self.output_template_edit = QLineEdit()
+        self.output_template_edit.setPlaceholderText("combined_{timestamp}.md")
+        self.output_template_edit.setText("combined_{timestamp}.md")
+        form.addRow("Output Template", self.output_template_edit)
+
+        self.reasoning_checkbox = QCheckBox("Use reasoning (thinking models)")
+        form.addRow("Reasoning", self.reasoning_checkbox)
+
         layout.addLayout(form)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._handle_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        # Initial visibility
+        self._on_operation_changed()
 
     def _wrap_with_button(self, line_edit: QLineEdit, button: QPushButton) -> QWidget:
         widget = QWidget()
@@ -128,6 +167,18 @@ class SummaryGroupDialog(QDialog):
         if file_path:
             line_edit.setText(self._normalise_path(Path(file_path)))
 
+    def _on_operation_changed(self) -> None:
+        combined = self.operation_combo.currentData() == "combined"
+        self.map_tree_group.setVisible(combined)
+        # Combined options are still useful to adjust ahead of time
+        self.order_combo.setEnabled(combined)
+        self.output_template_edit.setEnabled(combined)
+        self.reasoning_checkbox.setEnabled(True)
+
+    def _on_map_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        # Placeholder for future tristate behavior
+        return
+
     # ------------------------------------------------------------------
     # Acceptance
     # ------------------------------------------------------------------
@@ -150,16 +201,56 @@ class SummaryGroupDialog(QDialog):
         system_prompt = self._normalise_text(self.system_prompt_edit.text().strip())
         user_prompt = self._normalise_text(self.user_prompt_edit.text().strip())
 
-        self._group = SummaryGroup.create(
-            name=name,
-            description=description,
-            files=files,
-            directories=directories,
-            provider_id=provider_id,
-            model=model,
-            system_prompt_path=system_prompt,
-            user_prompt_path=user_prompt,
-        )
+        op = self.operation_combo.currentData()
+        if op == "combined":
+            # Collect map outputs selections
+            map_files: list[str] = []
+            root = self.map_tree.invisibleRootItem()
+            nodes = [root]
+            while nodes:
+                node = nodes.pop()
+                for i in range(node.childCount()):
+                    child = node.child(i)
+                    nodes.append(child)
+                    data = child.data(0, Qt.UserRole)
+                    if not data:
+                        continue
+                    kind, value = data
+                    if kind == "map-file" and child.checkState(0) == Qt.Checked:
+                        map_files.append(str(value))
+
+            group = SummaryGroup.create(
+                name=name,
+                description=description,
+                files=[],
+                directories=[],
+                provider_id=provider_id,
+                model=model,
+                system_prompt_path=system_prompt,
+                user_prompt_path=user_prompt,
+            )
+            group.operation = "combined"
+            group.combine_converted_files = files
+            group.combine_converted_directories = directories
+            group.combine_map_files = sorted(set(map_files))
+            group.combine_map_groups = []
+            group.combine_map_directories = []
+            group.combine_order = self.order_combo.currentData() or "path"
+            templ = self.output_template_edit.text().strip() or "combined_{timestamp}.md"
+            group.combine_output_template = templ
+            group.use_reasoning = self.reasoning_checkbox.isChecked()
+            self._group = group
+        else:
+            self._group = SummaryGroup.create(
+                name=name,
+                description=description,
+                files=files,
+                directories=directories,
+                provider_id=provider_id,
+                model=model,
+                system_prompt_path=system_prompt,
+                user_prompt_path=user_prompt,
+            )
         self.accept()
 
     # ------------------------------------------------------------------
@@ -206,6 +297,36 @@ class SummaryGroupDialog(QDialog):
             self._add_path_to_tree(path)
         self.file_tree.expandAll()
         self._block_tree_signal = False
+
+    def _populate_map_outputs_tree(self) -> None:
+        self.map_tree.clear()
+        if not self._project_dir:
+            info = QTreeWidgetItem(["No project directory available."])
+            info.setFlags(Qt.NoItemFlags)
+            self.map_tree.addTopLevelItem(info)
+            return
+        ba_root = self._project_dir / "bulk_analysis"
+        if not ba_root.exists():
+            info = QTreeWidgetItem(["No per-document outputs found."])
+            info.setFlags(Qt.NoItemFlags)
+            self.map_tree.addTopLevelItem(info)
+            return
+        for slug_dir in sorted(ba_root.iterdir()):
+            if not slug_dir.is_dir():
+                continue
+            outputs = slug_dir / "outputs"
+            if not outputs.exists():
+                continue
+            group_item = QTreeWidgetItem([slug_dir.name])
+            group_item.setFlags(Qt.ItemIsEnabled)
+            self.map_tree.addTopLevelItem(group_item)
+            for path in sorted(outputs.rglob("*.md")):
+                rel = path.relative_to(outputs).as_posix()
+                item = QTreeWidgetItem([rel])
+                item.setData(0, Qt.UserRole, ("map-file", f"{slug_dir.name}/{rel}"))
+                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+                item.setCheckState(0, Qt.Unchecked)
+                group_item.addChild(item)
 
     def _add_path_to_tree(self, relative_path: str) -> None:
         parts = relative_path.split("/")
