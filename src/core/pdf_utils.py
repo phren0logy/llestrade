@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import time
+import re
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -324,12 +325,7 @@ def process_pdf_with_azure(
         page_count = get_pdf_page_count(pdf_path)
         MAX_PAGES = 1000
 
-        if page_count > MAX_PAGES:
-            raise Exception(
-                f"PDF has {page_count} pages, which exceeds Azure Document Intelligence's "
-                f"limit of {MAX_PAGES} pages. Consider splitting the document."
-            )
-        elif page_count > 2:
+        if page_count > 2:
             # F0 tier only processes first 2 pages
             print(
                 f"Warning: PDF has {page_count} pages. Note that F0 tier will only process the first 2 pages."
@@ -340,7 +336,24 @@ def process_pdf_with_azure(
             f"Warning: Couldn't determine page count: {str(e)}. Continuing with processing."
         )
 
-    # Process the file with Azure Document Intelligence
+    # If page count exceeds Azure's 1000 page limit, process in ranges with overlap and combine
+    if 'page_count' in locals() and page_count is not None and page_count > 1000:
+        combined = _azure_markdown_chunked(
+            client=document_intelligence_client,
+            pdf_path=pdf_path,
+            total_pages=page_count,
+            max_pages=1000,
+            overlap=5,
+        )
+        # Save combined markdown
+        with open(markdown_path, "w", encoding="utf-8") as f:
+            f.write(f"# {file_name}\n\n")
+            f.write(combined)
+        print(f"Saved chunked Markdown results to {markdown_path}")
+        # JSON not produced for chunked path; caller does not require it
+        return None, markdown_path
+
+    # Process the file with Azure Document Intelligence (single pass)
     try:
         # Open the file
         with open(pdf_path, "rb") as file:
@@ -431,6 +444,106 @@ def process_pdf_with_azure(
 
     except Exception as e:
         raise Exception(f"Error processing {pdf_path} with Azure: {str(e)}")
+
+
+def _azure_markdown_chunked(*, client: DocumentIntelligenceClient, pdf_path: str, total_pages: int, max_pages: int, overlap: int) -> str:
+    """Return combined Markdown by analyzing the PDF in page ranges with overlap.
+
+    - Uses the `pages` parameter if supported; otherwise falls back to pre-splitting the PDF.
+    - Ensures a PageBreak between pages and at range boundaries.
+    - Deduplicates the first `overlap` pages of each chunk beyond the first.
+    """
+    ranges = []
+    start = 1
+    while start <= total_pages:
+        end = min(total_pages, start + max_pages - 1)
+        # extend overlap except for last chunk
+        if end < total_pages:
+            end = min(total_pages, end + overlap)
+        ranges.append((start, end))
+        if end == total_pages:
+            break
+        start = end - overlap + 1
+
+    def _split_pages(markdown: str) -> list[str]:
+        # Split by explicit Azure page breaks, preserving content segments per page
+        pat = re.compile(r"^\s*<!--\s*PageBreak\s*-->\s*$", re.IGNORECASE | re.MULTILINE)
+        # Normalize endings
+        md = markdown.replace("\r\n", "\n")
+        parts = pat.split(md)
+        return [p.strip("\n") for p in parts]
+
+    combined_segments: list[str] = []
+    first = True
+    for (rs, re_) in ranges:
+        use_pages_param = True
+        content = None
+        try:
+            with open(pdf_path, "rb") as fh:
+                poller = client.begin_analyze_document(
+                    "prebuilt-layout",
+                    fh,
+                    output_content_format=DocumentContentFormat.MARKDOWN,
+                    pages=f"{rs}-{re_}",
+                )
+                result = poller.result(timeout=1800)
+                content = result.content
+        except TypeError:
+            use_pages_param = False
+        except Exception:
+            # Some SDKs may not accept pages for file streams
+            use_pages_param = False
+
+        if not use_pages_param:
+            # Fallback: render only the page range via temporary sub-PDF
+            import fitz
+            doc = fitz.open(pdf_path)
+            sub = fitz.open()
+            sub.insert_pdf(doc, from_page=rs - 1, to_page=re_ - 1)
+            tmp_path = os.path.join(os.path.dirname(pdf_path), f".__tmp_azure_{rs}_{re_}.pdf")
+            try:
+                sub.save(tmp_path)
+                sub.close()
+                doc.close()
+                with open(tmp_path, "rb") as fh:
+                    poller = client.begin_analyze_document(
+                        "prebuilt-layout",
+                        fh,
+                        output_content_format=DocumentContentFormat.MARKDOWN,
+                    )
+                    result = poller.result(timeout=1800)
+                    content = result.content
+            finally:
+                try:
+                    os.remove(tmp_path)
+                except Exception:
+                    pass
+
+        if not content:
+            continue
+
+        segs = _split_pages(content)
+        # Drop first `overlap` pages for subsequent chunks
+        if not first:
+            segs = segs[overlap:] if len(segs) > overlap else []
+
+        if not segs:
+            first = False
+            continue
+
+        # Append with explicit PageBreaks between pages and at chunk boundaries
+        if combined_segments:
+            combined_segments.append("<!-- PageBreak -->")
+        interleaved = []
+        for i, s in enumerate(segs):
+            if i > 0:
+                interleaved.append("<!-- PageBreak -->")
+            interleaved.append(s)
+        combined_segments.extend(interleaved)
+        first = False
+
+    combined = "\n\n".join(combined_segments).strip() + "\n"
+    return combined
 
 
 def process_pdfs_with_azure(pdf_files, output_dir, endpoint=None, key=None):

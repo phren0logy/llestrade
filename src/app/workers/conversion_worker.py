@@ -1,9 +1,17 @@
-"""Background worker for document conversion jobs."""
+"""Background worker for document conversion jobs.
+
+Adds YAML front-matter and page markers to PDF/DOCX conversions:
+- YAML keys: source_path, source_rel, source_format, source_mtime, page_count (PDFs), converted
+- Page markers for PDFs are emitted as HTML comments:
+  <!--- <project_rel_source>.pdf#page=N --->
+"""
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
+import re
+from datetime import datetime
 from typing import Dict, Iterable, List, Optional
 
 from PySide6.QtCore import Signal
@@ -85,14 +93,47 @@ class ConversionWorker(DashboardWorker):
         job.destination_path.parent.mkdir(parents=True, exist_ok=True)
         output_dir = job.destination_path.parent
         produced = Path(process_docx_to_markdown(str(job.source_path), str(output_dir)))
-        if produced != job.destination_path:
-            if job.destination_path.exists():
-                job.destination_path.unlink()
-            produced.rename(job.destination_path)
+        # Ensure final path
+        final_path = job.destination_path
+        if produced != final_path:
+            if final_path.exists():
+                final_path.unlink()
+            produced.rename(final_path)
+        # Inject YAML front-matter
+        try:
+            content = final_path.read_text(encoding="utf-8")
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.warning("Failed to read DOCX conversion for metadata injection: %s", exc)
+            return
+        header = self._yaml_header(job, source_format="docx", pages_detected=None, pages_pdf=None)
+        if not content.startswith("---\n"):
+            content = header + content
+        else:
+            content = header + content  # Prepend regardless to ensure required keys exist
+        final_path.write_text(content, encoding="utf-8")
 
     def _convert_pdf_locally(self, job: ConversionJob) -> None:
         job.destination_path.parent.mkdir(parents=True, exist_ok=True)
-        content = extract_text_from_pdf(str(job.source_path))
+        raw = extract_text_from_pdf(str(job.source_path))
+        # Replace legacy page markers with HTML comments carrying project-relative path
+        source_rel = self._project_relative(job)
+        # Pattern like: --- Page N --- at start of a line
+        def _repl(match: re.Match) -> str:
+            n = match.group(1)
+            return f"<!--- {source_rel}#page={n} --->\n"
+
+        content = re.sub(r"^---\s*Page\s*(\d+)\s*---\s*$", _repl, raw, flags=re.MULTILINE)
+        # Inject YAML front-matter with page count (count of markers)
+        pages_detected = len(re.findall(r"<!---\s*.+#page=\d+\s*--->", content)) or 0
+        # Count pages via PyMuPDF as a sanity check
+        try:
+            import fitz  # PyMuPDF
+            pages_pdf = len(fitz.open(job.source_path))
+        except Exception:
+            pages_pdf = None
+        header = self._yaml_header(job, source_format="pdf", pages_detected=pages_detected or None, pages_pdf=pages_pdf)
+        self._warn_if_page_mismatch(job, pages_detected, pages_pdf)
+        content = header + content
         write_file_content(str(job.destination_path), content)
 
     def _convert_pdf_with_azure(self, job: ConversionJob) -> None:
@@ -114,10 +155,28 @@ class ConversionWorker(DashboardWorker):
         )
 
         produced = Path(markdown_path)
-        if produced != job.destination_path:
-            if job.destination_path.exists():
-                job.destination_path.unlink()
-            produced.rename(job.destination_path)
+        final_path = job.destination_path
+        if produced != final_path:
+            if final_path.exists():
+                final_path.unlink()
+            produced.rename(final_path)
+
+        # Insert page markers by parsing Azure DI markdown, then inject YAML front-matter
+        try:
+            content = final_path.read_text(encoding="utf-8")
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.warning("Failed to read Azure DI markdown for page markers: %s", exc)
+            return
+        source_rel = self._project_relative(job)
+        content_marked, pages_detected = self._insert_azure_page_markers(content, source_rel)
+        try:
+            import fitz  # PyMuPDF
+            pages_pdf = len(fitz.open(job.source_path))
+        except Exception:
+            pages_pdf = None
+        header = self._yaml_header(job, source_format="pdf", pages_detected=pages_detected or None, pages_pdf=pages_pdf)
+        final_path.write_text(header + content_marked, encoding="utf-8")
+        self._warn_if_page_mismatch(job, pages_detected, pages_pdf)
 
         if json_path:
             LOGGER.debug("Azure DI JSON saved to %s", json_path)
@@ -169,3 +228,107 @@ class ConversionWorker(DashboardWorker):
             helper = registry().default_helper()
         self._helper_cache = helper
         return helper
+
+    # ------------------------------------------------------------------
+    # Metadata helpers
+    # ------------------------------------------------------------------
+    def _project_relative(self, job: ConversionJob) -> str:
+        """Return project-relative path to the source file if possible, else a safe relpath.
+
+        Also ensures that PDFs retain their original extension in the path used for page markers.
+        """
+        dest = job.destination_path.resolve()
+        parts = dest.parts
+        try:
+            idx = parts.index("converted_documents")
+            project_dir = Path(*parts[:idx])
+            try:
+                rel = job.source_path.resolve().relative_to(project_dir.resolve()).as_posix()
+                return rel
+            except Exception:
+                # Fallback to os.path.relpath with potential .. segments
+                import os as _os
+                rel = _os.path.relpath(job.source_path.resolve(), project_dir.resolve())
+                return Path(rel).as_posix()
+        except ValueError:
+            return job.source_path.name
+
+    def _yaml_header(self, job: ConversionJob, *, source_format: str, pages_detected: int | None, pages_pdf: int | None) -> str:
+        src_abs = job.source_path.resolve().as_posix()
+        src_rel = self._project_relative(job)
+        try:
+            mtime = datetime.fromtimestamp(int(job.source_path.stat().st_mtime)).isoformat()
+        except Exception:
+            mtime = ""
+        converted_ts = datetime.now().isoformat()
+        # Assemble YAML
+        lines = [
+            "---",
+            f"source_path: {src_abs}",
+            f"source_rel: {src_rel}",
+            f"source_format: {source_format}",
+            f"source_mtime: {mtime}",
+        ]
+        if pages_detected is not None:
+            lines.append(f"pages_detected: {pages_detected}")
+        if pages_pdf is not None:
+            lines.append(f"pages_pdf: {pages_pdf}")
+        lines.append(f"converted: {converted_ts}")
+        lines.append("---\n\n")
+        return "\n".join(lines)
+
+    def _insert_azure_page_markers(self, markdown: str, source_rel: str) -> tuple[str, int]:
+        """Attempt to insert page markers into Azure DI Markdown by parsing headings.
+
+        Heuristics (Markdown only, no JSON):
+        - Replace lines like "--- Page N ---" with HTML comment markers
+        - Insert a marker before lines matching heading patterns: "# Page N" or "## Page N"
+        If no markers are found, return original content with zero count.
+        """
+        lines = markdown.splitlines()
+        out: list[str] = []
+        count = 0
+        # --- Page N ---
+        page_pat1 = re.compile(r"^---\s*Page\s*(\d+)\s*---\s*$", re.IGNORECASE)
+        # # Page N / ## Page N / ### Page N
+        page_pat2 = re.compile(r"^\s*#{1,3}\s*Page\s+(\d+)\s*$", re.IGNORECASE)
+        # Page N of M (as standalone line)
+        page_pat3 = re.compile(r"^\s*Page\s+(\d+)\s+(?:of|/)\s*\d+\s*$", re.IGNORECASE)
+        # **Page N** standalone
+        page_pat4 = re.compile(r"^\s*\*\*\s*Page\s+(\d+)\s*\*\*\s*$", re.IGNORECASE)
+        # Lines like — Page N — or -- Page N -- using various dashes
+        dash = "\u2012\u2013\u2014\-"  # figure/en/en em dashes and hyphen
+        page_pat5 = re.compile(rf"^[{dash}\s]*Page\s+(\d+)[{dash}\s]*$", re.IGNORECASE)
+
+        # Azure default emits explicit page breaks as HTML comments
+        pagebreak_pat = re.compile(r"^\s*<!--\s*PageBreak\s*-->\s*$", re.IGNORECASE)
+        pagenum_misc_pat = re.compile(r"^\s*<!--\s*PageNumber=.*-->\s*$", re.IGNORECASE)
+
+        # Start with a page 1 marker at the very beginning
+        out.append(f"<!--- {source_rel}#page=1 --->")
+        count += 1
+        current_page = 1
+
+        for line in lines:
+            if pagenum_misc_pat.match(line):
+                # Skip non-page-number metadata comments
+                continue
+            if pagebreak_pat.match(line):
+                current_page += 1
+                out.append(f"<!--- {source_rel}#page={current_page} --->")
+                count += 1
+                continue
+            out.append(line)
+
+        return "\n".join(out) + "\n", count
+
+    def _warn_if_page_mismatch(self, job, pages_detected: int | None, pages_pdf: int | None) -> None:
+        if pages_detected is None or pages_pdf is None:
+            return
+        if pages_detected != pages_pdf:
+            self.logger.warning(
+                "Page count mismatch for %s: detected=%s, pdf=%s",
+                job.source_path.name,
+                pages_detected,
+                pages_pdf,
+            )

@@ -154,6 +154,52 @@ Files: `src/app/workers/conversion_worker.py`, `src/core/pdf_utils.py`
 5) Conversion updates: YAML front‑matter + HTML comment page markers (project‑relative); adapt local/Azure paths.
 6) Tests: unit + UI integration for the above.
 
+## Status Update — 2025-09-29
+
+Completed
+- Data model
+  - Added `operation` (per_document | combined) and all Combined selection/options fields to `SummaryGroup`.
+  - Bumped `SUMMARY_GROUP_VERSION` to 2; invalid/unsupported configs are skipped with a clear log message.
+- UI
+  - Group Dialog: operation selector; Converted-docs tree; Per‑document outputs tree; Combined options (order, output template); “Use reasoning” checkbox.
+  - Workspace: Coverage shows “Combined – Inputs: N”; actions include “Run Combined” and “Open Latest”; status shows “Stale” when applicable.
+- Workers
+  - Implemented `BulkReduceWorker` to assemble Combined inputs (comment‑delimited sections), run a single prompt with chunking, and write timestamped outputs + manifest.
+- Metrics & Staleness
+  - Extended workspace metrics to compute Combined input count, latest combined artifact, and `stale` flag without altering FileTracker map coverage.
+- Conversion pipeline
+  - Prepend YAML front‑matter with `source_path`, `source_rel`, `source_format`, `source_mtime`, `pages_detected`, `pages_pdf`, and `converted`.
+  - Azure DI: parse `<!-- PageBreak -->` and insert absolute page markers `<!--- <project_rel>#page=N --->`.
+  - Local: convert legacy “--- Page N ---” to absolute comment markers.
+  - Large PDFs: added chunked Azure DI (1000 pages with 5‑page overlap) with robust merge and PageBreak interleaving.
+  - Log a warning if `pages_detected != pages_pdf`.
+- Tests
+  - Added unit tests to verify Azure PageBreak → marker conversion and page mismatch logging. Existing bulk‑analysis UI tests still pass.
+
+Deviations from original plan (intentional)
+- “Type” column in table: surfaced Combined via Coverage string instead of a new column to keep layout stable; can revisit if needed.
+- JSON output for chunked Azure path is omitted; only Markdown is required downstream. We can emit a lightweight manifest if needed later.
+
+## Suggested Next Steps
+
+High‑value next
+- Add UI “Stale” chip with tooltip listing the first few changed inputs (path + last modified) for Combined operations.
+- Add UI affordance to open the latest Combined manifest for quick diagnostics.
+- Expand tests:
+  - Verify YAML includes both `pages_detected` and `pages_pdf` and logs mismatch warnings end‑to‑end (tiny PDF + synthesized PageBreaks).
+  - Add Combined UI flow tests: create combined operation, run, ensure output exists, status transitions, and “Open Latest.”
+  - Add worker tests for Combined manifest content and staleness resolution after touching inputs.
+
+Refinements
+- Per‑document outputs tree: add folder‑level tri‑state nodes (like Converted tree) for bulk selection; currently file‑only.
+- Provide a clickable link to the latest Combined artifact path directly in the table status tooltip.
+- Reasoning toggle: expand provider/model detection beyond a simple “thinking” substring when docs are available (keep checkbox UX).
+- Chunked Azure DI: add a minimal runtime capability check log (“using pages param” vs “pre‑split fallback”) and simple telemetry counters.
+
+Future
+- Optional: small JSON manifest alongside Combined output noting chunk ranges and merge stats (for large documents triage).
+- Optional: header‑aware merging if Azure boundaries need semantic continuity (deferred until we see quality issues).
+
 ## Risks & Mitigations
 
 - Large combined inputs may exceed context window:
@@ -173,4 +219,3 @@ Files: `src/app/workers/conversion_worker.py`, `src/core/pdf_utils.py`
 
 - Paths in HTML comments and manifest are project‑relative to disambiguate similarly named files.
 - All time comparisons are second‑granularity (adequate for these operations).
-
