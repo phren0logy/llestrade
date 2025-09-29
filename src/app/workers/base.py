@@ -16,7 +16,7 @@ class DashboardWorker(QObject, QRunnable):
     The base class provides cancellation helpers and consistent crash logging.
     """
 
-    def __init__(self, *, worker_name: str, auto_delete: bool = True) -> None:
+    def __init__(self, *, worker_name: str, auto_delete: bool = False) -> None:
         QObject.__init__(self)
         QRunnable.__init__(self)
         self.setAutoDelete(auto_delete)

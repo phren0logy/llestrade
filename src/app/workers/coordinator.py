@@ -55,6 +55,23 @@ class WorkerCoordinator:
             self.cancel(key)
 
     def clear(self) -> None:
+        # Cancel and safely delete all tracked workers
+        try:
+            from shiboken6 import isValid  # type: ignore
+        except Exception:  # pragma: no cover - fallback if not available
+            def isValid(obj):
+                return True
+
+        for worker in list(self._workers.values()):
+            try:
+                worker.cancel()
+            except Exception:
+                pass
+            try:
+                if isValid(worker):
+                    worker.deleteLater()
+            except Exception:
+                pass
         self._workers.clear()
 
 

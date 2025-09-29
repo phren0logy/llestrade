@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, Optional, List, Sequence
 
 from PySide6.QtCore import Qt, QUrl
+from shiboken6 import isValid
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -736,10 +737,11 @@ class ProjectWorkspace(QWidget):
         failures: int,
     ) -> None:
         stored = self._workers.pop(self._conversion_key())
-        if stored and stored is not worker:
-            stored.deleteLater()
-        if worker is stored:
+        # Always attempt to delete the actual worker and any stored reference safely
+        if worker and isValid(worker):
             worker.deleteLater()
+        if stored and stored is not worker and isValid(stored):
+            stored.deleteLater()
         for job in jobs:
             self._inflight_sources.discard(job.source_path)
 
@@ -814,10 +816,11 @@ class ProjectWorkspace(QWidget):
 
     def _on_highlight_finished(self, worker: HighlightWorker, successes: int, failures: int) -> None:
         stored = self._workers.pop(self._highlight_key())
-        if stored and stored is not worker:
-            stored.deleteLater()
-        if worker is stored:
+        # Always attempt to delete the actual worker and any stored reference safely
+        if worker and isValid(worker):
             worker.deleteLater()
+        if stored and stored is not worker and isValid(stored):
+            stored.deleteLater()
 
         self._highlight_running = False
         if self._extract_highlights_button and not self._conversion_running:
@@ -1100,7 +1103,9 @@ class ProjectWorkspace(QWidget):
         )
         worker.progress.connect(lambda done, total, path, gid=group.group_id: self._on_bulk_progress(gid, done, total, path))
         worker.file_failed.connect(lambda rel, err, gid=group.group_id: self._on_bulk_failed(gid, rel, err))
-        worker.finished.connect(lambda success, failed, gid=group.group_id: self._on_bulk_finished(gid, success, failed))
+        worker.finished.connect(
+            lambda success, failed, w=worker, gid=group.group_id: self._on_bulk_finished(gid, w, success, failed)
+        )
         worker.log_message.connect(lambda message, gid=group.group_id: self._on_bulk_log(gid, message))
 
         key = self._bulk_key(group.group_id)
@@ -1138,7 +1143,7 @@ class ProjectWorkspace(QWidget):
         worker.progress.connect(lambda done, total, msg, g=gid: self._on_bulk_progress(g, done, total, msg))
         worker.file_failed.connect(lambda rel, err, g=gid: self._on_bulk_failed(g, rel, err))
         worker.log_message.connect(lambda message, g=gid: self._on_bulk_log(g, message))
-        worker.finished.connect(lambda success, failed, g=gid: self._on_bulk_finished(g, success, failed))
+        worker.finished.connect(lambda success, failed, w=worker, g=gid: self._on_bulk_finished(g, w, success, failed))
         self._workers.start(key, worker)
 
     def _cancel_group_run(self, group: SummaryGroup) -> None:
@@ -1176,12 +1181,15 @@ class ProjectWorkspace(QWidget):
     def _on_bulk_log(self, group_id: str, message: str) -> None:  # noqa: ARG002 - future use
         LOGGER.info("[BulkAnalysis][%s] %s", group_id, message)
 
-    def _on_bulk_finished(self, group_id: str, successes: int, failures: int) -> None:
+    def _on_bulk_finished(self, group_id: str, worker, successes: int, failures: int) -> None:
         key = self._bulk_key(group_id)
-        worker = self._workers.pop(key)
+        stored = self._workers.pop(key)
         self._running_groups.discard(group_id)
-        if worker:
+        # Delete the specific worker instance and any different stored worker safely
+        if worker and isValid(worker):
             worker.deleteLater()
+        if stored and stored is not worker and isValid(stored):
+            stored.deleteLater()
         self._bulk_progress.pop(group_id, None)
         errors = self._bulk_failures.pop(group_id, [])
         was_cancelled = group_id in self._cancelling_groups
@@ -1226,7 +1234,8 @@ class ProjectWorkspace(QWidget):
             worker = self._workers.pop(key)
             if worker:
                 worker.cancel()
-                worker.deleteLater()
+                if isValid(worker):
+                    worker.deleteLater()
             self._running_groups.discard(gid)
             self._bulk_progress.pop(gid, None)
             self._bulk_failures.pop(gid, None)
