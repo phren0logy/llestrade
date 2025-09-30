@@ -140,6 +140,48 @@ forensic-report-drafter/
 │   └── test_output/
 ```
 
+## Workspace Output Layout
+
+When you create a project, the application maintains a self-contained workspace with derived outputs. The key folders are:
+
+```
+<project>/
+├── project.frpd                # Project metadata (source config, helper, UI state)
+├── sources.json                # Included folders (+ warnings for root files)
+├── converted_documents/        # Markdown outputs mirroring selected folder structure
+│   ├── medical_records/
+│   │   ├── report1.md
+│   │   └── report2.md
+│   └── legal_docs/
+│       └── case_summary.md
+├── highlights/                 # Highlight outputs for PDFs (mirrors converted_documents)
+│   ├── medical_records/
+│   │   ├── report1.highlights.md
+│   │   └── report2.highlights.md
+│   └── legal_docs/
+│       └── case_summary.highlights.md
+├── bulk_analysis/
+│   ├── clinical_records/
+│   │   ├── config.json         # Prompts, model, folder subset
+│   │   └── outputs/
+│   │       ├── medical_records/
+│   │       │   ├── report1.md
+│   │       │   └── report2.md
+│   │       └── legal_docs/
+│   │           └── case_summary.md
+│   └── legal_documents/
+│       ├── config.json
+│       └── outputs/
+│           └── legal_docs/
+│               └── case_summary.md
+└── backups/
+    └── 2025-01-01T120000Z/    # Snapshot copies created by the app
+```
+
+Notes:
+- Highlights are extracted only for PDFs. If a PDF has no highlights, a placeholder `.highlights.md` file is created with a processed timestamp.
+- Dashboard highlight counts use a PDF-only denominator (e.g., `Highlights: X of Y` where `Y` is the number of PDF-converted documents), so DOCX and other non-PDF sources are excluded from the “pending highlights” count.
+
 ## Configuration
 
 ### Application Settings

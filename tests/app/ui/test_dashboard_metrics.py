@@ -67,7 +67,7 @@ def test_dashboard_metrics_persist_across_project_reload(tmp_path: Path, qt_app:
 
     converted = manager.project_dir / "converted_documents"
     converted.mkdir(exist_ok=True)
-    (converted / "doc.md").write_text("data")
+    (converted / "doc.md").write_text("---\nsource_format: pdf\n---\nbody")
 
     first_metrics = manager.get_dashboard_metrics(refresh=True)
     manager.save_project()
@@ -90,7 +90,7 @@ def test_read_dashboard_metrics_from_disk(tmp_path: Path, qt_app: QApplication) 
 
     converted = manager.project_dir / "converted_documents"
     converted.mkdir(exist_ok=True)
-    (converted / "doc.md").write_text("data")
+    (converted / "doc.md").write_text("---\nsource_format: pdf\n---\nbody")
 
     manager.get_dashboard_metrics(refresh=True)
     manager.save_project()
@@ -139,7 +139,7 @@ def test_welcome_stage_uses_persisted_metrics(
 
     converted = manager.project_dir / "converted_documents"
     converted.mkdir(exist_ok=True)
-    (converted / "doc.md").write_text("data")
+    (converted / "doc.md").write_text("---\nsource_format: pdf\n---\nbody")
 
     manager.get_dashboard_metrics(refresh=True)
     manager.save_project()
@@ -167,7 +167,7 @@ def test_welcome_stage_refreshes_on_show_event(
 
     converted_dir = manager.project_dir / "converted_documents"
     converted_dir.mkdir(exist_ok=True)
-    (converted_dir / "doc.md").write_text("data")
+    (converted_dir / "doc.md").write_text("---\nsource_format: pdf\n---\nbody")
 
     manager.get_dashboard_metrics(refresh=True)
     manager.save_project()

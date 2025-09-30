@@ -41,34 +41,34 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Step 1 - Core Infrastructure
 
-- [x] Create FileTracker class (`src/new/core/file_tracker.py`)
+- [x] Create FileTracker class (`src/app/core/file_tracker.py`)
   - [x] Implement file existence checking with folder structure preservation
   - [x] Add project statistics calculation
   - [x] Write pytest tests for critical methods
   - [x] Limit initial scope to counts, last-run timestamps, and deterministic reconciliation
-- [x] Update ProjectManager (`src/new/core/project_manager.py`)
+- [x] Update ProjectManager (`src/app/core/project_manager.py`)
   - [x] Persist new project layout (create `<parent>/<project-name>/` folder, sanitize name, keep readable)
   - [x] Store source folder configuration as relative paths with include/exclude tree state
   - [x] Record selected conversion helper and per-project conversion preferences
   - [x] Expose lightweight dashboard state (last opened tab, pending job descriptors) instead of `WorkflowState`
-  - [ ] Surface FileTracker statistics and bulk-analysis metadata for the workspace views
-- [x] Create bulk analysis group system (`src/new/core/summary_groups.py` → to be renamed if needed)
+  - [x] Surface FileTracker statistics and bulk-analysis metadata for the workspace views
+- [x] Create bulk analysis group system (`src/app/core/summary_groups.py`)
   - [x] Implement SummaryGroup dataclass
   - [x] Add config.json serialization for groups
   - [x] Create folder structure management
   - [x] Base mocked responses on fixtures captured from real provider calls
-- [ ] Extract and consolidate worker threads
-  - [ ] Move DocumentProcessorThread to `src/new/workers/`
-  - [ ] Create shared base class for workers
-  - [ ] Set up QThreadPool for parallel operations (max 3 workers)
+- [x] Extract and consolidate worker threads (implemented under `src/app/workers/`)
+  - [x] Move processing/summarization into workers (`ConversionWorker`, `HighlightWorker`, `BulkAnalysisWorker`)
+  - [x] Create shared base class for workers (`DashboardWorker`)
+  - [x] Set up QThreadPool for parallel operations (max 3 workers) with `WorkerCoordinator`
 
 #### Step 2 - Dashboard Enhancement & Project Setup
 
 - [x] Wire `main_new.py` dashboard shell into welcome + workspace views
-  - [ ] Enhance Welcome Stage (`src/new/stages/welcome_stage.py`)
-    - [ ] Add FileTracker stats to project cards (X/Y converted, X/Y summarized)
-    - [ ] Implement project deletion
-    - [ ] Add "Open Folder" action
+  - [ ] Enhance Welcome Stage (`src/app/ui/stages/welcome_stage.py`)
+    - [x] Add FileTracker stats to project cards (X/Y converted, X/Y summarized)
+    - [x] Implement project deletion
+    - [x] Add "Open Folder" action
     - [ ] Test with existing projects (breaking changes OK)
 - [x] Simplify project creation
   - [x] Single-screen setup (name, source folder, output folder)
@@ -78,7 +78,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 
 #### Step 3 - Project Workspace
 
-- [x] Create tabbed workspace (`src/new/stages/project_workspace.py`)
+- [x] Create tabbed workspace (`src/app/ui/stages/project_workspace.py`)
   - [x] Replace linear stages with QTabWidget
   - [x] Create Documents and Bulk Analysis tabs *(progress feed handled within Bulk Analysis; separate tab descoped)*
   - [ ] Default to Bulk Analysis tab on open once setup is complete
@@ -91,8 +91,8 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 - [ ] Bulk Analysis Tab
   - [x] List bulk analysis groups with `X of Y` document coverage using FileTracker data
   - [x] Reuse folder tree with greyed-out (tooltip: "Enable in Documents → Sources") entries for folders not selected for conversion *(simplified to converted_documents tree only)*
-  - [ ] Offer system/user prompt file pickers per group (stored as relative paths)
-  - [x] Provide run/stop controls that enqueue work on the shared worker pool and surface concise logs *(stubbed with simulated runs; replace with real workers later)*
+  - [x] Offer system/user prompt file pickers per group (stored as relative paths)
+  - [x] Provide run/stop controls that enqueue work on the shared worker pool and surface concise logs *(uses real workers with cancellation)*
 - [ ] Progress Tab *(descoped; future activity feed will live in Bulk Analysis tab)*
 
 #### Step 4 - Automated Conversion & Bulk Analysis
@@ -114,12 +114,12 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] "Create Group" launches modal; inline edit deferred for later polish
   - [x] Delete action triggers confirmation noting all generated outputs will be removed
   - [x] Run button enqueues jobs and streams concise log output
-- [ ] Group dialog (`src/new/dialogs/summary_group_dialog.py`)
+- [ ] Group dialog (`src/app/ui/dialogs/summary_group_dialog.py`)
   - [ ] Group name input with duplicate-name warning
-  - [ ] Folder tree mirrors Documents tab selections (checkboxes only at folder level, greyed-out nodes blocked with tooltip)
-  - [ ] System prompt + user prompt file pickers (persisted as relative paths)
-  - [ ] Model/provider selection leveraging existing configuration helpers
-  - [ ] Persist include/exclude choices and prompt paths into group `config.json`
+  - [x] Folder tree mirrors Documents tab selections (checkboxes only at folder level, greyed-out nodes blocked with tooltip)
+  - [x] System prompt + user prompt file pickers (persisted as relative paths)
+  - [x] Model/provider selection leveraging existing configuration helpers
+  - [x] Persist include/exclude choices and prompt paths into group `config.json`
 
 #### Step 5 - Integration & Testing
 
@@ -128,11 +128,11 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Update output structure to use `bulk_analysis/<group_name>/` directories
   - [ ] Add skip logic for existing analyses (based on timestamp + prompt hash)
   - [ ] Test with multiple groups and overlapping folders
-- [ ] Consolidate worker infrastructure under `src/new/workers/`
-  - [ ] Move document processing/summarization threads into shared base classes
-  - [ ] Register workers with a `QThreadPool` (max 3) and add cancellation hooks
+- [x] Consolidate worker infrastructure under `src/app/workers/`
+  - [x] Move document processing/summarization threads into shared base classes
+  - [x] Register workers with a `QThreadPool` (max 3) and add cancellation hooks
   - [ ] Emit consistent debug logging (job id + status transitions) for traceability
-  - [ ] Add unit tests for worker lifecycle and error propagation
+  - [x] Add unit tests for worker lifecycle and error propagation
 - [ ] Phoenix integration for LLM calls
   - [ ] Keep existing observability.py setup
   - [ ] Add bulk analysis group context to traces
@@ -172,6 +172,12 @@ project_dir/
 │   │   └── report2.md
 │   └── legal_docs/
 │       └── case_summary.md
+├── highlights/                 # Highlight outputs mirroring converted_documents (PDF-only)
+│   ├── medical_records/
+│   │   ├── report1.highlights.md
+│   │   └── report2.highlights.md
+│   └── legal_docs/
+│       └── case_summary.highlights.md
 ├── bulk_analysis/
 │   ├── clinical_records/
 │   │   ├── config.json         # Prompts, model, folder subset
@@ -190,19 +196,21 @@ project_dir/
     └── 2025-01-01T120000Z/    # Snapshot copies created by the app
 ```
 
-> Original source files remain in their external locations; the project stores only relative references and derived outputs.
+> Original source files remain in their external locations; the project stores only relative references and derived outputs. Highlight files exist only for PDFs and mirror the converted_documents tree. When no highlights are found, a placeholder `.highlights.md` is written with a timestamped note.
 
 ### Success Criteria for Priority 0
 
-- [ ] Users can create multiple bulk analysis groups (shared converted docs)
-- [ ] Files can belong to multiple groups without duplication
+- [x] Users can create multiple bulk analysis groups (shared converted docs)
+- [x] Files can belong to multiple groups without duplication
 - [ ] Scan-on-open + manual re-scan convert new files with user confirmation
-- [ ] Dashboard shows accurate `X of Y` conversion and bulk-analysis counts with root-level warnings where needed
-- [ ] Converted/bulk output mirrors folder structure via relative paths
-- [ ] Worker operations remain non-blocking with safe shutdown
-- [ ] Breaking changes implemented cleanly
-- [ ] Business logic tests passing
+- [x] Dashboard shows accurate `X of Y` conversion and bulk-analysis counts with root-level warnings where needed
+- [x] Converted/bulk output mirrors folder structure via relative paths
+- [x] Worker operations remain non-blocking with safe shutdown
+- [x] Breaking changes implemented cleanly
+- [x] Business logic tests passing
 - [ ] Phoenix tracing working for LLM calls with group context
+
+Note: Highlights denominator uses PDFs only (pending/highlights reflect PDF-eligible files).
 
 ## Current Project Status
 
@@ -282,26 +290,7 @@ dev = [
 
 ### 1.5 Add LLM Observability
 
-**Langfuse Integration (Dev-only)**:
-
-```python
-# Example wrapper for LLM calls
-if settings.DEVELOPMENT_MODE:
-    from langfuse import Langfuse
-    langfuse = Langfuse()
-
-    @langfuse.observe()
-    def generate_summary(text, model):
-        # Track costs, latency, token usage
-        pass
-```
-
-Benefits:
-
-- Track all LLM calls and costs
-- Debug prompt effectiveness
-- Monitor token usage patterns
-- Analyze performance bottlenecks
+Moved to "Proposed Additions (For Review Later)" to align with Phoenix/OpenInference instrumentation direction.
 
 ## Phase 2: Business Logic Testing (Week 2-3)
 
@@ -473,11 +462,22 @@ _The wizard-style UI with linear stages has been replaced by the dashboard appro
 
 ## Immediate Next Steps
 
-1. Surface conversion helper selection in the new project dialog and plumb helper-specific options
-2. Extend Documents tab counts/logging to show converted vs. pending documents after each run
-3. Add automatic hand-off from conversion completion to bulk-analysis job scheduling where configured
-4. Build out the Bulk Analysis tab actions (folder gating, prompt pickers, run + delete flows)
-5. Enhance Welcome Stage with per-project stats/open-folder action and finish legacy cleanup UI polish
+- [x] Surface conversion helper selection in the new project dialog and plumb helper-specific options
+- [x] Extend Documents tab counts/logging to show converted vs. pending documents after each run
+- [ ] Add automatic hand-off from conversion completion to bulk-analysis job scheduling where configured
+- [x] Build out the Bulk Analysis tab actions (folder gating, prompt pickers, run + delete flows)
+- [x] Enhance Welcome Stage with per-project stats/open-folder action; UI polish for legacy cleanup remains
+
+## Proposed Additions (For Review Later)
+
+- Summary group migration helper: upgrade `bulk_analysis/*/config.json` from version 1 to 2 with validation.
+- Documentation: add `highlights/` to the folder structure diagram; clarify that highlight counts use PDFs only.
+- Auto hand-off: optionally kick off bulk analysis after conversions complete when configured per group.
+- Skip logic: avoid re-processing existing bulk outputs using timestamp + prompt hash.
+- Observability: instrument LLM calls with Phoenix/OpenInference and attach group context; update dev deps snippet accordingly.
+- Worker traceability: add consistent job identifiers in logs and progress signals.
+- Highlights UX: add "Re-extract highlights" action and surface reasons when a file remains pending.
+- Welcome polish: finish remaining legacy cleanup messaging and small UI tweaks.
 
 ## Notes
 

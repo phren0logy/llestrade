@@ -35,12 +35,27 @@ def test_scan_empty_project_creates_tracker(project_root: Path):
     assert snapshot.missing["highlights_missing"] == []
 
     stored = load_tracker_snapshot(project_root)
-    assert stored["counts"] == {"imported": 0, "bulk_analysis": 0, "highlights": 0}
-    assert stored["files"] == {"imported": [], "bulk_analysis": [], "highlights": []}
+    # Core counters must be present and zero; imported_pdf may also be present for PDF-only metrics
+    assert stored["counts"].get("imported") == 0
+    assert stored["counts"].get("bulk_analysis") == 0
+    assert stored["counts"].get("highlights") == 0
+    if "imported_pdf" in stored["counts"]:
+        assert stored["counts"]["imported_pdf"] == 0
+    # Files lists are empty for a fresh project; imported_pdf may also be present
+    assert stored["files"].get("imported", []) == []
+    assert stored["files"].get("bulk_analysis", []) == []
+    assert stored["files"].get("highlights", []) == []
+    if "imported_pdf" in stored["files"]:
+        assert stored["files"]["imported_pdf"] == []
 
 
 def test_scan_detects_missing_bulk_outputs(project_root: Path):
-    write_file(project_root / "converted_documents", "case/doc1.md")
+    # Mark converted doc as originating from PDF so highlights are expected
+    write_file(
+        project_root / "converted_documents",
+        "case/doc1.md",
+        "---\nsource_format: pdf\n---\ncontent",
+    )
 
     tracker = FileTracker(project_root)
     snapshot = tracker.scan()
@@ -55,7 +70,11 @@ def test_scan_updates_when_new_files_added(project_root: Path):
     tracker = FileTracker(project_root)
     tracker.scan()
 
-    write_file(project_root / "converted_documents", "doc1.md")
+    write_file(
+        project_root / "converted_documents",
+        "doc1.md",
+        "---\nsource_format: pdf\n---\ncontent",
+    )
     snapshot = tracker.scan()
     assert snapshot.imported_count == 1
     assert tracker.snapshot is snapshot

@@ -113,7 +113,8 @@ def test_conversion_worker_uses_azure_when_configured(monkeypatch: pytest.Monkey
     worker = ConversionWorker([job], helper="azure_di")
     worker._convert_pdf_with_azure(job)
 
-    assert job.destination_path.read_text() == "azure output"
+    content = job.destination_path.read_text()
+    assert "azure output" in content
     assert not produced_json.exists()
 
 
