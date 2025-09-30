@@ -8,7 +8,6 @@ Adds YAML front-matter and page markers to PDF/DOCX conversions:
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 import re
 from datetime import datetime
@@ -25,8 +24,6 @@ from src.app.core.conversion_manager import ConversionJob, copy_existing_markdow
 from src.app.core.conversion_helpers import ConversionHelper, registry
 from src.app.core.secure_settings import SecureSettings
 from .base import DashboardWorker
-
-LOGGER = logging.getLogger(__name__)
 
 
 class ConversionWorker(DashboardWorker):
@@ -51,22 +48,31 @@ class ConversionWorker(DashboardWorker):
 
     def _run(self) -> None:  # pragma: no cover - executed in worker thread
         total = len(self._jobs)
+        self.logger.info("%s starting conversion (jobs=%s)", self.job_tag, total)
         successes = 0
         failures = 0
         for job in self._jobs:
             if self.is_cancelled():
-                self.logger.info("Conversion cancelled after %s/%s jobs", successes + failures, total)
+                self.logger.info("%s cancelled after %s/%s jobs", self.job_tag, successes + failures, total)
                 break
             try:
                 self._execute(job)
             except Exception as exc:  # noqa: BLE001 - propagate via signal
                 failures += 1
-                self.logger.exception("Conversion failed for %s", job.source_path)
+                self.logger.exception("%s failed %s", self.job_tag, job.source_path)
                 self.file_failed.emit(str(job.source_path), str(exc))
             else:
                 successes += 1
             finally:
+                self.logger.debug(
+                    "%s progress %s/%s %s",
+                    self.job_tag,
+                    successes + failures,
+                    total,
+                    job.display_name,
+                )
                 self.progress.emit(successes + failures, total, job.display_name)
+        self.logger.info("%s finished: successes=%s failures=%s", self.job_tag, successes, failures)
         self.finished.emit(successes, failures)
 
     # ------------------------------------------------------------------
@@ -179,7 +185,7 @@ class ConversionWorker(DashboardWorker):
         self._warn_if_page_mismatch(job, pages_detected, pages_pdf)
 
         if json_path:
-            LOGGER.debug("Azure DI JSON saved to %s", json_path)
+            self.logger.debug("%s Azure DI JSON saved to %s", self.job_tag, json_path)
 
     def _azure_credentials(self) -> tuple[str, str]:
         settings = SecureSettings()

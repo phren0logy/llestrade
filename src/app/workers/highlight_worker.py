@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Iterable, List
 
@@ -16,9 +15,6 @@ from src.app.core.highlights import (
 )
 from src.app.core.highlight_manager import HighlightJob
 from .base import DashboardWorker
-
-
-LOGGER = logging.getLogger(__name__)
 
 
 class HighlightWorker(DashboardWorker):
@@ -35,24 +31,32 @@ class HighlightWorker(DashboardWorker):
 
     def _run(self) -> None:  # pragma: no cover - executed in worker thread
         total = len(self._jobs)
+        self.logger.info("%s starting extraction (jobs=%s)", self.job_tag, total)
         successes = 0
         failures = 0
         for index, job in enumerate(self._jobs, start=1):
             if self.is_cancelled():
-                LOGGER.info("Highlight extraction cancelled after %s/%s jobs", index - 1, total)
+                self.logger.info("%s cancelled after %s/%s jobs", self.job_tag, index - 1, total)
                 break
 
             try:
                 self._process_job(job)
             except Exception as exc:  # noqa: BLE001 - surface via signal
                 failures += 1
-                LOGGER.exception("Highlight extraction failed for %s", job.source_pdf)
+                self.logger.exception("%s failed %s", self.job_tag, job.source_pdf)
                 self.file_failed.emit(str(job.source_pdf), str(exc))
             else:
                 successes += 1
             finally:
+                self.logger.debug(
+                    "%s progress %s/%s %s",
+                    self.job_tag,
+                    successes + failures,
+                    total,
+                    job.converted_relative,
+                )
                 self.progress.emit(successes + failures, total, job.converted_relative)
-
+        self.logger.info("%s finished: successes=%s failures=%s", self.job_tag, successes, failures)
         self.finished.emit(successes, failures)
 
     def _process_job(self, job: HighlightJob) -> None:
@@ -69,4 +73,3 @@ class HighlightWorker(DashboardWorker):
 
 
 __all__ = ["HighlightWorker"]
-

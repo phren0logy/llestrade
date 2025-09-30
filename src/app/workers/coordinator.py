@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, Iterable, Optional
 
 from PySide6.QtCore import QThreadPool
@@ -22,20 +23,27 @@ class WorkerCoordinator:
 
         self._pool: QThreadPool = pool or get_worker_pool()
         self._workers: Dict[str, DashboardWorker] = {}
+        self._logger = logging.getLogger(__name__ + ".coordinator")
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
     def start(self, key: str, worker: DashboardWorker) -> None:
         """Start `worker` on the thread pool and register it under `key`."""
-
         self._workers[key] = worker
+        try:
+            self._logger.info("%s enqueued key=%s", getattr(worker, "job_tag", "[unknown]"), key)
+        except Exception:
+            pass
         self._pool.start(worker)
 
     def register(self, key: str, worker: DashboardWorker) -> None:
         """Store `worker` under `key` without starting it."""
-
         self._workers[key] = worker
+        try:
+            self._logger.debug("%s registered key=%s", getattr(worker, "job_tag", "[unknown]"), key)
+        except Exception:
+            pass
 
     def get(self, key: str) -> Optional[DashboardWorker]:
         return self._workers.get(key)
@@ -48,6 +56,10 @@ class WorkerCoordinator:
         if not worker:
             return False
         worker.cancel()
+        try:
+            self._logger.info("%s cancel requested key=%s", getattr(worker, "job_tag", "[unknown]"), key)
+        except Exception:
+            pass
         return True
 
     def cancel_many(self, keys: Iterable[str]) -> None:
@@ -69,6 +81,10 @@ class WorkerCoordinator:
                 pass
             try:
                 if isValid(worker):
+                    try:
+                        self._logger.debug("%s cleared", getattr(worker, "job_tag", "[unknown]"))
+                    except Exception:
+                        pass
                     worker.deleteLater()
             except Exception:
                 pass

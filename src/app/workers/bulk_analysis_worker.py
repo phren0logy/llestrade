@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
@@ -27,8 +26,6 @@ from src.app.core.project_manager import ProjectMetadata
 from src.app.core.secure_settings import SecureSettings
 from src.app.core.summary_groups import SummaryGroup
 from .base import DashboardWorker
-
-LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -75,9 +72,11 @@ class BulkAnalysisWorker(DashboardWorker):
             total = len(documents)
             if total == 0:
                 self.log_message.emit("No documents resolved for bulk analysis run.")
+                self.logger.info("%s no documents to process", self.job_tag)
                 self.finished.emit(0, 0)
                 return
 
+            self.logger.info("%s starting bulk analysis (docs=%s)", self.job_tag, total)
             provider_config = self._resolve_provider()
             bundle = load_prompts(self._project_dir, self._group, self._metadata)
             system_prompt = render_system_prompt(bundle, self._metadata)
@@ -101,7 +100,7 @@ class BulkAnalysisWorker(DashboardWorker):
                     raise
                 except Exception as exc:  # noqa: BLE001 - propagate via signal
                     failures += 1
-                    LOGGER.exception("Bulk analysis failed for %s", document.source_path)
+                    self.logger.exception("%s failed %s", self.job_tag, document.source_path)
                     self.file_failed.emit(document.relative_path, str(exc))
                 else:
                     try:
@@ -109,22 +108,31 @@ class BulkAnalysisWorker(DashboardWorker):
                         document.output_path.write_text(summary, encoding="utf-8")
                     except Exception as exc:  # noqa: BLE001 - propagate via signal
                         failures += 1
-                        LOGGER.exception("Failed to write bulk analysis output %s", document.output_path)
+                        self.logger.exception("%s write failed %s", self.job_tag, document.output_path)
                         self.file_failed.emit(document.relative_path, str(exc))
                     else:
                         successes += 1
 
+                self.logger.debug(
+                    "%s progress %s/%s %s",
+                    self.job_tag,
+                    successes + failures,
+                    total,
+                    document.relative_path,
+                )
                 self.progress.emit(successes + failures, total, document.relative_path)
 
         except BulkAnalysisCancelled:
             self.log_message.emit("Bulk analysis run cancelled.")
+            self.logger.info("%s cancelled", self.job_tag)
         except Exception as exc:  # pragma: no cover - defensive logging
-            self.logger.exception("Bulk analysis worker crashed: %s", exc)
+            self.logger.exception("%s worker crashed: %s", self.job_tag, exc)
             self.log_message.emit(f"Bulk analysis worker encountered an error: {exc}")
             failures = max(failures, 1)
         finally:
             if provider and isinstance(provider, BaseLLMProvider) and hasattr(provider, "deleteLater"):
                 provider.deleteLater()
+            self.logger.info("%s finished: successes=%s failures=%s", self.job_tag, successes, failures)
             self.finished.emit(successes, failures)
 
     def cancel(self) -> None:
@@ -155,6 +163,7 @@ class BulkAnalysisWorker(DashboardWorker):
             f"Processing {document.relative_path} ({token_count} tokens, "
             f"chunking={'yes' if needs_chunking else 'no'})"
         )
+        self.logger.debug("%s processing %s tokens=%s chunking=%s", self.job_tag, document.relative_path, token_count, 'yes' if needs_chunking else 'no')
 
         if not needs_chunking:
             prompt = render_user_prompt(
