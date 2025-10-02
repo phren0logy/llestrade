@@ -606,7 +606,12 @@ def _resolve_group_converted_paths(
         return set()
 
     selected: set[str] = set()
-    normalised_converted = {path.strip("/") for path in converted_paths}
+    # Only consider markdown or text files for per-document operations
+    normalised_converted = {
+        path.strip("/")
+        for path in converted_paths
+        if path.lower().endswith(".md") or path.lower().endswith(".txt")
+    }
 
     for path in group.files:
         candidate = path.strip("/")

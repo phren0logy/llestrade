@@ -139,6 +139,13 @@ class SummaryGroupDialog(QDialog):
         # Initial visibility
         self._on_operation_changed()
 
+    def _is_allowed_file(self, path: Path) -> bool:
+        """Return True if the file should be selectable (only .md or .txt)."""
+        try:
+            return path.suffix.lower() in {".md", ".txt"}
+        except Exception:
+            return False
+
     def _wrap_with_button(self, line_edit: QLineEdit, button: QPushButton) -> QWidget:
         widget = QWidget()
         h_layout = QHBoxLayout(widget)
@@ -189,9 +196,19 @@ class SummaryGroupDialog(QDialog):
             return
 
         tree_files, directories = self._collect_selection()
-        manual_files = [self._normalise_text(line.strip()) for line in self.manual_files_edit.toPlainText().splitlines() if line.strip()]
-        files_set = {self._normalise_text(path) for path in tree_files if path}
-        files_set.update(manual_files)
+        # Filter allowed extensions from tree and manual entries
+        manual_files_all = [self._normalise_text(line.strip()) for line in self.manual_files_edit.toPlainText().splitlines() if line.strip()]
+        files_set = set()
+        for path in tree_files:
+            if not path:
+                continue
+            if Path(path).suffix.lower() in {".md", ".txt"}:
+                files_set.add(self._normalise_text(path))
+        for path in manual_files_all:
+            if not path:
+                continue
+            if Path(path).suffix.lower() in {".md", ".txt"}:
+                files_set.add(self._normalise_text(path))
         files = sorted(files_set)
 
         directories = sorted({self._normalise_directory(path) for path in directories if path})
@@ -280,6 +297,9 @@ class SummaryGroupDialog(QDialog):
                 part in {".azure-di", ".azure_di"} or part.startswith(".azure-di") or part.startswith(".azure_di")
                 for part in path.parts
             ):
+                continue
+            # Only allow markdown or text files
+            if not self._is_allowed_file(path):
                 continue
             converted_files.append(path.relative_to(converted_root).as_posix())
 

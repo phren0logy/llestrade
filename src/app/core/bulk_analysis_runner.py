@@ -54,6 +54,11 @@ def prepare_documents(
             LOGGER.warning("Converted file missing for bulk analysis: %s", source_path)
             continue
 
+        # Only process markdown or text files produced by conversion
+        if source_path.suffix.lower() not in {".md", ".txt"}:
+            LOGGER.warning("Skipping non-markdown file for bulk analysis: %s", source_path)
+            continue
+
         output_relative = Path(relative).with_suffix("")
         output_filename = f"{output_relative.name}_analysis.md"
         output_path = group_root / output_relative.parent / output_filename

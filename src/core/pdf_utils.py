@@ -224,7 +224,7 @@ def process_pdf_with_azure(
     Args:
         pdf_path: Path to the PDF file to process
         output_dir: Base output directory
-        json_dir: Directory for JSON output (if None, will be created in output_dir)
+        json_dir: Directory for JSON output. If None, JSON will NOT be written.
         markdown_dir: Directory for markdown output (if None, will be created in output_dir)
         endpoint: Azure Document Intelligence endpoint
         key: Azure Document Intelligence API key
@@ -254,12 +254,11 @@ def process_pdf_with_azure(
         )
 
     # Create output directories if needed
-    if not json_dir:
-        json_dir = os.path.join(output_dir, "json")
     if not markdown_dir:
         markdown_dir = os.path.join(output_dir, "markdown")
-
-    os.makedirs(json_dir, exist_ok=True)
+    
+    if json_dir is not None:
+        os.makedirs(json_dir, exist_ok=True)
     os.makedirs(markdown_dir, exist_ok=True)
 
     # Get the file name for the output files
@@ -267,13 +266,18 @@ def process_pdf_with_azure(
     base_name = os.path.splitext(file_name)[0]
 
     # Define output file paths
-    json_path = os.path.join(json_dir, f"{base_name}.json")
+    json_path = os.path.join(json_dir, f"{base_name}.json") if json_dir is not None else None
     markdown_path = os.path.join(markdown_dir, f"{base_name}.md")
 
     # Skip if both files already exist
-    if os.path.exists(json_path) and os.path.exists(markdown_path):
-        print(f"Skipping {file_name} - already converted (found {base_name}.json and {base_name}.md)")
-        return json_path, markdown_path
+    if json_path is not None:
+        if os.path.exists(json_path) and os.path.exists(markdown_path):
+            print(f"Skipping {file_name} - already converted (found {base_name}.json and {base_name}.md)")
+            return json_path, markdown_path
+    else:
+        if os.path.exists(markdown_path):
+            print(f"Skipping {file_name} - already converted (found {base_name}.md)")
+            return None, markdown_path
 
     # Initialize the Document Intelligence client with retry mechanism
     max_retries = 3
@@ -432,13 +436,14 @@ def process_pdf_with_azure(
         except Exception as e:
             raise Exception(f"Error saving Markdown results: {str(e)}")
 
-        # Save JSON content
-        try:
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(json_result.as_dict(), f, indent=4)
-            print(f"Saved JSON results to {json_path}")
-        except Exception as e:
-            raise Exception(f"Error saving JSON results: {str(e)}")
+        # Save JSON content only if requested
+        if json_path is not None:
+            try:
+                with open(json_path, "w", encoding="utf-8") as f:
+                    json.dump(json_result.as_dict(), f, indent=4)
+                print(f"Saved JSON results to {json_path}")
+            except Exception as e:
+                raise Exception(f"Error saving JSON results: {str(e)}")
 
         return json_path, markdown_path
 
