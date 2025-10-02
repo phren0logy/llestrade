@@ -17,10 +17,9 @@ MODEL_CONTEXT_WINDOWS = {
     "gpt-35-turbo": int(16_000 * 0.65),  # 10,400 tokens
     
     # Anthropic Claude
-    "claude-sonnet-4-5-20250929": int(200_000 * 0.65),  # 130,000 tokens
-    "claude-sonnet-4-20250514": int(200_000 * 0.65),    # 130,000 tokens
-    "claude-3-opus-20240229": int(200_000 * 0.65),      # 130,000 tokens
-    "claude-3-haiku-20240307": int(200_000 * 0.65),     # 130,000 tokens
+    "claude-sonnet-4-5-20250929": int(200_000 * 0.65),   # 130,000 tokens
+    "claude-sonnet-4-20250514": int(200_000 * 0.65),     # 130,000 tokens
+    "claude-opus-4-1-20250805": int(200_000 * 0.65),     # 130,000 tokens
     
     # Google Gemini
     "gemini-2.5-pro-preview-05-06": int(2_000_000 * 0.65),  # 1,300,000 tokens

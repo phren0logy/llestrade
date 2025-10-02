@@ -121,7 +121,13 @@ class SummaryGroupDialog(QDialog):
             self.user_prompt_edit.setText(DEFAULT_USER_PROMPT)
 
         self.model_combo = self._build_model_combo()
+        self.model_combo.currentIndexChanged.connect(self._on_model_changed)
         form.addRow("Model", self.model_combo)
+
+        self.custom_model_label = QLabel("Custom model")
+        self.custom_model_edit = QLineEdit()
+        self.custom_model_edit.setPlaceholderText("e.g., claude-sonnet-4-5-20250929")
+        form.addRow(self.custom_model_label, self.custom_model_edit)
 
         # Combined options
         self.order_combo = QComboBox()
@@ -146,6 +152,7 @@ class SummaryGroupDialog(QDialog):
 
         # Initial visibility
         self._on_operation_changed()
+        self._on_model_changed()
 
     def _is_allowed_file(self, path: Path) -> bool:
         """Return True if the file should be selectable (only .md or .txt)."""
@@ -165,11 +172,23 @@ class SummaryGroupDialog(QDialog):
     def _build_model_combo(self):
         combo = QComboBox()
         combo.setEditable(False)
-        providers = get_available_providers_and_models()
-        combo.addItem("(None)", ("", ""))
-        for entry in providers:
-            combo.addItem(entry["display_name"], (entry["id"], entry["model"]))
+        # Limit to Anthropic with two supported models and a Custom option
+        combo.addItem("Custom…", ("custom", ""))
+        combo.addItem(
+            "Anthropic Claude (claude-sonnet-4-5-20250929)",
+            ("anthropic", "claude-sonnet-4-5-20250929"),
+        )
+        combo.addItem(
+            "Anthropic Claude (claude-opus-4-1-20250805)",
+            ("anthropic", "claude-opus-4-1-20250805"),
+        )
         return combo
+
+    def _on_model_changed(self) -> None:
+        data = self.model_combo.currentData()
+        is_custom = bool(data) and data[0] == "custom"
+        self.custom_model_label.setVisible(is_custom)
+        self.custom_model_edit.setVisible(is_custom)
 
     def _choose_prompt_file(self, line_edit: QLineEdit) -> None:
         initial_dir = self._project_dir if self._project_dir else Path.cwd()
@@ -237,6 +256,13 @@ class SummaryGroupDialog(QDialog):
         directories = sorted({self._normalise_directory(path) for path in directories if path})
 
         provider_id, model = self.model_combo.currentData()
+        # Handle custom model entry
+        if provider_id == "custom":
+            provider_id = "anthropic"
+            model = self.custom_model_edit.text().strip()
+            if not model:
+                QMessageBox.warning(self, "Missing Model", "Please enter a model id for the custom option.")
+                return
         description = self.description_edit.toPlainText().strip()
         system_prompt = self._normalise_text(self.system_prompt_edit.text().strip())
         user_prompt = self._normalise_text(self.user_prompt_edit.text().strip())
