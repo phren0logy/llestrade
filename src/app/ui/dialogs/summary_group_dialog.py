@@ -95,10 +95,11 @@ class SummaryGroupDialog(QDialog):
         map_layout.addWidget(self.map_tree)
         form.addRow(self.map_tree_group)
 
+        self.manual_files_label = QLabel("Extra Files")
         self.manual_files_edit = QPlainTextEdit()
         self.manual_files_edit.setPlaceholderText("Additional files (one per line, optional)")
         self.manual_files_edit.setMinimumHeight(60)
-        form.addRow("Extra Files", self.manual_files_edit)
+        form.addRow(self.manual_files_label, self.manual_files_edit)
 
         self.system_prompt_edit = QLineEdit()
         self.system_prompt_button = QPushButton("Browse…")
@@ -181,9 +182,24 @@ class SummaryGroupDialog(QDialog):
         self.order_combo.setEnabled(combined)
         self.output_template_edit.setEnabled(combined)
         self.reasoning_checkbox.setEnabled(True)
+        # Show Extra Files only for Combined
+        self.manual_files_label.setVisible(combined)
+        self.manual_files_edit.setVisible(combined)
 
     def _on_map_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
-        # Placeholder for future tristate behavior
+        # Mirror tri-state behavior used in the converted-docs tree
+        data = item.data(0, Qt.UserRole)
+        if not data:
+            return
+        node_type, _ = data
+        state = item.checkState(0)
+        # Propagate to children when a directory/group toggles
+        if node_type in ("map-dir", "map-group") and state in (Qt.Checked, Qt.Unchecked):
+            for index in range(item.childCount()):
+                child = item.child(index)
+                child.setCheckState(0, state)
+        # Update ancestors' partial/checked state
+        self._sync_parent_state(item.parent())
         return
 
     # ------------------------------------------------------------------
@@ -220,7 +236,9 @@ class SummaryGroupDialog(QDialog):
 
         op = self.operation_combo.currentData()
         if op == "combined":
-            # Collect map outputs selections
+            # Collect map outputs selections using tri-state tree
+            map_groups: list[str] = []
+            map_dirs: list[str] = []
             map_files: list[str] = []
             root = self.map_tree.invisibleRootItem()
             nodes = [root]
@@ -233,7 +251,13 @@ class SummaryGroupDialog(QDialog):
                     if not data:
                         continue
                     kind, value = data
-                    if kind == "map-file" and child.checkState(0) == Qt.Checked:
+                    if child.checkState(0) != Qt.Checked:
+                        continue
+                    if kind == "map-group":
+                        map_groups.append(str(value))
+                    elif kind == "map-dir":
+                        map_dirs.append(str(value))
+                    elif kind == "map-file":
                         map_files.append(str(value))
 
             group = SummaryGroup.create(
@@ -250,8 +274,8 @@ class SummaryGroupDialog(QDialog):
             group.combine_converted_files = files
             group.combine_converted_directories = directories
             group.combine_map_files = sorted(set(map_files))
-            group.combine_map_groups = []
-            group.combine_map_directories = []
+            group.combine_map_groups = sorted(set(map_groups))
+            group.combine_map_directories = sorted(set(map_dirs))
             group.combine_order = self.order_combo.currentData() or "path"
             templ = self.output_template_edit.text().strip() or "combined_{timestamp}.md"
             group.combine_output_template = templ
@@ -337,16 +361,19 @@ class SummaryGroupDialog(QDialog):
             outputs = slug_dir / "outputs"
             if not outputs.exists():
                 continue
+            # Top-level group node (tri-state)
             group_item = QTreeWidgetItem([slug_dir.name])
-            group_item.setFlags(Qt.ItemIsEnabled)
+            group_item.setData(0, Qt.UserRole, ("map-group", slug_dir.name))
+            flags = group_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate
+            group_item.setFlags(flags)
+            group_item.setCheckState(0, Qt.Unchecked)
             self.map_tree.addTopLevelItem(group_item)
+
+            # Build hierarchical tree under the group, mirroring outputs structure
+            tree_nodes: dict[tuple[str, bool], QTreeWidgetItem] = {}
             for path in sorted(outputs.rglob("*.md")):
                 rel = path.relative_to(outputs).as_posix()
-                item = QTreeWidgetItem([rel])
-                item.setData(0, Qt.UserRole, ("map-file", f"{slug_dir.name}/{rel}"))
-                item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
-                item.setCheckState(0, Qt.Unchecked)
-                group_item.addChild(item)
+                self._add_map_path_to_tree(group_item, slug_dir.name, rel, tree_nodes)
 
     def _add_path_to_tree(self, relative_path: str) -> None:
         parts = relative_path.split("/")
@@ -376,6 +403,31 @@ class SummaryGroupDialog(QDialog):
             else:
                 self._tree_nodes[(current_path, True)] = item
 
+            parent_item = item
+
+    def _add_map_path_to_tree(self, group_item: QTreeWidgetItem, slug: str, relative_path: str, cache: dict) -> None:
+        parts = relative_path.split("/")
+        current_path = ""
+        parent_item = group_item
+        for index, part in enumerate(parts):
+            current_path = f"{current_path}/{part}" if current_path else part
+            is_file = index == len(parts) - 1
+            key = (f"{slug}/{current_path}", is_file)
+            existing = cache.get(key)
+            if existing:
+                parent_item = existing
+                continue
+            item = QTreeWidgetItem(parent_item, [part])
+            if is_file:
+                item.setData(0, Qt.UserRole, ("map-file", f"{slug}/{current_path}"))
+            else:
+                item.setData(0, Qt.UserRole, ("map-dir", f"{slug}/{current_path}"))
+            flags = item.flags() | Qt.ItemFlag.ItemIsUserCheckable
+            if not is_file:
+                flags |= Qt.ItemFlag.ItemIsAutoTristate
+            item.setFlags(flags)
+            item.setCheckState(0, Qt.Unchecked)
+            cache[key] = item
             parent_item = item
 
     def _on_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:

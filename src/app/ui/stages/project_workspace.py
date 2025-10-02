@@ -181,7 +181,7 @@ class ProjectWorkspace(QWidget):
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.addWidget(QLabel("Manage bulk analysis groups to organise processed documents."))
         header_layout.addStretch()
-        create_button = QPushButton("Create Group…")
+        create_button = QPushButton("New Bulk Analysis…")
         create_button.clicked.connect(self._show_create_group_dialog)
         header_layout.addWidget(create_button)
         refresh_button = QPushButton("Refresh")
