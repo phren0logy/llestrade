@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import logging
 import sys
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -17,6 +18,8 @@ from PySide6.QtWidgets import (
     QToolBar,
     QVBoxLayout,
     QWidget,
+    QDialogButtonBox,
+    QLabel,
 )
 from PySide6.QtCore import Qt, QTimer
 
@@ -32,6 +35,12 @@ from src.app.core import (
 )
 from src.app.ui.dialogs import NewProjectDialog
 from src.app.ui.stages.welcome_stage import WelcomeStage
+from src.config.prompt_store import (
+    load_manifest as load_prompt_manifest,
+    compute_repo_digest,
+    sync_bundled_prompts,
+    get_repo_prompts_dir,
+)
 
 
 class SimplifiedMainWindow(QMainWindow):
@@ -143,12 +152,69 @@ class SimplifiedMainWindow(QMainWindow):
         if missing:
             self.logger.info("Missing API keys for: %s", ", ".join(missing))
 
+        # Offer prompt sync on initial setup or when bundled prompts changed
+        try:
+            self._maybe_offer_prompt_sync()
+        except Exception as exc:
+            self.logger.debug("Prompt sync check failed: %s", exc)
+
     def _show_welcome(self) -> None:
         if self._welcome_stage:
             self._stack.setCurrentWidget(self._welcome_stage)
         self._workspace_widget = None
         self._update_window_title()
         self.statusBar().showMessage("Ready")
+
+    # ------------------------------------------------------------------
+    # Prompt sync offer
+    # ------------------------------------------------------------------
+    def _maybe_offer_prompt_sync(self) -> None:
+        manifest = load_prompt_manifest() or {}
+        previous = (manifest.get("repo_digest") or {}).get("digest")
+        current = compute_repo_digest(get_repo_prompts_dir()).get("digest")
+        if previous == current:
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Update Bundled Prompts")
+        v = QVBoxLayout(dialog)
+        label = QLabel(
+            "Bundled prompt templates have changed.\n\n"
+            "You can sync the updated templates into your prompts folder. "
+            "Your custom prompts will not be modified."
+        )
+        label.setWordWrap(True)
+        v.addWidget(label)
+
+        buttons = QDialogButtonBox()
+        sync_btn = buttons.addButton("Sync Bundled Prompts", QDialogButtonBox.AcceptRole)
+        later_btn = buttons.addButton("Later", QDialogButtonBox.RejectRole)
+        settings_btn = buttons.addButton("Open Prompts Settings", QDialogButtonBox.HelpRole)
+        v.addWidget(buttons)
+
+        def _on_clicked(btn):
+            if btn == sync_btn:
+                try:
+                    result = sync_bundled_prompts(force=False)
+                    copied = len(result.get("copied", []))
+                    updated = len(result.get("updated", []))
+                    skipped = len(result.get("skipped", []))
+                    same = len(result.get("same", []))
+                    self.statusBar().showMessage(
+                        f"Prompts synced (copied={copied}, updated={updated}, skipped={skipped}, unchanged={same})",
+                        5000,
+                    )
+                except Exception as exc:
+                    QMessageBox.warning(self, "Prompt Sync Failed", str(exc))
+                dialog.accept()
+            elif btn == settings_btn:
+                dialog.accept()
+                self._open_settings()
+            else:
+                dialog.reject()
+
+        buttons.clicked.connect(lambda b: _on_clicked(b))
+        dialog.exec()
 
     # ------------------------------------------------------------------
     # Project lifecycle helpers
