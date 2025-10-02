@@ -20,7 +20,7 @@ DEFAULT_SETTINGS = {
         "anthropic": {
             "enabled": True,
             "label": "Anthropic Claude",
-            "default_model": "claude-sonnet-4-20250514"
+            "default_model": "claude-sonnet-4-5-20250929"
         },
         "gemini": {
             "enabled": True,

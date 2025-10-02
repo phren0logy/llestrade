@@ -214,6 +214,9 @@ def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:
             search_paths.append((project_dir / candidate).resolve())
         repo_root = Path(__file__).resolve().parents[3]
         search_paths.append((repo_root / candidate).resolve())
+        # Also support resources shipped under src/app/resources when a relative path like
+        # "resources/prompts/..." is provided.
+        search_paths.append((repo_root / "src" / "app" / candidate).resolve())
 
     seen: set[Path] = set()
     for path in search_paths:

@@ -82,7 +82,7 @@ class SecureSettings(QObject):
         return {
             "version": "1.0",
             "llm_provider": "anthropic",
-            "llm_model": "claude-sonnet-4-20250514",
+            "llm_model": "claude-sonnet-4-5-20250929",
             "output_directory": str(Path.home() / "Documents" / "ForensicReports"),
             "auto_save_interval": 60,  # seconds
             "theme": "light",

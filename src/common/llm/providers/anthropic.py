@@ -132,7 +132,7 @@ class AnthropicProvider(BaseLLMProvider):
     @property
     def default_model(self) -> str:
         """Return the default model."""
-        return "claude-sonnet-4-20250514"
+        return "claude-sonnet-4-5-20250929"
     
     @trace_llm_call()
     def generate(

@@ -11,10 +11,11 @@ from PySide6.QtWidgets import (
     QLineEdit, QPushButton, QLabel, QDialogButtonBox,
     QTabWidget, QWidget, QSpinBox, QComboBox
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, Signal, QUrl
+from PySide6.QtGui import QIcon, QDesktopServices
 
 from src.app.core import SecureSettings
+from src.config.prompt_store import get_bundled_dir, get_custom_dir, sync_bundled_prompts
 
 
 class SettingsDialog(QDialog):
@@ -49,6 +50,10 @@ class SettingsDialog(QDialog):
         # API Keys tab (still needed for app-level API configuration)
         api_tab = self._create_api_tab()
         self.tab_widget.addTab(api_tab, "API Keys")
+
+        # Prompts tab
+        prompts_tab = self._create_prompts_tab()
+        self.tab_widget.addTab(prompts_tab, "Prompts")
         
         layout.addWidget(self.tab_widget)
         
@@ -62,6 +67,84 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
         
         
+    def _create_prompts_tab(self) -> QWidget:
+        """Create the Prompts tab for managing bundled and custom prompt files."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        info = QLabel(
+            "Prompts are stored outside the application bundle so you can edit them "
+            "with your preferred editor and keep custom files. Bundled prompts can be "
+            "updated on app updates without changing your custom prompts."
+        )
+        info.setWordWrap(True)
+        info.setStyleSheet("color: #555;")
+        layout.addWidget(info)
+
+        paths_group = QGroupBox("Prompt Folders")
+        paths_form = QFormLayout(paths_group)
+
+        self.custom_dir = str(get_custom_dir())
+        self.bundled_dir = str(get_bundled_dir())
+
+        # Custom folder row
+        custom_row = QHBoxLayout()
+        self.custom_dir_edit = QLineEdit(self.custom_dir)
+        self.custom_dir_edit.setReadOnly(True)
+        open_custom_btn = QPushButton("Open Folder…")
+        open_custom_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.custom_dir)))
+        custom_row.addWidget(self.custom_dir_edit)
+        custom_row.addWidget(open_custom_btn)
+        paths_form.addRow("Custom prompts:", custom_row)
+
+        # Bundled folder row
+        bundled_row = QHBoxLayout()
+        self.bundled_dir_edit = QLineEdit(self.bundled_dir)
+        self.bundled_dir_edit.setReadOnly(True)
+        open_bundled_btn = QPushButton("Open Folder…")
+        open_bundled_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.bundled_dir)))
+        bundled_row.addWidget(self.bundled_dir_edit)
+        bundled_row.addWidget(open_bundled_btn)
+        paths_form.addRow("Bundled prompts:", bundled_row)
+
+        layout.addWidget(paths_group)
+
+        # Sync controls
+        sync_group = QGroupBox("Update Bundled Prompts")
+        sync_layout = QVBoxLayout(sync_group)
+        sync_row = QHBoxLayout()
+        self.sync_btn = QPushButton("Sync (non-destructive)")
+        self.sync_btn.clicked.connect(self._sync_prompts)
+        self.sync_force_btn = QPushButton("Force Update (overwrite bundled)")
+        self.sync_force_btn.clicked.connect(lambda: self._sync_prompts(force=True))
+        sync_row.addWidget(self.sync_btn)
+        sync_row.addWidget(self.sync_force_btn)
+        sync_layout.addLayout(sync_row)
+        self.sync_result_label = QLabel("")
+        self.sync_result_label.setStyleSheet("color: #666;")
+        sync_layout.addWidget(self.sync_result_label)
+        layout.addWidget(sync_group)
+
+        layout.addStretch()
+        return widget
+
+    def _sync_prompts(self, force: bool = False) -> None:
+        """Run the bundled prompt sync and display a summary."""
+        try:
+            result = sync_bundled_prompts(force=force)
+            copied = len(result.get("copied", []))
+            updated = len(result.get("updated", []))
+            skipped = len(result.get("skipped", []))
+            same = len(result.get("same", []))
+            summary = (
+                f"Copied: {copied}  •  Updated: {updated}  •  Skipped: {skipped}  •  Unchanged: {same}"
+            )
+            self.sync_result_label.setText(summary)
+            self.logger.info("Prompt sync completed: %s", summary)
+        except Exception as exc:
+            self.sync_result_label.setText(f"Sync failed: {exc}")
+            self.logger.exception("Prompt sync failed")
+
     def _create_defaults_tab(self) -> QWidget:
         """Create the defaults tab."""
         widget = QWidget()

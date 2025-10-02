@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
 )
 
 from src.config.app_config import get_available_providers_and_models
+from src.config.prompt_store import get_bundled_dir
 from src.app.core.summary_groups import SummaryGroup
 
 DEFAULT_SYSTEM_PROMPT = "resources/prompts/document_analysis_system_prompt.md"
@@ -41,7 +42,7 @@ class SummaryGroupDialog(QDialog):
         super().__init__(parent)
         self._project_dir = project_dir
         self._group: Optional[SummaryGroup] = None
-        self.setWindowTitle("Create Summary Group")
+        self.setWindowTitle("New Bulk Analysis")
         self.setModal(True)
         self._build_ui()
         self._populate_file_tree()
@@ -105,13 +106,19 @@ class SummaryGroupDialog(QDialog):
         self.system_prompt_button = QPushButton("Browse…")
         self.system_prompt_button.clicked.connect(lambda: self._choose_prompt_file(self.system_prompt_edit))
         form.addRow("System Prompt", self._wrap_with_button(self.system_prompt_edit, self.system_prompt_button))
-        self.system_prompt_edit.setText(DEFAULT_SYSTEM_PROMPT)
+        try:
+            self.system_prompt_edit.setText(str(get_bundled_dir() / "document_analysis_system_prompt.md"))
+        except Exception:
+            self.system_prompt_edit.setText(DEFAULT_SYSTEM_PROMPT)
 
         self.user_prompt_edit = QLineEdit()
         self.user_prompt_button = QPushButton("Browse…")
         self.user_prompt_button.clicked.connect(lambda: self._choose_prompt_file(self.user_prompt_edit))
         form.addRow("User Prompt", self._wrap_with_button(self.user_prompt_edit, self.user_prompt_button))
-        self.user_prompt_edit.setText(DEFAULT_USER_PROMPT)
+        try:
+            self.user_prompt_edit.setText(str(get_bundled_dir() / "document_summary_prompt.md"))
+        except Exception:
+            self.user_prompt_edit.setText(DEFAULT_USER_PROMPT)
 
         self.model_combo = self._build_model_combo()
         form.addRow("Model", self.model_combo)

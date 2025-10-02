@@ -6,6 +6,7 @@ Handles loading and formatting of prompt templates.
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional
+from src.config.prompt_store import get_bundled_dir, get_custom_dir
 
 
 class PromptManager:
@@ -15,7 +16,8 @@ class PromptManager:
     Template files can include placeholders in {variable} format.
     """
     
-    DEFAULT_PROMPTS_PATH = Path(__file__).resolve().parents[2] / "app" / "resources" / "prompts"
+    # Default search precedence: user custom → user bundled
+    DEFAULT_PROMPTS_DIRS = [get_custom_dir(), get_bundled_dir()]
 
     def __init__(self, template_dir: Optional[str | Path] = None):
         """Initialize the prompt manager with a template directory.
@@ -23,24 +25,32 @@ class PromptManager:
         Args:
             template_dir: Directory containing prompt template files
         """
-        directory = Path(template_dir) if template_dir is not None else self.DEFAULT_PROMPTS_PATH
-        self.template_dir = directory
+        # Support a single directory or default to the user store dirs
+        if template_dir is not None:
+            self.template_dirs = [Path(template_dir)]
+        else:
+            self.template_dirs = list(self.DEFAULT_PROMPTS_DIRS)
         self.templates: Dict[str, str] = {}
         self._load_templates()
     
     def _load_templates(self) -> None:
         """Load all templates from the template directory."""
-        if not self.template_dir.exists():
-            logging.warning(f"Template directory not found: {self.template_dir}")
+        if not self.template_dirs:
             return
-            
-        for template_file in self.template_dir.glob("*.md"):
-            try:
-                with open(template_file, 'r', encoding='utf-8') as f:
-                    self.templates[template_file.stem] = f.read()
-                logging.debug(f"Loaded template: {template_file.stem}")
-            except Exception as e:
-                logging.error(f"Error loading template {template_file}: {e}")
+        for directory in self.template_dirs:
+            if not directory.exists():
+                continue
+            for template_file in directory.glob("*.md"):
+                try:
+                    # First directory wins (custom overrides bundled)
+                    stem = template_file.stem
+                    if stem in self.templates:
+                        continue
+                    with open(template_file, 'r', encoding='utf-8') as f:
+                        self.templates[stem] = f.read()
+                    logging.debug(f"Loaded template: {stem} from {directory}")
+                except Exception as e:
+                    logging.error(f"Error loading template {template_file}: {e}")
     
     def get_template(self, name: str, **kwargs: Any) -> str:
         """Get a template by name with optional formatting.
