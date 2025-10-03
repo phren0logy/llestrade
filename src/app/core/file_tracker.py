@@ -557,16 +557,23 @@ def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[
     # Compare mtimes with manifest if present; else fallback to simple mtime comparison
     manifest = latest_path.with_suffix(".manifest.json")
     recorded: dict[str, float] = {}
+    high_precision: set[str] = set()
     if manifest.exists():
         try:
             payload = json.loads(manifest.read_text())
             for entry in payload.get("inputs", []):
                 path = entry.get("path")
+                mtime_ns = entry.get("mtime_ns")
                 mtime = entry.get("mtime")
-                if isinstance(path, str) and isinstance(mtime, (int, float)):
-                    recorded[path] = float(mtime)
+                if isinstance(path, str):
+                    if isinstance(mtime_ns, (int, float)):
+                        recorded[path] = float(mtime_ns) / 1_000_000_000
+                        high_precision.add(path)
+                    elif isinstance(mtime, (int, float)):
+                        recorded[path] = float(mtime)
         except Exception:
             recorded = {}
+            high_precision = set()
 
     def _current_mtime(path: Path) -> float:
         try:
@@ -579,8 +586,12 @@ def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[
     for rel in converted_selected:
         key = f"converted/{rel}"
         current = _current_mtime(conv_root / rel)
-        recorded_m = recorded.get(key, 0.0)
-        if current > recorded_m:
+        recorded_m = recorded.get(key)
+        if recorded_m is None or recorded_m <= 0:
+            stale = True
+            break
+        tolerance = 1e-6 if key in high_precision else 0.5
+        if current - recorded_m > tolerance:
             stale = True
             break
 
@@ -592,8 +603,12 @@ def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[
             slug = parts[0]
             remainder = parts[1] if len(parts) == 2 else ""
             current = _current_mtime(ba_root / slug / "outputs" / remainder)
-            recorded_m = recorded.get(key, 0.0)
-            if current > recorded_m:
+            recorded_m = recorded.get(key)
+            if recorded_m is None or recorded_m <= 0:
+                stale = True
+                break
+            tolerance = 1e-6 if key in high_precision else 0.5
+            if current - recorded_m > tolerance:
                 stale = True
                 break
 

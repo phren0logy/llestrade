@@ -78,7 +78,11 @@ class BulkReduceWorker(DashboardWorker):
                 self.finished.emit(0, 0)
                 return
 
-            self.progress.emit(0, total, "Reading inputs…")
+            if total == 1:
+                status_message = "Reading 1 input file…"
+            else:
+                status_message = f"Reading {total} input files…"
+            self.progress.emit(0, 1, status_message)
             combined_content = self._assemble_combined_content(inputs)
 
             if self.is_cancelled():
@@ -152,7 +156,7 @@ class BulkReduceWorker(DashboardWorker):
             manifest = self._build_manifest(inputs, provider_cfg)
             manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-            self.progress.emit(total, total, "Completed")
+            self.progress.emit(1, 1, "Completed")
             self.finished.emit(1, 0)
 
         except BulkAnalysisCancelled:
@@ -327,10 +331,21 @@ class BulkReduceWorker(DashboardWorker):
         manifest_inputs = []
         for _, path, key in inputs:
             try:
-                mtime = int(path.stat().st_mtime)
+                stat_result = path.stat()
+                mtime = float(stat_result.st_mtime)
+                mtime_ns = getattr(stat_result, "st_mtime_ns", None)
             except OSError:
-                mtime = 0
-            manifest_inputs.append({"path": key, "mtime": mtime})
+                mtime = 0.0
+                mtime_ns = None
+
+            entry = {"path": key, "mtime": mtime}
+            if mtime_ns is not None:
+                try:
+                    entry["mtime_ns"] = int(mtime_ns)
+                except (TypeError, ValueError):
+                    # st_mtime_ns may not be an int on all platforms
+                    pass
+            manifest_inputs.append(entry)
 
         return {
             "version": 1,
