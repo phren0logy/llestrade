@@ -154,7 +154,6 @@ class ProjectWorkspace(QWidget):
         self._report_generate_button: QPushButton | None = None
         self._report_progress_bar: QProgressBar | None = None
         self._report_log: QTextEdit | None = None
-        self._report_instructions_edit: QTextEdit | None = None
         self._report_template_edit: QLineEdit | None = None
         self._report_transcript_edit: QLineEdit | None = None
         self._report_history_list: QTreeWidget | None = None
@@ -165,8 +164,6 @@ class ProjectWorkspace(QWidget):
         self._report_open_inputs_button: QPushButton | None = None
         self._report_last_result: Optional[Dict[str, str]] = None
         self._report_running = False
-        self._report_default_instructions: Optional[str] = None
-        self._report_last_instructions_text: Optional[str] = None
 
         self._build_ui()
         if project_manager:
@@ -387,20 +384,6 @@ class ProjectWorkspace(QWidget):
             default_refinement = self._default_refinement_prompt_path()
             if default_refinement:
                 self._report_refinement_prompt_edit.setText(default_refinement)
-
-        instructions_header = QHBoxLayout()
-        instructions_header.setContentsMargins(0, 0, 0, 0)
-        instructions_header.addWidget(QLabel("Refinement instructions:"))
-        reset_button = QPushButton("Reset")
-        reset_button.clicked.connect(self._reset_report_instructions)
-        instructions_header.addWidget(reset_button)
-        instructions_header.addStretch()
-        config_layout.addLayout(instructions_header)
-
-        self._report_instructions_edit = QTextEdit()
-        self._report_instructions_edit.setMinimumHeight(120)
-        self._report_instructions_edit.textChanged.connect(self._update_report_controls)
-        config_layout.addWidget(self._report_instructions_edit)
 
         top_layout.addWidget(config_group, 1)
         layout.addLayout(top_layout)
@@ -1318,21 +1301,6 @@ class ProjectWorkspace(QWidget):
                 widget.setVisible(is_custom)
         self._update_report_controls()
 
-    def _get_default_report_instructions(self) -> str:
-        if self._report_default_instructions is None:
-            try:
-                prompt_manager = PromptManager()
-                self._report_default_instructions = prompt_manager.get_template("refinement_instructions")
-            except Exception:
-                LOGGER.warning("Failed to load default refinement instructions", exc_info=True)
-                self._report_default_instructions = ""
-        return self._report_default_instructions or ""
-
-    def _reset_report_instructions(self) -> None:
-        if self._report_instructions_edit:
-            self._report_instructions_edit.setPlainText(self._get_default_report_instructions())
-        self._update_report_controls()
-
     def _browse_report_template(self) -> None:
         initial = None
         try:
@@ -1525,7 +1493,6 @@ class ProjectWorkspace(QWidget):
             return
         has_inputs = bool(self._report_selected_inputs)
         transcript_ok = bool(self._report_transcript_edit and self._report_transcript_edit.text().strip())
-        instructions_ok = bool(self._report_instructions_edit and self._report_instructions_edit.toPlainText().strip())
         template_text = self._report_template_edit.text().strip() if self._report_template_edit else ""
         template_ok = bool(template_text)
         refinement_text = (
@@ -1541,7 +1508,6 @@ class ProjectWorkspace(QWidget):
                 model_ok = bool(self._report_custom_model_edit and self._report_custom_model_edit.text().strip())
         enabled = (
             (has_inputs or transcript_ok)
-            and instructions_ok
             and model_ok
             and template_ok
             and refinement_ok
@@ -1573,11 +1539,6 @@ class ProjectWorkspace(QWidget):
             return
         if not self._project_manager or not self._project_manager.project_dir:
             QMessageBox.warning(self, "Report Generator", "No project is currently loaded.")
-            return
-
-        instructions = self._report_instructions_edit.toPlainText().strip() if self._report_instructions_edit else ""
-        if not instructions:
-            QMessageBox.warning(self, "Report Generator", "Refinement instructions cannot be empty.")
             return
 
         model_data = self._report_model_combo.currentData() if self._report_model_combo else None
@@ -1674,7 +1635,6 @@ class ProjectWorkspace(QWidget):
             context_window=context_window,
             template_path=str(template_path) if template_path else None,
             transcript_path=str(transcript_path) if transcript_path else None,
-            instructions=instructions,
             refinement_prompt=str(refinement_prompt_path),
         )
 
@@ -1685,7 +1645,6 @@ class ProjectWorkspace(QWidget):
             model=model_id,
             custom_model=custom_model,
             context_window=context_window,
-            instructions=instructions,
             template_path=template_path,
             transcript_path=transcript_path,
             refinement_prompt_path=refinement_prompt_path,
@@ -1698,7 +1657,6 @@ class ProjectWorkspace(QWidget):
         worker.failed.connect(lambda message, w=worker: self._on_report_failed(w, message))
 
         self._report_last_result = None
-        self._report_last_instructions_text = instructions
         self._report_running = True
         self._report_progress_bar.setValue(0)
         if self._report_log:
@@ -1756,9 +1714,7 @@ class ProjectWorkspace(QWidget):
                 context_window_int = None
             inputs = list(result.get("inputs", []))
 
-            instructions_snapshot = self._report_last_instructions_text or (
-                self._report_instructions_edit.toPlainText().strip() if self._report_instructions_edit else ""
-            )
+            instructions_snapshot = str(result.get("instructions", ""))
             refinement_prompt = str(
                 result.get("refinement_prompt")
                 or (
@@ -1947,11 +1903,6 @@ class ProjectWorkspace(QWidget):
                 self._report_refinement_prompt_edit.setText(state.last_refinement_prompt)
             elif not self._report_refinement_prompt_edit.text().strip():
                 self._report_refinement_prompt_edit.setText(self._default_refinement_prompt_path())
-
-        default_instructions = self._get_default_report_instructions()
-        instructions_text = state.last_instructions or default_instructions
-        if self._report_instructions_edit:
-            self._report_instructions_edit.setPlainText(instructions_text)
 
         self._on_report_model_changed()
         self._update_report_controls()

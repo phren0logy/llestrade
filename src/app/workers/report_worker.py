@@ -19,6 +19,7 @@ from src.app.core.report_inputs import (
     category_display_name,
 )
 from src.app.core.prompt_manager import PromptManager
+from src.app.core.refinement_prompt import load_refinement_prompt
 from src.app.core.report_template_sections import (
     TemplateSection,
     load_template_sections,
@@ -46,7 +47,6 @@ class ReportWorker(DashboardWorker):
         model: str,
         custom_model: Optional[str],
         context_window: Optional[int],
-        instructions: str,
         template_path: Optional[Path],
         transcript_path: Optional[Path],
         refinement_prompt_path: Path,
@@ -60,10 +60,10 @@ class ReportWorker(DashboardWorker):
         self._model = model
         self._custom_model = custom_model.strip() if custom_model else None
         self._context_window = context_window
-        self._instructions = instructions.strip()
         self._template_path = Path(template_path) if template_path else None
         self._transcript_path = Path(transcript_path) if transcript_path else None
         self._refinement_prompt_path = Path(refinement_prompt_path).expanduser()
+        self._instructions: str = ""
         self._metadata = metadata
         self._max_report_tokens = max_report_tokens
         self._refine_usage: Optional[int] = None
@@ -85,8 +85,6 @@ class ReportWorker(DashboardWorker):
                 )
             if self._transcript_path and not self._transcript_path.exists():
                 raise FileNotFoundError(f"Transcript not found: {self._transcript_path}")
-            if not self._instructions:
-                raise RuntimeError("Refinement instructions must not be empty")
 
             timestamp = datetime.now(timezone.utc)
             report_dir = self._project_dir / "reports"
@@ -108,6 +106,20 @@ class ReportWorker(DashboardWorker):
             self.log_message.emit(f"Combined inputs written to {inputs_path.name}.")
 
             prompt_manager = PromptManager()
+            instructions_text, refinement_template = load_refinement_prompt(
+                self._refinement_prompt_path
+            )
+            self._instructions = instructions_text.strip()
+            refinement_template = refinement_template.strip()
+            if not self._instructions:
+                raise RuntimeError(
+                    "Refinement instructions cannot be empty. Update the refinement prompt file."
+                )
+            if not refinement_template.strip():
+                raise RuntimeError(
+                    "Refinement prompt template cannot be empty. Update the refinement prompt file."
+                )
+
             sections = load_template_sections(self._template_path)
             if not sections:
                 raise RuntimeError("Template does not contain any sections to process")
@@ -142,7 +154,10 @@ class ReportWorker(DashboardWorker):
 
             self.log_message.emit("Refining draft report…")
             self.progress.emit(65, "Refining draft…")
-            refined_content, reasoning_content = self._run_refinement(draft_content)
+            refined_content, reasoning_content = self._run_refinement(
+                refinement_template=refinement_template,
+                draft_content=draft_content,
+            )
             refined_path.write_text(refined_content, encoding="utf-8")
             self.log_message.emit(f"Refined report saved to {refined_path.name}.")
             reasoning_written: Optional[Path] = None
@@ -178,6 +193,7 @@ class ReportWorker(DashboardWorker):
                 "context_window": self._context_window,
                 "inputs": [item[1] for item in self._inputs],
                 "refinement_prompt": str(self._refinement_prompt_path),
+                "instructions": self._instructions,
             }
             self.progress.emit(100, "Report generated")
             self.finished.emit(result)
@@ -356,23 +372,32 @@ class ReportWorker(DashboardWorker):
 
     def _run_refinement(
         self,
+        *,
+        refinement_template: str,
         draft_content: str,
     ) -> tuple[str, Optional[str]]:
-        refinement_template = self._refinement_prompt_path.read_text(encoding="utf-8")
+        template_raw = ""
         template_section = ""
         if self._template_path and self._template_path.exists():
-            template_content = self._template_path.read_text(encoding="utf-8")
-            template_section = f"<template>\n{template_content}\n</template>"
+            template_raw = self._template_path.read_text(encoding="utf-8")
+            template_section = f"<template>\n{template_raw}\n</template>"
+        transcript_raw = ""
         transcript_section = ""
         if self._transcript_path and self._transcript_path.exists():
-            transcript_content = self._transcript_path.read_text(encoding="utf-8")
-            transcript_section = f"<transcript>\n{transcript_content}\n</transcript>"
+            transcript_raw = self._transcript_path.read_text(encoding="utf-8")
+            transcript_section = f"<transcript>\n{transcript_raw}\n</transcript>"
 
-        refine_prompt = refinement_template.format(
-            instructions=self._instructions,
-            report_content=draft_content,
-            template_section=template_section,
-            transcript_section=transcript_section,
+        refine_prompt = self._format_prompt(
+            refinement_template,
+            {
+                "instructions": self._instructions,
+                "report_content": draft_content,
+                "template_section": template_section,
+                "transcript_section": transcript_section,
+                "draft_report": draft_content,
+                "template": template_raw,
+                "transcript": transcript_raw,
+            },
         )
         system_prompt = PromptManager().get_system_prompt()
         provider = self._create_provider(system_prompt)
@@ -392,6 +417,14 @@ class ReportWorker(DashboardWorker):
         reasoning = response.get("reasoning") or response.get("thinking")
         self._refine_usage = response.get("usage", {}).get("output_tokens")
         return content + "\n", reasoning
+
+    def _format_prompt(self, template: str, context: dict[str, object]) -> str:
+        class _SafeDict(dict):
+            def __missing__(self, key: str) -> str:  # noqa: D401 - inline default placeholder
+                return "{" + key + "}"
+
+        safe_context = _SafeDict({k: v for k, v in context.items() if v is not None})
+        return template.format_map(safe_context)
 
     def _build_manifest(
         self,

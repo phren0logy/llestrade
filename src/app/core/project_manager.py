@@ -258,7 +258,6 @@ class ReportState:
     last_context_window: Optional[int] = None
     last_template: Optional[str] = None
     last_transcript: Optional[str] = None
-    last_instructions: Optional[str] = None
     last_refinement_prompt: Optional[str] = None
     history: List[ReportHistoryEntry] = field(default_factory=list)
 
@@ -271,7 +270,6 @@ class ReportState:
             "last_context_window": self.last_context_window,
             "last_template": self.last_template,
             "last_transcript": self.last_transcript,
-            "last_instructions": self.last_instructions,
             "last_refinement_prompt": self.last_refinement_prompt,
             "history": [entry.to_dict() for entry in self.history],
         }
@@ -299,7 +297,6 @@ class ReportState:
             ),
             last_template=data.get("last_template"),
             last_transcript=data.get("last_transcript"),
-            last_instructions=data.get("last_instructions"),
             last_refinement_prompt=data.get("last_refinement_prompt"),
             history=history,
         )
@@ -867,7 +864,6 @@ class ProjectManager(QObject):
         context_window: Optional[int],
         template_path: Optional[str],
         transcript_path: Optional[str],
-        instructions: Optional[str],
         refinement_prompt: Optional[str],
     ) -> None:
         state = self.report_state
@@ -878,7 +874,6 @@ class ProjectManager(QObject):
         state.last_context_window = context_window
         state.last_template = template_path
         state.last_transcript = transcript_path
-        state.last_instructions = instructions
         state.last_refinement_prompt = refinement_prompt
         self.mark_modified()
 
