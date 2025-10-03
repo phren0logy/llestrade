@@ -49,7 +49,7 @@ class ReportWorker(DashboardWorker):
         instructions: str,
         template_path: Optional[Path],
         transcript_path: Optional[Path],
-        refinement_prompt_name: str,
+        refinement_prompt_path: Path,
         metadata: ProjectMetadata,
         max_report_tokens: int = 60_000,
     ) -> None:
@@ -63,7 +63,7 @@ class ReportWorker(DashboardWorker):
         self._instructions = instructions.strip()
         self._template_path = Path(template_path) if template_path else None
         self._transcript_path = Path(transcript_path) if transcript_path else None
-        self._refinement_prompt_name = refinement_prompt_name
+        self._refinement_prompt_path = Path(refinement_prompt_path).expanduser()
         self._metadata = metadata
         self._max_report_tokens = max_report_tokens
         self._refine_usage: Optional[int] = None
@@ -77,6 +77,8 @@ class ReportWorker(DashboardWorker):
                 raise RuntimeError("A report template must be provided before generating a report")
             if not self._template_path.exists():
                 raise FileNotFoundError(f"Report template not found: {self._template_path}")
+            if not self._refinement_prompt_path.exists():
+                raise FileNotFoundError(f"Refinement prompt not found: {self._refinement_prompt_path}")
             if not self._inputs and not self._transcript_path:
                 raise RuntimeError(
                     "Select at least one input or provide a transcript before generating a report"
@@ -140,9 +142,7 @@ class ReportWorker(DashboardWorker):
 
             self.log_message.emit("Refining draft report…")
             self.progress.emit(65, "Refining draft…")
-            refined_content, reasoning_content = self._run_refinement(
-                prompt_manager, draft_content
-            )
+            refined_content, reasoning_content = self._run_refinement(draft_content)
             refined_path.write_text(refined_content, encoding="utf-8")
             self.log_message.emit(f"Refined report saved to {refined_path.name}.")
             reasoning_written: Optional[Path] = None
@@ -177,7 +177,7 @@ class ReportWorker(DashboardWorker):
                 "custom_model": self._custom_model,
                 "context_window": self._context_window,
                 "inputs": [item[1] for item in self._inputs],
-                "refinement_prompt": self._refinement_prompt_name,
+                "refinement_prompt": str(self._refinement_prompt_path),
             }
             self.progress.emit(100, "Report generated")
             self.finished.emit(result)
@@ -356,10 +356,9 @@ class ReportWorker(DashboardWorker):
 
     def _run_refinement(
         self,
-        prompt_manager: PromptManager,
         draft_content: str,
     ) -> tuple[str, Optional[str]]:
-        refinement_template = prompt_manager.get_template(self._refinement_prompt_name)
+        refinement_template = self._refinement_prompt_path.read_text(encoding="utf-8")
         template_section = ""
         if self._template_path and self._template_path.exists():
             template_content = self._template_path.read_text(encoding="utf-8")
@@ -394,16 +393,6 @@ class ReportWorker(DashboardWorker):
         self._refine_usage = response.get("usage", {}).get("output_tokens")
         return content + "\n", reasoning
 
-    def _count_tokens(self, system_prompt: str, user_prompt: str) -> Optional[int]:
-        token_info = TokenCounter.count(
-            text=f"{system_prompt}\n{user_prompt}",
-            provider=self._provider_id,
-            model=self._custom_model or self._model,
-        )
-        if token_info.get("success"):
-            return int(token_info.get("token_count", 0))
-        return None
-
     def _build_manifest(
         self,
         *,
@@ -430,7 +419,7 @@ class ReportWorker(DashboardWorker):
             "inputs_path": str(inputs_path),
             "template_path": str(self._template_path) if self._template_path else None,
             "transcript_path": str(self._transcript_path) if self._transcript_path else None,
-            "refinement_prompt": self._refinement_prompt_name,
+            "refinement_prompt": str(self._refinement_prompt_path),
             "instructions": self._instructions,
             "inputs": list(inputs_metadata),
             "sections": [

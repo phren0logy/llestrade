@@ -110,6 +110,21 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
         "# Section One\n\nDetails for section one.\n\n# Section Two\n\nDetails for section two.",
         encoding="utf-8",
     )
+    prompt_dir = project_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    refinement_prompt_path = prompt_dir / "refinement_prompt.md"
+    refinement_prompt_path.write_text(
+        "Refine\n<draft>{report_content}</draft>\n{template_section}{transcript_section}",
+        encoding="utf-8",
+    )
+    prompt_dir = project_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    refinement_prompt_path = prompt_dir / "refinement_prompt.md"
+    refinement_prompt_path.write_text(
+        "Please help refine the following draft report:\n\n<draft>{report_content}</draft>\n"
+        "{template_section}{transcript_section}",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -125,7 +140,7 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
         instructions="Follow instructions",
         template_path=template_path,
         transcript_path=None,
-        refinement_prompt_name="refinement_prompt",
+        refinement_prompt_path=refinement_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -157,6 +172,7 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert manifest["draft_path"].endswith("-draft.md")
     assert manifest["inputs"]
     assert len(manifest["sections"]) == 2
+    assert manifest["refinement_prompt"].endswith("refinement_prompt.md")
 
 
 def test_report_worker_requires_generation_instructions(
@@ -174,6 +190,13 @@ def test_report_worker_requires_generation_instructions(
     template_dir.mkdir(parents=True, exist_ok=True)
     template_path = template_dir / "report-template.md"
     template_path.write_text("# Only Section\n\nDetails", encoding="utf-8")
+    prompt_dir = project_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    refinement_prompt_path = prompt_dir / "refinement_prompt.md"
+    refinement_prompt_path.write_text(
+        "Refine\n<draft>{report_content}</draft>\n{template_section}{transcript_section}",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -189,7 +212,7 @@ def test_report_worker_requires_generation_instructions(
         instructions="Follow instructions",
         template_path=template_path,
         transcript_path=None,
-        refinement_prompt_name="refinement_prompt",
+        refinement_prompt_path=refinement_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -209,6 +232,13 @@ def test_report_worker_requires_template(tmp_path: Path, qt_app: QApplication, m
     converted_dir = project_dir / "converted_documents"
     converted_dir.mkdir(parents=True, exist_ok=True)
     (converted_dir / "doc.md").write_text("Content", encoding="utf-8")
+    prompt_dir = project_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    refinement_prompt_path = prompt_dir / "refinement_prompt.md"
+    refinement_prompt_path.write_text(
+        "Refine\n<draft>{report_content}</draft>\n{template_section}{transcript_section}",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -224,7 +254,7 @@ def test_report_worker_requires_template(tmp_path: Path, qt_app: QApplication, m
         instructions="Do it",
         template_path=None,
         transcript_path=None,
-        refinement_prompt_name="refinement_prompt",
+        refinement_prompt_path=refinement_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -251,6 +281,13 @@ def test_report_worker_supports_transcript_without_inputs(
     template_dir.mkdir(parents=True, exist_ok=True)
     template_path = template_dir / "report-template.md"
     template_path.write_text("Template body", encoding="utf-8")
+    prompt_dir = project_dir / "prompts"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    refinement_prompt_path = prompt_dir / "refinement_prompt.md"
+    refinement_prompt_path.write_text(
+        "Refine\n<draft>{report_content}</draft>\n{template_section}{transcript_section}",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -266,7 +303,7 @@ def test_report_worker_supports_transcript_without_inputs(
         instructions="Follow",
         template_path=template_path,
         transcript_path=transcript_path,
-        refinement_prompt_name="refinement_prompt",
+        refinement_prompt_path=refinement_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 

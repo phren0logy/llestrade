@@ -67,7 +67,12 @@ from src.app.workers import (
     WorkerCoordinator,
     get_worker_pool,
 )
-from src.config.prompt_store import get_template_custom_dir
+from src.config.prompt_store import (
+    get_template_custom_dir,
+    get_bundled_dir,
+    get_custom_dir,
+    get_repo_prompts_dir,
+)
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 
 LOGGER = logging.getLogger(__name__)
@@ -145,7 +150,7 @@ class ProjectWorkspace(QWidget):
         self._report_custom_model_label: QLabel | None = None
         self._report_custom_context_spin: QSpinBox | None = None
         self._report_custom_context_label: QLabel | None = None
-        self._report_refinement_prompt_combo: QComboBox | None = None
+        self._report_refinement_prompt_edit: QLineEdit | None = None
         self._report_generate_button: QPushButton | None = None
         self._report_progress_bar: QProgressBar | None = None
         self._report_log: QTextEdit | None = None
@@ -369,12 +374,19 @@ class ProjectWorkspace(QWidget):
             self._wrap_line_edit_with_button(self._report_transcript_edit, transcript_browse)
         )
 
-        refinement_row = QHBoxLayout()
-        refinement_row.setContentsMargins(0, 0, 0, 0)
-        refinement_row.addWidget(QLabel("Refinement prompt:"))
-        self._report_refinement_prompt_combo = self._build_refinement_prompt_combo()
-        refinement_row.addWidget(self._report_refinement_prompt_combo)
-        config_layout.addLayout(refinement_row)
+        refinement_label = QLabel("Refinement prompt:")
+        config_layout.addWidget(refinement_label)
+        self._report_refinement_prompt_edit = QLineEdit()
+        self._report_refinement_prompt_edit.textChanged.connect(self._update_report_controls)
+        refinement_browse = QPushButton("Browse…")
+        refinement_browse.clicked.connect(self._browse_refinement_prompt)
+        config_layout.addWidget(
+            self._wrap_line_edit_with_button(self._report_refinement_prompt_edit, refinement_browse)
+        )
+        if self._report_refinement_prompt_edit and not self._report_refinement_prompt_edit.text().strip():
+            default_refinement = self._default_refinement_prompt_path()
+            if default_refinement:
+                self._report_refinement_prompt_edit.setText(default_refinement)
 
         instructions_header = QHBoxLayout()
         instructions_header.setContentsMargins(0, 0, 0, 0)
@@ -1293,34 +1305,6 @@ class ProjectWorkspace(QWidget):
         )
         return combo
 
-    def _build_refinement_prompt_combo(self) -> QComboBox:
-        combo = QComboBox()
-        combo.setEditable(False)
-        for name in self._available_refinement_prompts():
-            combo.addItem(name, name)
-        default_index = combo.findData("refinement_prompt")
-        if default_index >= 0:
-            combo.setCurrentIndex(default_index)
-        combo.currentIndexChanged.connect(self._update_report_controls)
-        return combo
-
-    def _available_refinement_prompts(self) -> List[str]:
-        try:
-            prompt_manager = PromptManager()
-        except Exception:
-            LOGGER.exception("Failed to enumerate refinement prompts", exc_info=True)
-            return ["refinement_prompt"]
-
-        names: List[str] = []
-        for name, content in prompt_manager.templates.items():
-            if "{report_content}" in content and "{template_section}" in content:
-                names.append(name)
-
-        if not names and "refinement_prompt" in prompt_manager.templates:
-            names.append("refinement_prompt")
-
-        return sorted(dict.fromkeys(names)) or ["refinement_prompt"]
-
     def _on_report_model_changed(self) -> None:
         data = self._report_model_combo.currentData() if self._report_model_combo else None
         is_custom = bool(data) and data[0] == "custom"
@@ -1367,6 +1351,35 @@ class ProjectWorkspace(QWidget):
         if file_path and self._report_template_edit:
             self._report_template_edit.setText(file_path)
         self._update_report_controls()
+
+    def _browse_refinement_prompt(self) -> None:
+        initial = None
+        try:
+            initial = get_custom_dir()
+        except Exception:
+            initial = Path.home()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Refinement Prompt",
+            str(initial),
+            "Markdown/Text Files (*.md *.txt);;All Files (*)",
+        )
+        if file_path and self._report_refinement_prompt_edit:
+            self._report_refinement_prompt_edit.setText(file_path)
+        self._update_report_controls()
+
+    def _default_refinement_prompt_path(self) -> str:
+        try:
+            bundled_path = get_bundled_dir() / "refinement_prompt.md"
+            if bundled_path.exists():
+                return str(bundled_path)
+        except Exception:
+            LOGGER.debug("Unable to resolve bundled refinement prompt path", exc_info=True)
+        repo_dir = get_repo_prompts_dir()
+        repo_path = repo_dir / "refinement_prompt.md"
+        if repo_path.exists():
+            return str(repo_path)
+        return ""
 
     def _browse_report_transcript(self) -> None:
         initial = None
@@ -1515,10 +1528,12 @@ class ProjectWorkspace(QWidget):
         instructions_ok = bool(self._report_instructions_edit and self._report_instructions_edit.toPlainText().strip())
         template_text = self._report_template_edit.text().strip() if self._report_template_edit else ""
         template_ok = bool(template_text)
-        refinement_ok = bool(
-            self._report_refinement_prompt_combo
-            and self._report_refinement_prompt_combo.currentData()
+        refinement_text = (
+            self._report_refinement_prompt_edit.text().strip()
+            if self._report_refinement_prompt_edit
+            else ""
         )
+        refinement_ok = bool(refinement_text and Path(refinement_text).expanduser().is_file())
         model_ok = True
         if self._report_model_combo:
             data = self._report_model_combo.currentData()
@@ -1600,15 +1615,23 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        refinement_prompt_name = ""
-        if self._report_refinement_prompt_combo:
-            data = self._report_refinement_prompt_combo.currentData()
-            refinement_prompt_name = str(data or "").strip()
-        if not refinement_prompt_name:
+        refinement_prompt_path = None
+        if self._report_refinement_prompt_edit:
+            text = self._report_refinement_prompt_edit.text().strip()
+            if text:
+                refinement_prompt_path = Path(text).expanduser()
+        if not refinement_prompt_path:
             QMessageBox.warning(
                 self,
                 "Report Generator",
                 "Select a refinement prompt before generating a report.",
+            )
+            return
+        if not refinement_prompt_path.is_file():
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                f"The selected refinement prompt does not exist:\n{refinement_prompt_path}",
             )
             return
 
@@ -1652,7 +1675,7 @@ class ProjectWorkspace(QWidget):
             template_path=str(template_path) if template_path else None,
             transcript_path=str(transcript_path) if transcript_path else None,
             instructions=instructions,
-            refinement_prompt=refinement_prompt_name,
+            refinement_prompt=str(refinement_prompt_path),
         )
 
         worker = ReportWorker(
@@ -1665,7 +1688,7 @@ class ProjectWorkspace(QWidget):
             instructions=instructions,
             template_path=template_path,
             transcript_path=transcript_path,
-            refinement_prompt_name=refinement_prompt_name,
+            refinement_prompt_path=refinement_prompt_path,
             metadata=metadata,
         )
 
@@ -1739,8 +1762,8 @@ class ProjectWorkspace(QWidget):
             refinement_prompt = str(
                 result.get("refinement_prompt")
                 or (
-                    self._report_refinement_prompt_combo.currentData()
-                    if self._report_refinement_prompt_combo
+                    self._report_refinement_prompt_edit.text().strip()
+                    if self._report_refinement_prompt_edit
                     else ""
                 )
                 or ""
@@ -1919,21 +1942,11 @@ class ProjectWorkspace(QWidget):
             self._report_template_edit.setText(state.last_template or "")
         if self._report_transcript_edit:
             self._report_transcript_edit.setText(state.last_transcript or "")
-        if self._report_refinement_prompt_combo:
+        if self._report_refinement_prompt_edit:
             if state.last_refinement_prompt:
-                index = self._report_refinement_prompt_combo.findData(state.last_refinement_prompt)
-                if index < 0:
-                    self._report_refinement_prompt_combo.addItem(
-                        state.last_refinement_prompt,
-                        state.last_refinement_prompt,
-                    )
-                    index = self._report_refinement_prompt_combo.findData(state.last_refinement_prompt)
-                if index >= 0:
-                    self._report_refinement_prompt_combo.setCurrentIndex(index)
-            elif self._report_refinement_prompt_combo.count() > 0:
-                default_index = self._report_refinement_prompt_combo.findData("refinement_prompt")
-                if default_index >= 0:
-                    self._report_refinement_prompt_combo.setCurrentIndex(default_index)
+                self._report_refinement_prompt_edit.setText(state.last_refinement_prompt)
+            elif not self._report_refinement_prompt_edit.text().strip():
+                self._report_refinement_prompt_edit.setText(self._default_refinement_prompt_path())
 
         default_instructions = self._get_default_report_instructions()
         instructions_text = state.last_instructions or default_instructions
