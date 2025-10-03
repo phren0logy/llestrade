@@ -41,9 +41,23 @@ def get_custom_dir() -> Path:
 def get_repo_prompts_dir() -> Path:
     """Return the path to prompts bundled with the application source tree.
 
-    Repo layout: src/app/resources/prompts
+    Normal dev layout: src/app/resources/prompts
+    Provide a few fallbacks to be resilient to where this file is located.
     """
-    return Path(__file__).resolve().parents[2] / "app" / "resources" / "prompts"
+    here = Path(__file__).resolve()
+    candidates = [
+        # ../ (src)/app/resources/prompts
+        here.parents[1] / "app" / "resources" / "prompts",
+        # repo_root/src/app/resources/prompts
+        here.parents[2] / "src" / "app" / "resources" / "prompts",
+        # repo_root/app/resources/prompts (legacy fallback)
+        here.parents[2] / "app" / "resources" / "prompts",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    # Prefer the src-based path even if it doesn't exist to make intent clear
+    return candidates[1]
 
 
 def _hash_file(path: Path) -> str:

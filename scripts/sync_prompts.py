@@ -7,15 +7,31 @@ This copies prompts from src/app/resources/prompts into
 touching custom prompts.
 
 Usage:
-  uv run scripts/sync_prompts.py           # Copy new files, skip changed
-  uv run scripts/sync_prompts.py --force   # Overwrite changed bundled files
+  uv run scripts/sync_prompts.py            # Copy new files, skip changed
+  uv run scripts/sync_prompts.py --force    # Overwrite changed bundled files
+  
+  # Alternatively (module mode):
+  uv run -m scripts.sync_prompts            # Preferred when using Python module paths
+  uv run -m scripts.sync_prompts --force
 """
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from src.config.prompt_store import get_bundled_dir, get_repo_prompts_dir, sync_bundled_prompts
+import sys
+
+# Ensure repository root is on sys.path when invoked as a script
+_THIS_FILE = Path(__file__).resolve()
+_REPO_ROOT = _THIS_FILE.parents[1]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from src.config.prompt_store import (
+    get_bundled_dir,
+    get_repo_prompts_dir,
+    sync_bundled_prompts,
+)
 
 
 def main() -> int:

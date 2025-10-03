@@ -84,7 +84,6 @@ class APIKeyDialog(QDialog):
         providers = [
             ("Anthropic (Claude)", "anthropic", "https://console.anthropic.com/"),
             ("Google Gemini", "gemini", "https://makersuite.google.com/app/apikey"),
-            ("Azure OpenAI", "azure_openai", "https://portal.azure.com/")
         ]
         
         for display_name, key, url in providers:
@@ -136,22 +135,45 @@ class APIKeyDialog(QDialog):
         # Azure OpenAI Settings
         openai_group = QGroupBox("Azure OpenAI Configuration")
         openai_layout = QFormLayout(openai_group)
-        
+
+        ak_row = QHBoxLayout()
+        self.azure_openai_key = QLineEdit()
+        self.azure_openai_key.setEchoMode(QLineEdit.Password)
+        self.azure_openai_key.setPlaceholderText("Enter Azure OpenAI API key…")
+        self.api_fields["azure_openai"] = self.azure_openai_key
+        ak_row.addWidget(self.azure_openai_key)
+
+        ak_show_btn = QPushButton("Show")
+        ak_show_btn.setCheckable(True)
+        ak_show_btn.setMaximumWidth(60)
+        ak_show_btn.toggled.connect(
+            lambda checked: self.azure_openai_key.setEchoMode(
+                QLineEdit.Normal if checked else QLineEdit.Password
+            )
+        )
+        ak_row.addWidget(ak_show_btn)
+        openai_layout.addRow("API Key:", ak_row)
+
         self.azure_endpoint = QLineEdit()
         self.azure_endpoint.setPlaceholderText("https://your-resource.openai.azure.com/")
         openai_layout.addRow("Endpoint:", self.azure_endpoint)
         self.config_fields["azure_endpoint"] = self.azure_endpoint
-        
+
         self.azure_deployment = QLineEdit()
         self.azure_deployment.setPlaceholderText("e.g., gpt-4.1")
         openai_layout.addRow("Deployment Name:", self.azure_deployment)
         self.config_fields["azure_deployment"] = self.azure_deployment
-        
+
         self.azure_api_version = QLineEdit()
         self.azure_api_version.setPlaceholderText("e.g., 2025-01-01-preview")
         openai_layout.addRow("API Version:", self.azure_api_version)
         self.config_fields["azure_api_version"] = self.azure_api_version
-        
+
+        help_text_openai = QLabel('<a href="https://portal.azure.com/">Configure in Azure Portal →</a>')
+        help_text_openai.setOpenExternalLinks(True)
+        help_text_openai.setStyleSheet("color: #1976d2;")
+        openai_layout.addRow("", help_text_openai)
+
         layout.addWidget(openai_group)
         
         # Azure Document Intelligence Settings

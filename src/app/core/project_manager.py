@@ -259,7 +259,7 @@ class ProjectManager(QObject):
         self.workflow_state = WorkflowState()
         self.settings = {
             "llm_provider": "anthropic",
-            "llm_model": "claude-sonnet-4-20250514",
+            "llm_model": "claude-sonnet-4-5-20250929",
             "template_id": "standard_competency"
         }
         self.source_state = SourceTreeState()
