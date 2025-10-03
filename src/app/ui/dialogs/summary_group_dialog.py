@@ -32,6 +32,9 @@ from src.config.app_config import get_available_providers_and_models
 from src.config.prompt_store import get_bundled_dir, get_custom_dir
 from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.summary_groups import SummaryGroup
+from src.app.core.project_manager import ProjectMetadata
+from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
+from .prompt_preview_dialog import PromptPreviewDialog
 
 DEFAULT_SYSTEM_PROMPT = "resources/prompts/document_analysis_system_prompt.md"
 DEFAULT_USER_PROMPT = "resources/prompts/document_summary_prompt.md"
@@ -40,9 +43,16 @@ DEFAULT_USER_PROMPT = "resources/prompts/document_summary_prompt.md"
 class SummaryGroupDialog(QDialog):
     """Collect information needed to create a summary group."""
 
-    def __init__(self, project_dir: Path, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        project_dir: Path,
+        parent: Optional[QWidget] = None,
+        *,
+        metadata: Optional[ProjectMetadata] = None,
+    ) -> None:
         super().__init__(parent)
         self._project_dir = project_dir
+        self._metadata = metadata
         self._group: Optional[SummaryGroup] = None
         self.setWindowTitle("New Bulk Analysis")
         self.setModal(True)
@@ -121,6 +131,10 @@ class SummaryGroupDialog(QDialog):
             self.user_prompt_edit.setText(str(get_bundled_dir() / "document_summary_prompt.md"))
         except Exception:
             self.user_prompt_edit.setText(DEFAULT_USER_PROMPT)
+
+        self.preview_prompt_button = QPushButton("Preview Prompt")
+        self.preview_prompt_button.clicked.connect(self._preview_prompt)
+        form.addRow("", self.preview_prompt_button)
 
         self.model_combo = self._build_model_combo()
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
@@ -247,14 +261,24 @@ class SummaryGroupDialog(QDialog):
     # Acceptance
     # ------------------------------------------------------------------
     def _handle_accept(self) -> None:
+        group = self._build_group_instance()
+        if group is None:
+            return
+        self._group = group
+        self.accept()
+
+    def _build_group_instance(self) -> Optional[SummaryGroup]:
         name = self.name_edit.text().strip()
         if not name:
             QMessageBox.warning(self, "Missing Name", "Please provide a name for the summary group.")
-            return
+            return None
 
         tree_files, directories = self._collect_selection()
-        # Filter allowed extensions from tree and manual entries
-        manual_files_all = [self._normalise_text(line.strip()) for line in self.manual_files_edit.toPlainText().splitlines() if line.strip()]
+        manual_files_all = [
+            self._normalise_text(line.strip())
+            for line in self.manual_files_edit.toPlainText().splitlines()
+            if line.strip()
+        ]
         files_set = set()
         for path in tree_files:
             if not path:
@@ -271,23 +295,22 @@ class SummaryGroupDialog(QDialog):
         directories = sorted({self._normalise_directory(path) for path in directories if path})
 
         provider_id, model = self.model_combo.currentData()
-        # Handle custom model entry
         if provider_id == "custom":
             provider_id = "anthropic"
             model = self.custom_model_edit.text().strip()
             if not model:
                 QMessageBox.warning(self, "Missing Model", "Please enter a model id for the custom option.")
-                return
+                return None
             custom_window = int(self.custom_context_spin.value())
         else:
             custom_window = None
+
         description = self.description_edit.toPlainText().strip()
         system_prompt = self._normalise_text(self.system_prompt_edit.text().strip())
         user_prompt = self._normalise_text(self.user_prompt_edit.text().strip())
 
         op = self.operation_combo.currentData()
         if op == "combined":
-            # Collect map outputs selections using tri-state tree
             map_groups: list[str] = []
             map_dirs: list[str] = []
             map_files: list[str] = []
@@ -332,20 +355,37 @@ class SummaryGroupDialog(QDialog):
             group.combine_output_template = templ
             group.use_reasoning = self.reasoning_checkbox.isChecked()
             group.model_context_window = custom_window
-            self._group = group
-        else:
-            self._group = SummaryGroup.create(
-                name=name,
-                description=description,
-                files=files,
-                directories=directories,
-                provider_id=provider_id,
-                model=model,
-                system_prompt_path=system_prompt,
-                user_prompt_path=user_prompt,
-            )
-            self._group.model_context_window = custom_window
-        self.accept()
+            return group
+
+        group = SummaryGroup.create(
+            name=name,
+            description=description,
+            files=files,
+            directories=directories,
+            provider_id=provider_id,
+            model=model,
+            system_prompt_path=system_prompt,
+            user_prompt_path=user_prompt,
+        )
+        group.model_context_window = custom_window
+        return group
+
+    def _preview_prompt(self) -> None:
+        group = self._build_group_instance()
+        if group is None:
+            return
+        try:
+            preview = generate_prompt_preview(self._project_dir, group, metadata=self._metadata)
+        except PromptPreviewError as exc:
+            QMessageBox.warning(self, "Prompt Preview", str(exc))
+            return
+        except Exception as exc:  # pragma: no cover - defensive
+            QMessageBox.warning(self, "Prompt Preview", "Failed to generate prompt preview.")
+            return
+
+        dialog = PromptPreviewDialog(self)
+        dialog.set_prompts(preview.system_prompt, preview.user_prompt)
+        dialog.exec()
 
     # ------------------------------------------------------------------
     # Helpers

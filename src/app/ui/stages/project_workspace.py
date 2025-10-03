@@ -53,6 +53,7 @@ from src.app.core.report_inputs import (
 )
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
+from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
 from src.app.workers import (
     BulkAnalysisWorker,
     BulkReduceWorker,
@@ -63,6 +64,7 @@ from src.app.workers import (
     get_worker_pool,
 )
 from src.config.prompt_store import get_custom_dir
+from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1922,6 +1924,10 @@ class ProjectWorkspace(QWidget):
             run_button.clicked.connect(lambda _, g=group: self._start_group_run(g))
         action_layout.addWidget(run_button)
 
+        preview_button = QPushButton("Preview Prompt")
+        preview_button.clicked.connect(lambda _, g=group: self._show_group_prompt_preview(g))
+        action_layout.addWidget(preview_button)
+
         cancel_button = QPushButton("Cancel")
         cancel_button.setEnabled(group.group_id in self._running_groups)
         cancel_button.clicked.connect(lambda _, g=group: self._cancel_group_run(g))
@@ -1967,7 +1973,11 @@ class ProjectWorkspace(QWidget):
             return
         if not self._project_manager or not self._project_manager.project_dir:
             return
-        dialog = SummaryGroupDialog(self._project_manager.project_dir, self)
+        dialog = SummaryGroupDialog(
+            self._project_manager.project_dir,
+            self,
+            metadata=self._project_manager.metadata,
+        )
         if dialog.exec() == QDialog.Accepted:
             group = dialog.build_group()
             try:
@@ -2008,6 +2018,30 @@ class ProjectWorkspace(QWidget):
         folder = self._project_manager.project_dir / "bulk_analysis" / group.folder_name
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _show_group_prompt_preview(self, group: SummaryGroup) -> None:
+        if not self._feature_flags.summary_groups_enabled:
+            return
+        if not self._project_manager or not self._project_manager.project_dir:
+            QMessageBox.warning(self, "Prompt Preview", "Open a project to preview prompts.")
+            return
+
+        project_dir = Path(self._project_manager.project_dir)
+        metadata = self._project_manager.metadata
+
+        try:
+            preview = generate_prompt_preview(project_dir, group, metadata=metadata)
+        except PromptPreviewError as exc:
+            QMessageBox.warning(self, "Prompt Preview", str(exc))
+            return
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.exception("Prompt preview failed: %s", exc)
+            QMessageBox.warning(self, "Prompt Preview", "Failed to generate prompt preview.")
+            return
+
+        dialog = PromptPreviewDialog(self)
+        dialog.set_prompts(preview.system_prompt, preview.user_prompt)
+        dialog.exec()
 
     def _open_latest_combined(self, group: SummaryGroup) -> None:
         if not self._feature_flags.summary_groups_enabled:
