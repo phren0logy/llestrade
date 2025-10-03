@@ -57,8 +57,9 @@ def test_build_highlight_jobs(tmp_path: Path) -> None:
     assert len(jobs) == 1
     job = jobs[0]
     assert job.source_pdf == pdf_path
+    assert job.pdf_relative == "folder/doc.pdf"
     assert job.converted_relative == "folder/doc.md"
-    assert job.highlight_output == project_root / "highlights" / "folder/doc.highlights.md"
+    assert job.highlight_output == project_root / "highlights" / "documents" / "folder/doc.highlights.md"
 
 
 def test_highlight_worker_creates_output(tmp_path: Path) -> None:
@@ -75,11 +76,14 @@ def test_highlight_worker_creates_output(tmp_path: Path) -> None:
     job = jobs[0]
 
     worker = HighlightWorker([job])
-    worker._process_job(job)
+    collection = worker._process_job(job)
 
     assert job.highlight_output.exists()
     content = job.highlight_output.read_text(encoding="utf-8")
     assert "Annotated" in content
+    assert "folder/doc.pdf" in content
+    assert collection is not None
+    assert not collection.is_empty()
 
 
 def test_highlight_worker_creates_placeholder_when_no_highlights(tmp_path: Path) -> None:
@@ -96,8 +100,34 @@ def test_highlight_worker_creates_placeholder_when_no_highlights(tmp_path: Path)
     job = jobs[0]
 
     worker = HighlightWorker([job])
-    worker._process_job(job)
+    collection = worker._process_job(job)
 
     assert job.highlight_output.exists()
     content = job.highlight_output.read_text(encoding="utf-8")
     assert "No highlights found" in content
+    assert collection.is_empty()
+
+
+def test_highlight_worker_writes_color_aggregates(tmp_path: Path) -> None:
+    manager, project_root, sources_root = _setup_manager(tmp_path)
+
+    pdf_path = sources_root / "folder" / "doc.pdf"
+    _create_pdf(pdf_path, "Color text", highlight=True)
+    converted_path = project_root / "converted_documents" / "folder" / "doc.md"
+    converted_path.parent.mkdir(parents=True, exist_ok=True)
+    converted_path.write_text("content", encoding="utf-8")
+
+    jobs = build_highlight_jobs(manager)
+    assert jobs
+
+    worker = HighlightWorker(jobs)
+    worker._run()
+
+    colors_dir = project_root / "highlights" / "colors"
+    files = list(colors_dir.glob("*.md"))
+    assert files, "Expected aggregated color files to be created"
+    content = files[0].read_text(encoding="utf-8")
+    assert "Page" in content
+    assert "folder/doc.pdf" in content
+    assert worker.summary is not None
+    assert worker.summary.color_files_written == len(files)

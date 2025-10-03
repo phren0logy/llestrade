@@ -14,6 +14,7 @@ class HighlightJob:
     """Specification for extracting highlights from a document."""
 
     source_pdf: Path
+    pdf_relative: str
     converted_relative: str
     converted_markdown: Path
     highlight_relative: str
@@ -40,6 +41,7 @@ def build_highlight_jobs(project_manager: ProjectManager) -> List[HighlightJob]:
         return []
 
     highlights_root = project_dir / "highlights"
+    documents_root = highlights_root / "documents"
 
     scan_roots: Set[Path] = set()
     if state.include_root_files:
@@ -66,11 +68,12 @@ def build_highlight_jobs(project_manager: ProjectManager) -> List[HighlightJob]:
                 continue
 
             highlight_relative = Path(relative).with_suffix(".highlights.md").as_posix()
-            highlight_output = highlights_root / highlight_relative
+            highlight_output = documents_root / highlight_relative
 
             jobs.append(
                 HighlightJob(
                     source_pdf=pdf_path,
+                    pdf_relative=relative,
                     converted_relative=converted_relative,
                     converted_markdown=converted_markdown,
                     highlight_relative=highlight_relative,
@@ -89,4 +92,3 @@ def _resolve_root(project_dir: Path, root_spec: str) -> Optional[Path]:
 
 
 __all__ = ["HighlightJob", "build_highlight_jobs"]
-

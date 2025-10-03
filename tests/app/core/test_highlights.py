@@ -57,14 +57,16 @@ def test_markdown_helpers(tmp_path: Path) -> None:
     collection = extractor.extract(pdf_path)
     assert collection is not None
 
-    markdown = highlight_markdown_content(collection)
+    markdown = highlight_markdown_content(collection, source_relative="folder/sample.pdf")
     assert "Highlights from sample.pdf" in markdown
     assert "Important finding" in markdown
+    assert "folder/sample.pdf" in markdown
 
     output_path = tmp_path / "out.md"
-    save_highlights_markdown(collection, output_path)
+    save_highlights_markdown(collection, output_path, source_relative="folder/sample.pdf")
     content = output_path.read_text(encoding="utf-8")
     assert "Important finding" in content
+    assert "folder/sample.pdf" in content
 
     placeholder_path = tmp_path / "placeholder.md"
     save_placeholder_markdown(placeholder_path, processed_at=datetime(2024, 1, 1))

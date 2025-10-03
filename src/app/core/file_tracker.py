@@ -635,7 +635,14 @@ def _normalize_highlight_entry(relative_path: str) -> str | None:
     suffix = ".highlights.md"
     if not relative_path.endswith(suffix):
         return None
-    base = relative_path[: -len(suffix)] + ".md"
+    if relative_path.startswith("colors/"):
+        return None
+    normalized = relative_path
+    if normalized.startswith("documents/"):
+        normalized = normalized[len("documents/") :]
+    if not normalized:
+        return None
+    base = normalized[: -len(suffix)] + ".md"
     return base
 
 

@@ -7,8 +7,9 @@ from src.app.core.file_tracker import FileTracker
 
 @pytest.fixture
 def project_root(tmp_path: Path) -> Path:
-    for folder in ("converted_documents", "bulk_analysis", "highlights"):
+    for folder in ("converted_documents", "bulk_analysis"):
         (tmp_path / folder).mkdir()
+    (tmp_path / "highlights" / "documents").mkdir(parents=True)
     return tmp_path
 
 
@@ -86,7 +87,7 @@ def test_scan_updates_when_new_files_added(project_root: Path):
     assert snapshot.files["bulk_analysis"] == ["doc1.md"]
     assert snapshot.missing["bulk_analysis_missing"] == []
 
-    write_file(project_root / "highlights", "doc1.highlights.md")
+    write_file(project_root / "highlights" / "documents", "doc1.highlights.md")
     snapshot = tracker.scan()
     assert snapshot.highlights_count == 1
     assert snapshot.missing["highlights_missing"] == []

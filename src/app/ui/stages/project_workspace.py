@@ -6,7 +6,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, List, Sequence
+from typing import Dict, Optional, List, Sequence, Set
 
 from PySide6.QtCore import Qt, QUrl
 from shiboken6 import isValid
@@ -26,14 +26,30 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QDialog,
+    QComboBox,
+    QGroupBox,
+    QLineEdit,
+    QProgressBar,
+    QSpinBox,
+    QTextEdit,
 )
 from PySide6.QtWidgets import QHeaderView
 
 from src.app.core.conversion_manager import ConversionJob, build_conversion_jobs
 from src.app.core.feature_flags import FeatureFlags
 from src.app.core.file_tracker import WorkspaceMetrics, WorkspaceGroupMetrics
-from src.app.core.project_manager import ProjectManager
+from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.core.summary_groups import SummaryGroup
+from src.app.core.prompt_manager import PromptManager
+from src.app.core.report_inputs import (
+    REPORT_CATEGORY_BULK_COMBINED,
+    REPORT_CATEGORY_BULK_MAP,
+    REPORT_CATEGORY_CONVERTED,
+    REPORT_CATEGORY_HIGHLIGHT_COLOR,
+    REPORT_CATEGORY_HIGHLIGHT_DOCUMENT,
+    ReportInputDescriptor,
+    category_display_name,
+)
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
 from src.app.workers import (
@@ -41,9 +57,11 @@ from src.app.workers import (
     BulkReduceWorker,
     ConversionWorker,
     HighlightWorker,
+    ReportWorker,
     WorkerCoordinator,
     get_worker_pool,
 )
+from src.config.prompt_store import get_custom_dir
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,6 +105,36 @@ class ProjectWorkspace(QWidget):
         self._highlight_total = 0
         self._highlight_errors: List[str] = []
         self._missing_highlights_label: QLabel | None = None
+        self._highlights_tab: QWidget | None = None
+        self._highlight_counts_label: QLabel | None = None
+        self._highlight_last_run_label: QLabel | None = None
+        self._highlight_status_label: QLabel | None = None
+        self._highlight_tree: QTreeWidget | None = None
+        self._open_highlights_button: QPushButton | None = None
+        self._reports_tab: QWidget | None = None
+        self._report_inputs_tree: QTreeWidget | None = None
+        self._report_selected_inputs: Set[str] = set()
+        self._report_model_combo: QComboBox | None = None
+        self._report_custom_model_edit: QLineEdit | None = None
+        self._report_custom_model_label: QLabel | None = None
+        self._report_custom_context_spin: QSpinBox | None = None
+        self._report_custom_context_label: QLabel | None = None
+        self._report_generate_button: QPushButton | None = None
+        self._report_progress_bar: QProgressBar | None = None
+        self._report_log: QTextEdit | None = None
+        self._report_instructions_edit: QTextEdit | None = None
+        self._report_template_edit: QLineEdit | None = None
+        self._report_transcript_edit: QLineEdit | None = None
+        self._report_history_list: QTreeWidget | None = None
+        self._report_open_draft_button: QPushButton | None = None
+        self._report_open_refined_button: QPushButton | None = None
+        self._report_open_reasoning_button: QPushButton | None = None
+        self._report_open_manifest_button: QPushButton | None = None
+        self._report_open_inputs_button: QPushButton | None = None
+        self._report_last_result: Optional[Dict[str, str]] = None
+        self._report_running = False
+        self._report_default_instructions: Optional[str] = None
+        self._report_last_instructions_text: Optional[str] = None
 
         self._build_ui()
         if project_manager:
@@ -99,6 +147,10 @@ class ProjectWorkspace(QWidget):
         self._tabs = QTabWidget()
         self._documents_tab = self._build_documents_tab()
         self._tabs.addTab(self._documents_tab, "Documents")
+        self._highlights_tab = self._build_highlights_tab()
+        self._tabs.addTab(self._highlights_tab, "Highlights")
+        self._reports_tab = self._build_reports_tab()
+        self._tabs.addTab(self._reports_tab, "Reports")
         if self._feature_flags.summary_groups_enabled:
             self._summary_tab = self._build_summary_groups_tab()
             self._tabs.addTab(self._summary_tab, "Bulk Analysis")
@@ -139,10 +191,6 @@ class ProjectWorkspace(QWidget):
         self._last_scan_label = QLabel("")
         self._last_scan_label.setStyleSheet("color: #666;")
         header_layout.addWidget(self._last_scan_label)
-        self._extract_highlights_button = QPushButton("Extract highlights")
-        self._extract_highlights_button.setEnabled(False)
-        self._extract_highlights_button.clicked.connect(self._trigger_highlight_extraction)
-        header_layout.addWidget(self._extract_highlights_button)
         self._rescan_button = QPushButton("Re-scan")
         self._rescan_button.clicked.connect(lambda: self._trigger_conversion(auto_run=False))
         header_layout.addWidget(self._rescan_button)
@@ -170,6 +218,199 @@ class ProjectWorkspace(QWidget):
         tab_layout.addWidget(self._missing_bulk_label)
 
         tab_layout.addStretch()
+        return widget
+
+    def _wrap_line_edit_with_button(self, line_edit: QLineEdit, button: QPushButton) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(line_edit)
+        layout.addWidget(button)
+        return container
+
+    def _build_highlights_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(8)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        self._highlight_counts_label = QLabel("Highlights extracted: 0 | Pending: 0")
+        header_layout.addWidget(self._highlight_counts_label)
+        header_layout.addStretch()
+        self._highlight_last_run_label = QLabel("Last run: —")
+        self._highlight_last_run_label.setStyleSheet("color: #666;")
+        header_layout.addWidget(self._highlight_last_run_label)
+        layout.addLayout(header_layout)
+
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        self._extract_highlights_button = QPushButton("Extract Highlights")
+        self._extract_highlights_button.setEnabled(False)
+        self._extract_highlights_button.clicked.connect(self._trigger_highlight_extraction)
+        button_row.addWidget(self._extract_highlights_button)
+
+        self._open_highlights_button = QPushButton("Open Highlights Folder")
+        self._open_highlights_button.setEnabled(False)
+        self._open_highlights_button.clicked.connect(self._open_highlights_folder)
+        button_row.addWidget(self._open_highlights_button)
+
+        button_row.addStretch()
+        layout.addLayout(button_row)
+
+        self._highlight_status_label = QLabel("Highlights have not been extracted yet.")
+        self._highlight_status_label.setWordWrap(True)
+        self._highlight_status_label.setStyleSheet("color: #555;")
+        layout.addWidget(self._highlight_status_label)
+
+        self._highlight_tree = QTreeWidget()
+        self._highlight_tree.setColumnCount(2)
+        self._highlight_tree.setHeaderLabels(["Category", "Relative Path"])
+        self._highlight_tree.setHeaderHidden(False)
+        self._highlight_tree.setIndentation(18)
+        self._highlight_tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self._highlight_tree.itemDoubleClicked.connect(self._open_highlight_item)
+        layout.addWidget(self._highlight_tree)
+
+        return widget
+
+    def _build_reports_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setSpacing(10)
+
+        top_layout = QHBoxLayout()
+        top_layout.setSpacing(12)
+
+        inputs_group = QGroupBox("Select Inputs")
+        inputs_layout = QVBoxLayout(inputs_group)
+        self._report_inputs_tree = QTreeWidget()
+        self._report_inputs_tree.setColumnCount(2)
+        self._report_inputs_tree.setHeaderLabels(["Input", "Project Path"])
+        self._report_inputs_tree.setUniformRowHeights(True)
+        self._report_inputs_tree.setSelectionMode(QAbstractItemView.NoSelection)
+        self._report_inputs_tree.itemChanged.connect(self._on_report_input_changed)
+        inputs_layout.addWidget(self._report_inputs_tree)
+        top_layout.addWidget(inputs_group, 1)
+
+        config_group = QGroupBox("Configuration")
+        config_layout = QVBoxLayout(config_group)
+        config_layout.setSpacing(6)
+
+        model_row = QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.addWidget(QLabel("Model:"))
+        self._report_model_combo = self._build_report_model_combo()
+        self._report_model_combo.currentIndexChanged.connect(self._on_report_model_changed)
+        model_row.addWidget(self._report_model_combo)
+        config_layout.addLayout(model_row)
+
+        self._report_custom_model_label = QLabel("Custom model id:")
+        self._report_custom_model_edit = QLineEdit()
+        custom_model_row = QHBoxLayout()
+        custom_model_row.setContentsMargins(0, 0, 0, 0)
+        custom_model_row.addWidget(self._report_custom_model_label)
+        custom_model_row.addWidget(self._report_custom_model_edit)
+        config_layout.addLayout(custom_model_row)
+
+        self._report_custom_context_label = QLabel("Context window:")
+        self._report_custom_context_spin = QSpinBox()
+        self._report_custom_context_spin.setRange(10_000, 400_000)
+        self._report_custom_context_spin.setSingleStep(1_000)
+        context_row = QHBoxLayout()
+        context_row.setContentsMargins(0, 0, 0, 0)
+        context_row.addWidget(self._report_custom_context_label)
+        context_row.addWidget(self._report_custom_context_spin)
+        context_row.addWidget(QLabel("tokens"))
+        config_layout.addLayout(context_row)
+
+        template_label = QLabel("Template (optional):")
+        config_layout.addWidget(template_label)
+        self._report_template_edit = QLineEdit()
+        template_browse = QPushButton("Browse…")
+        template_browse.clicked.connect(self._browse_report_template)
+        config_layout.addWidget(
+            self._wrap_line_edit_with_button(self._report_template_edit, template_browse)
+        )
+
+        transcript_label = QLabel("Transcript (optional):")
+        config_layout.addWidget(transcript_label)
+        self._report_transcript_edit = QLineEdit()
+        transcript_browse = QPushButton("Browse…")
+        transcript_browse.clicked.connect(self._browse_report_transcript)
+        config_layout.addWidget(
+            self._wrap_line_edit_with_button(self._report_transcript_edit, transcript_browse)
+        )
+
+        instructions_header = QHBoxLayout()
+        instructions_header.setContentsMargins(0, 0, 0, 0)
+        instructions_header.addWidget(QLabel("Refinement instructions:"))
+        reset_button = QPushButton("Reset")
+        reset_button.clicked.connect(self._reset_report_instructions)
+        instructions_header.addWidget(reset_button)
+        instructions_header.addStretch()
+        config_layout.addLayout(instructions_header)
+
+        self._report_instructions_edit = QTextEdit()
+        self._report_instructions_edit.setMinimumHeight(120)
+        self._report_instructions_edit.textChanged.connect(self._update_report_controls)
+        config_layout.addWidget(self._report_instructions_edit)
+
+        top_layout.addWidget(config_group, 1)
+        layout.addLayout(top_layout)
+
+        button_row = QHBoxLayout()
+        button_row.setContentsMargins(0, 0, 0, 0)
+        self._report_generate_button = QPushButton("Generate & Refine Report")
+        self._report_generate_button.clicked.connect(self._start_report_job)
+        button_row.addWidget(self._report_generate_button)
+        open_reports = QPushButton("Open Reports Folder")
+        open_reports.clicked.connect(self._open_reports_folder)
+        button_row.addWidget(open_reports)
+        button_row.addStretch()
+        layout.addLayout(button_row)
+
+        self._report_progress_bar = QProgressBar()
+        self._report_progress_bar.setRange(0, 100)
+        self._report_progress_bar.setValue(0)
+        layout.addWidget(self._report_progress_bar)
+
+        self._report_log = QTextEdit()
+        self._report_log.setReadOnly(True)
+        self._report_log.setMinimumHeight(140)
+        layout.addWidget(self._report_log)
+
+        history_group = QGroupBox("Recent Reports")
+        history_layout = QVBoxLayout(history_group)
+        self._report_history_list = QTreeWidget()
+        self._report_history_list.setColumnCount(3)
+        self._report_history_list.setHeaderLabels(["Generated", "Model", "Outputs"])
+        self._report_history_list.itemSelectionChanged.connect(self._on_report_history_selected)
+        history_layout.addWidget(self._report_history_list)
+
+        history_buttons = QHBoxLayout()
+        self._report_open_draft_button = QPushButton("Open Draft")
+        self._report_open_draft_button.clicked.connect(lambda: self._open_report_history_file("draft"))
+        history_buttons.addWidget(self._report_open_draft_button)
+        self._report_open_refined_button = QPushButton("Open Refined")
+        self._report_open_refined_button.clicked.connect(lambda: self._open_report_history_file("refined"))
+        history_buttons.addWidget(self._report_open_refined_button)
+        self._report_open_reasoning_button = QPushButton("Open Reasoning")
+        self._report_open_reasoning_button.clicked.connect(lambda: self._open_report_history_file("reasoning"))
+        history_buttons.addWidget(self._report_open_reasoning_button)
+        self._report_open_manifest_button = QPushButton("Open Manifest")
+        self._report_open_manifest_button.clicked.connect(lambda: self._open_report_history_file("manifest"))
+        history_buttons.addWidget(self._report_open_manifest_button)
+        self._report_open_inputs_button = QPushButton("Open Inputs")
+        self._report_open_inputs_button.clicked.connect(lambda: self._open_report_history_file("inputs"))
+        history_buttons.addWidget(self._report_open_inputs_button)
+        history_buttons.addStretch()
+        history_layout.addLayout(history_buttons)
+
+        layout.addWidget(history_group)
+
+        self._on_report_model_changed()
+        self._update_report_history_buttons()
         return widget
 
     def _build_summary_groups_tab(self) -> QWidget:
@@ -252,12 +493,12 @@ class ProjectWorkspace(QWidget):
         )
         if self._edit_metadata_button:
             self._edit_metadata_button.setEnabled(True)
-        if self._extract_highlights_button:
-            self._extract_highlights_button.setEnabled(True)
+        self._update_highlight_button_state()
         self._update_metadata_label()
         self._populate_source_tree()
         self._update_source_root_label()
         self._update_last_scan_label()
+        self._load_report_preferences()
         self.refresh()
 
     def project_manager(self) -> Optional[ProjectManager]:
@@ -267,6 +508,9 @@ class ProjectWorkspace(QWidget):
         self._populate_source_tree()
         self._update_source_root_label()
         self._refresh_file_tracker()
+        self._refresh_reports_tab()
+        self._refresh_highlights_tab()
+        self._update_highlight_button_state()
         if self._feature_flags.summary_groups_enabled:
             self._prune_running_groups()
             self._refresh_summary_groups()
@@ -752,10 +996,9 @@ class ProjectWorkspace(QWidget):
 
         self._conversion_running = False
         self._rescan_button.setEnabled(True)
-        if self._extract_highlights_button and not self._highlight_running:
-            self._extract_highlights_button.setEnabled(True)
-
+        self._update_highlight_button_state()
         self._refresh_file_tracker()
+        self._refresh_highlights_tab()
         if failures:
             error_text = "\n".join(self._conversion_errors) or "Unknown errors"
             QMessageBox.warning(
@@ -767,6 +1010,125 @@ class ProjectWorkspace(QWidget):
     # ------------------------------------------------------------------
     # Highlight extraction helpers
     # ------------------------------------------------------------------
+    def _open_highlights_folder(self) -> None:
+        if not self._project_manager or not self._project_manager.project_dir:
+            return
+        folder = self._project_manager.project_dir / "highlights"
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _open_highlight_item(self, item: QTreeWidgetItem, column: int) -> None:  # noqa: ARG002
+        path = item.data(0, Qt.UserRole)
+        if not path:
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _populate_highlight_tree(self) -> None:
+        if not self._highlight_tree:
+            return
+        tree = self._highlight_tree
+        tree.clear()
+        if not self._project_manager or not self._project_manager.project_dir:
+            return
+
+        project_dir = self._project_manager.project_dir
+        documents_root = project_dir / "highlights" / "documents"
+        colors_root = project_dir / "highlights" / "colors"
+
+        documents_item = QTreeWidgetItem(["Documents", ""])
+        documents_item.setExpanded(True)
+        if documents_root.exists():
+            for path in sorted(documents_root.rglob("*.highlights.md")):
+                relative = path.relative_to(documents_root).as_posix()
+                child = QTreeWidgetItem(["Document", relative])
+                child.setData(0, Qt.UserRole, str(path))
+                documents_item.addChild(child)
+        tree.addTopLevelItem(documents_item)
+
+        colors_item = QTreeWidgetItem(["Colors", ""])
+        colors_item.setExpanded(True)
+        if colors_root.exists():
+            for path in sorted(colors_root.glob("*.md")):
+                relative = path.relative_to(colors_root).as_posix()
+                child = QTreeWidgetItem(["Color", relative])
+                child.setData(0, Qt.UserRole, str(path))
+                colors_item.addChild(child)
+        tree.addTopLevelItem(colors_item)
+        tree.resizeColumnToContents(0)
+
+    def _refresh_highlights_tab(self) -> None:
+        if not self._highlights_tab:
+            return
+
+        if not self._project_manager:
+            if self._highlight_counts_label:
+                self._highlight_counts_label.setText("Highlights extracted: 0 | Pending: 0")
+            if self._highlight_last_run_label:
+                self._highlight_last_run_label.setText("Last run: —")
+            if self._highlight_status_label and not self._highlight_running:
+                self._highlight_status_label.setText("Highlights have not been extracted yet.")
+            if self._open_highlights_button:
+                self._open_highlights_button.setEnabled(False)
+            if self._highlight_tree:
+                self._highlight_tree.clear()
+            return
+
+        if self._open_highlights_button:
+            self._open_highlights_button.setEnabled(True)
+
+        metrics = None
+        try:
+            if self._workspace_metrics is None:
+                self._workspace_metrics = self._project_manager.get_workspace_metrics()
+            metrics = self._workspace_metrics.dashboard if self._workspace_metrics else None
+        except Exception:
+            metrics = None
+
+        if metrics and self._highlight_counts_label:
+            pdf_total = metrics.highlights_total + metrics.pending_highlights
+            message = f"Highlights extracted: {metrics.highlights_total} of {pdf_total}"
+            if metrics.pending_highlights:
+                message += f" (pending {metrics.pending_highlights})"
+        else:
+            message = "Highlights extracted: 0"
+        if self._highlight_counts_label:
+            self._highlight_counts_label.setText(message)
+
+        state = self._project_manager.highlight_state
+        last_run_text = "Last run: —"
+        if state.last_run_at:
+            try:
+                parsed = datetime.fromisoformat(state.last_run_at)
+                last_run_text = "Last run: " + parsed.astimezone().strftime("%Y-%m-%d %H:%M")
+            except ValueError:
+                last_run_text = f"Last run: {state.last_run_at}"
+        if self._highlight_last_run_label:
+            self._highlight_last_run_label.setText(last_run_text)
+
+        if self._highlight_status_label and not self._highlight_running:
+            if state.last_run_at:
+                details = (
+                    f"Last run captured {state.total_highlights} highlight(s) across "
+                    f"{state.documents_with_highlights} document(s). Color files: {state.color_files}."
+                )
+                self._highlight_status_label.setText(details)
+            else:
+                self._highlight_status_label.setText("Highlights have not been extracted yet.")
+
+        self._populate_highlight_tree()
+
+    def _update_highlight_button_state(self) -> None:
+        if not self._extract_highlights_button:
+            return
+        if not self._project_manager or self._highlight_running or self._conversion_running:
+            self._extract_highlights_button.setEnabled(False)
+            return
+        try:
+            jobs_available = bool(self._project_manager.build_highlight_jobs())
+        except Exception:
+            jobs_available = False
+        self._extract_highlights_button.setEnabled(jobs_available)
+
     def _highlight_key(self) -> str:
         return "highlights:run"
 
@@ -799,6 +1161,11 @@ class ProjectWorkspace(QWidget):
         self._counts_label.setText(f"Extracting highlights (0/{self._highlight_total})…")
         if self._extract_highlights_button:
             self._extract_highlights_button.setEnabled(False)
+        if self._highlight_status_label:
+            self._highlight_status_label.setText(
+                f"Extracting highlights (0/{self._highlight_total})…"
+            )
+        self._update_highlight_button_state()
         worker = HighlightWorker(jobs)
         worker.progress.connect(self._on_highlight_progress)
         worker.file_failed.connect(self._on_highlight_failed)
@@ -811,6 +1178,10 @@ class ProjectWorkspace(QWidget):
         self._counts_label.setText(
             f"Extracting highlights ({processed}/{total})… {relative_path}"
         )
+        if self._highlight_status_label:
+            self._highlight_status_label.setText(
+                f"Extracting highlights ({processed}/{total})… {relative_path}"
+            )
 
     def _on_highlight_failed(self, source_path: str, error: str) -> None:
         self._highlight_errors.append(f"{Path(source_path).name}: {error}")
@@ -824,10 +1195,20 @@ class ProjectWorkspace(QWidget):
             stored.deleteLater()
 
         self._highlight_running = False
-        if self._extract_highlights_button and not self._conversion_running:
-            self._extract_highlights_button.setEnabled(True)
+        self._update_highlight_button_state()
+
+        summary = worker.summary
+        if summary and self._project_manager:
+            self._project_manager.record_highlight_run(
+                generated_at=summary.generated_at,
+                documents_processed=summary.documents_processed,
+                documents_with_highlights=summary.documents_with_highlights,
+                total_highlights=summary.total_highlights,
+                color_files_written=summary.color_files_written,
+            )
 
         self._refresh_file_tracker()
+        self._refresh_highlights_tab()
 
         if failures:
             message = "\n".join(self._highlight_errors) or "Unknown errors"
@@ -836,6 +1217,582 @@ class ProjectWorkspace(QWidget):
                 "Highlight Extraction Issues",
                 "Some highlights could not be extracted:\n\n" + message,
             )
+        elif summary is None and self._highlight_status_label:
+            self._highlight_status_label.setText("Highlight extraction finished.")
+
+    # ------------------------------------------------------------------
+    # Report generation helpers
+    # ------------------------------------------------------------------
+    def _build_report_model_combo(self) -> QComboBox:
+        combo = QComboBox()
+        combo.setEditable(False)
+        combo.addItem("Custom…", ("custom", ""))
+        combo.addItem(
+            "Anthropic Claude (claude-sonnet-4-5-20250929)",
+            ("anthropic", "claude-sonnet-4-5-20250929"),
+        )
+        combo.addItem(
+            "Anthropic Claude (claude-opus-4-1-20250805)",
+            ("anthropic", "claude-opus-4-1-20250805"),
+        )
+        return combo
+
+    def _on_report_model_changed(self) -> None:
+        data = self._report_model_combo.currentData() if self._report_model_combo else None
+        is_custom = bool(data) and data[0] == "custom"
+        for widget in (
+            self._report_custom_model_label,
+            self._report_custom_model_edit,
+            self._report_custom_context_label,
+            self._report_custom_context_spin,
+        ):
+            if widget:
+                widget.setVisible(is_custom)
+        self._update_report_controls()
+
+    def _get_default_report_instructions(self) -> str:
+        if self._report_default_instructions is None:
+            try:
+                prompt_manager = PromptManager()
+                self._report_default_instructions = prompt_manager.get_template("refinement_instructions")
+            except Exception:
+                LOGGER.warning("Failed to load default refinement instructions", exc_info=True)
+                self._report_default_instructions = ""
+        return self._report_default_instructions or ""
+
+    def _reset_report_instructions(self) -> None:
+        if self._report_instructions_edit:
+            self._report_instructions_edit.setPlainText(self._get_default_report_instructions())
+        self._update_report_controls()
+
+    def _browse_report_template(self) -> None:
+        initial = None
+        try:
+            initial = get_custom_dir()
+        except Exception:
+            if self._project_manager and self._project_manager.project_dir:
+                initial = self._project_manager.project_dir
+            else:
+                initial = Path.home()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Template",
+            str(initial),
+            "Markdown/Text Files (*.md *.txt);;All Files (*)",
+        )
+        if file_path and self._report_template_edit:
+            self._report_template_edit.setText(file_path)
+        self._update_report_controls()
+
+    def _browse_report_transcript(self) -> None:
+        initial = None
+        if self._project_manager and self._project_manager.project_dir:
+            initial = self._project_manager.project_dir
+        else:
+            initial = Path.home()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Transcript",
+            str(initial),
+            "Markdown/Text Files (*.md *.txt);;All Files (*)",
+        )
+        if file_path and self._report_transcript_edit:
+            self._report_transcript_edit.setText(file_path)
+        self._update_report_controls()
+
+    def _collect_report_inputs(self) -> List[ReportInputDescriptor]:
+        descriptors: List[ReportInputDescriptor] = []
+        if not self._project_manager or not self._project_manager.project_dir:
+            return descriptors
+
+        project_dir = Path(self._project_manager.project_dir)
+
+        def add_descriptor(category: str, absolute: Path, label: str) -> None:
+            descriptors.append(
+                ReportInputDescriptor(
+                    category=category,
+                    relative_path=absolute.relative_to(project_dir).as_posix(),
+                    label=label,
+                )
+            )
+
+        converted_root = project_dir / "converted_documents"
+        if converted_root.exists():
+            for path in sorted(converted_root.rglob("*")):
+                if not path.is_file():
+                    continue
+                if path.suffix.lower() not in {".md", ".txt"}:
+                    continue
+                add_descriptor(
+                    REPORT_CATEGORY_CONVERTED,
+                    path,
+                    path.relative_to(converted_root).as_posix(),
+                )
+
+        bulk_root = project_dir / "bulk_analysis"
+        if bulk_root.exists():
+            for slug_dir in sorted(bulk_root.iterdir()):
+                if not slug_dir.is_dir():
+                    continue
+                outputs_dir = slug_dir / "outputs"
+                if outputs_dir.exists():
+                    for path in sorted(outputs_dir.rglob("*.md")):
+                        add_descriptor(
+                            REPORT_CATEGORY_BULK_MAP,
+                            path,
+                            f"{slug_dir.name}/outputs/{path.relative_to(outputs_dir).as_posix()}",
+                        )
+                reduce_dir = slug_dir / "reduce"
+                if reduce_dir.exists():
+                    for path in sorted(reduce_dir.rglob("*.md")):
+                        add_descriptor(
+                            REPORT_CATEGORY_BULK_COMBINED,
+                            path,
+                            f"{slug_dir.name}/reduce/{path.relative_to(reduce_dir).as_posix()}",
+                        )
+
+        highlight_docs = project_dir / "highlights" / "documents"
+        if highlight_docs.exists():
+            for path in sorted(highlight_docs.rglob("*.md")):
+                add_descriptor(
+                    REPORT_CATEGORY_HIGHLIGHT_DOCUMENT,
+                    path,
+                    path.relative_to(highlight_docs).as_posix(),
+                )
+
+        highlight_colors = project_dir / "highlights" / "colors"
+        if highlight_colors.exists():
+            for path in sorted(highlight_colors.glob("*.md")):
+                add_descriptor(
+                    REPORT_CATEGORY_HIGHLIGHT_COLOR,
+                    path,
+                    path.relative_to(highlight_colors).as_posix(),
+                )
+
+        return descriptors
+
+    def _populate_report_inputs_tree(self, descriptors: List[ReportInputDescriptor]) -> None:
+        if not self._report_inputs_tree:
+            return
+        tree = self._report_inputs_tree
+        tree.blockSignals(True)
+        tree.clear()
+
+        by_category: Dict[str, List[ReportInputDescriptor]] = {}
+        for descriptor in descriptors:
+            by_category.setdefault(descriptor.category, []).append(descriptor)
+
+        for category, label in (
+            (REPORT_CATEGORY_CONVERTED, category_display_name(REPORT_CATEGORY_CONVERTED)),
+            (REPORT_CATEGORY_BULK_MAP, category_display_name(REPORT_CATEGORY_BULK_MAP)),
+            (REPORT_CATEGORY_BULK_COMBINED, category_display_name(REPORT_CATEGORY_BULK_COMBINED)),
+            (REPORT_CATEGORY_HIGHLIGHT_DOCUMENT, category_display_name(REPORT_CATEGORY_HIGHLIGHT_DOCUMENT)),
+            (REPORT_CATEGORY_HIGHLIGHT_COLOR, category_display_name(REPORT_CATEGORY_HIGHLIGHT_COLOR)),
+        ):
+            entries = by_category.get(category)
+            if not entries:
+                continue
+            parent = QTreeWidgetItem([label, ""])
+            parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsTristate)
+            parent.setCheckState(0, Qt.Unchecked)
+            tree.addTopLevelItem(parent)
+
+            for descriptor in entries:
+                child = QTreeWidgetItem([descriptor.label, descriptor.relative_path])
+                child.setFlags(child.flags() | Qt.ItemIsUserCheckable)
+                key = descriptor.key()
+                child.setData(0, Qt.UserRole, key)
+                state = Qt.Checked if key in self._report_selected_inputs else Qt.Unchecked
+                child.setCheckState(0, state)
+                parent.addChild(child)
+
+        tree.expandAll()
+        tree.blockSignals(False)
+        self._update_report_controls()
+
+    def _on_report_input_changed(self, item: QTreeWidgetItem, column: int) -> None:  # noqa: ARG002
+        data = item.data(0, Qt.UserRole)
+        if not data:
+            return
+        key = str(data)
+        if item.checkState(0) == Qt.Checked:
+            self._report_selected_inputs.add(key)
+        else:
+            self._report_selected_inputs.discard(key)
+        self._update_report_controls()
+
+    def _update_report_controls(self) -> None:
+        if not self._report_generate_button:
+            return
+        if not self._project_manager:
+            self._report_generate_button.setEnabled(False)
+            return
+        has_inputs = bool(self._report_selected_inputs)
+        instructions_ok = bool(self._report_instructions_edit and self._report_instructions_edit.toPlainText().strip())
+        model_ok = True
+        if self._report_model_combo:
+            data = self._report_model_combo.currentData()
+            if data and data[0] == "custom":
+                model_ok = bool(self._report_custom_model_edit and self._report_custom_model_edit.text().strip())
+        enabled = has_inputs and instructions_ok and model_ok and not self._report_running
+        self._report_generate_button.setEnabled(enabled)
+
+    def _refresh_reports_tab(self) -> None:
+        if not self._reports_tab:
+            return
+        if not self._project_manager or not self._project_manager.project_dir:
+            self._report_selected_inputs.clear()
+            if self._report_inputs_tree:
+                self._report_inputs_tree.clear()
+            if self._report_history_list:
+                self._report_history_list.clear()
+            self._update_report_controls()
+            self._update_report_history_buttons()
+            return
+
+        descriptors = self._collect_report_inputs()
+        self._populate_report_inputs_tree(descriptors)
+        self._refresh_report_history()
+        self._update_report_controls()
+
+    def _start_report_job(self) -> None:
+        if self._report_running:
+            QMessageBox.information(self, "Report Generator", "A report generation run is already in progress.")
+            return
+        if not self._project_manager or not self._project_manager.project_dir:
+            QMessageBox.warning(self, "Report Generator", "No project is currently loaded.")
+            return
+
+        if not self._report_selected_inputs:
+            QMessageBox.warning(self, "Report Generator", "Select at least one input to include in the report.")
+            return
+
+        instructions = self._report_instructions_edit.toPlainText().strip() if self._report_instructions_edit else ""
+        if not instructions:
+            QMessageBox.warning(self, "Report Generator", "Refinement instructions cannot be empty.")
+            return
+
+        model_data = self._report_model_combo.currentData() if self._report_model_combo else None
+        provider_id = "anthropic"
+        model_id = "claude-sonnet-4-5-20250929"
+        custom_model = None
+        if model_data:
+            if model_data[0] == "custom":
+                custom_model = self._report_custom_model_edit.text().strip() if self._report_custom_model_edit else ""
+                if not custom_model:
+                    QMessageBox.warning(self, "Report Generator", "Enter a model id for the custom option.")
+                    return
+            else:
+                provider_id, model_id = model_data
+
+        context_window = None
+        if self._report_custom_context_spin and custom_model:
+            context_window = int(self._report_custom_context_spin.value())
+        elif self._report_custom_context_spin and not custom_model:
+            context_window = None
+
+        template_path = None
+        if self._report_template_edit:
+            text = self._report_template_edit.text().strip()
+            if text:
+                template_path = Path(text)
+
+        transcript_path = None
+        if self._report_transcript_edit:
+            text = self._report_transcript_edit.text().strip()
+            if text:
+                transcript_path = Path(text)
+
+        selected_pairs: List[tuple[str, str]] = []
+        for key in sorted(self._report_selected_inputs):
+            if ":" not in key:
+                continue
+            category, relative = key.split(":", 1)
+            selected_pairs.append((category, relative))
+
+        if not selected_pairs:
+            QMessageBox.warning(self, "Report Generator", "Unable to resolve selected inputs.")
+            return
+
+        project_dir = Path(self._project_manager.project_dir)
+        metadata = self._project_manager.metadata or ProjectMetadata(case_name=self._project_manager.project_name or "")
+
+        self._project_manager.update_report_preferences(
+            selected_inputs=sorted(self._report_selected_inputs),
+            provider_id=provider_id,
+            model=model_id,
+            custom_model=custom_model,
+            context_window=context_window,
+            template_path=str(template_path) if template_path else None,
+            transcript_path=str(transcript_path) if transcript_path else None,
+            instructions=instructions,
+        )
+
+        worker = ReportWorker(
+            project_dir=project_dir,
+            inputs=selected_pairs,
+            provider_id=provider_id,
+            model=model_id,
+            custom_model=custom_model,
+            context_window=context_window,
+            instructions=instructions,
+            template_path=template_path,
+            transcript_path=transcript_path,
+            metadata=metadata,
+        )
+
+        worker.progress.connect(self._on_report_progress)
+        worker.log_message.connect(self._append_report_log)
+        worker.finished.connect(lambda result, w=worker: self._on_report_finished(w, result))
+        worker.failed.connect(lambda message, w=worker: self._on_report_failed(w, message))
+
+        self._report_last_result = None
+        self._report_last_instructions_text = instructions
+        self._report_running = True
+        self._report_progress_bar.setValue(0)
+        if self._report_log:
+            self._report_log.clear()
+        self._update_report_controls()
+        self._update_report_history_buttons()
+        self._workers.start(self._report_key(), worker)
+
+    def _report_key(self) -> str:
+        return "report:run"
+
+    def _on_report_progress(self, percent: int, message: str) -> None:
+        if self._report_progress_bar:
+            self._report_progress_bar.setValue(percent)
+        self._append_report_log(message)
+
+    def _append_report_log(self, message: str) -> None:
+        if not self._report_log:
+            return
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self._report_log.append(f"[{timestamp}] {message}")
+
+    def _on_report_finished(self, worker: ReportWorker, result: Dict[str, object]) -> None:
+        stored = self._workers.pop(self._report_key())
+        if worker and isValid(worker):
+            worker.deleteLater()
+        if stored and stored is not worker and isValid(stored):
+            stored.deleteLater()
+
+        self._report_running = False
+        self._update_report_controls()
+
+        self._report_last_result = result
+        self._append_report_log("Report generation completed successfully.")
+        self._report_progress_bar.setValue(100)
+
+        if self._project_manager:
+            timestamp_str = str(result.get("timestamp"))
+            try:
+                timestamp = datetime.fromisoformat(timestamp_str)
+            except Exception:
+                timestamp = datetime.now(timezone.utc)
+            draft_path = Path(str(result.get("draft_path")))
+            refined_path = Path(str(result.get("refined_path")))
+            reasoning_path = Path(str(result.get("reasoning_path"))) if result.get("reasoning_path") else None
+            manifest_path = Path(str(result.get("manifest_path"))) if result.get("manifest_path") else None
+            inputs_path = Path(str(result.get("inputs_path"))) if result.get("inputs_path") else None
+            provider = str(result.get("provider", "anthropic"))
+            model = str(result.get("model", ""))
+            custom_model = result.get("custom_model")
+            context_window = result.get("context_window")
+            try:
+                context_window_int = int(context_window) if context_window is not None else None
+            except (ValueError, TypeError):
+                context_window_int = None
+            inputs = list(result.get("inputs", []))
+
+            instructions_snapshot = self._report_last_instructions_text or (
+                self._report_instructions_edit.toPlainText().strip() if self._report_instructions_edit else ""
+            )
+
+            self._project_manager.record_report_run(
+                timestamp=timestamp,
+                draft_path=draft_path,
+                refined_path=refined_path,
+                reasoning_path=reasoning_path,
+                manifest_path=manifest_path,
+                inputs_path=inputs_path,
+                provider=provider,
+                model=model,
+                custom_model=str(custom_model) if custom_model else None,
+                context_window=context_window_int,
+                inputs=inputs,
+                template_path=self._report_template_edit.text().strip() if self._report_template_edit else None,
+                transcript_path=self._report_transcript_edit.text().strip() if self._report_transcript_edit else None,
+                instructions=instructions_snapshot,
+            )
+
+        self._refresh_report_history()
+        self._update_report_history_buttons()
+
+    def _on_report_failed(self, worker: ReportWorker, message: str) -> None:
+        stored = self._workers.pop(self._report_key())
+        if worker and isValid(worker):
+            worker.deleteLater()
+        if stored and stored is not worker and isValid(stored):
+            stored.deleteLater()
+
+        self._report_running = False
+        self._update_report_controls()
+        self._update_report_history_buttons()
+
+        QMessageBox.critical(self, "Report Generator", message)
+        self._append_report_log(f"Error: {message}")
+
+    def _refresh_report_history(self) -> None:
+        if not self._report_history_list:
+            return
+        self._report_history_list.blockSignals(True)
+        self._report_history_list.clear()
+
+        if not self._project_manager:
+            self._report_history_list.blockSignals(False)
+            return
+
+        history = self._project_manager.report_state.history
+        for index, entry in enumerate(history):
+            try:
+                timestamp_display = datetime.fromisoformat(entry.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                timestamp_display = entry.timestamp
+            model_label = entry.custom_model or entry.model or ""
+            outputs_text = Path(entry.refined_path).name if entry.refined_path else Path(entry.draft_path).name
+            item = QTreeWidgetItem([timestamp_display, model_label, outputs_text])
+            item.setData(0, Qt.UserRole, index)
+            self._report_history_list.addTopLevelItem(item)
+
+        if history:
+            self._report_history_list.setCurrentItem(self._report_history_list.topLevelItem(0))
+
+        self._report_history_list.blockSignals(False)
+        self._update_report_history_buttons()
+
+    def _on_report_history_selected(self) -> None:
+        self._update_report_history_buttons()
+
+    def _update_report_history_buttons(self) -> None:
+        buttons = [
+            self._report_open_draft_button,
+            self._report_open_refined_button,
+            self._report_open_reasoning_button,
+            self._report_open_manifest_button,
+            self._report_open_inputs_button,
+        ]
+        for button in buttons:
+            if button:
+                button.setEnabled(False)
+
+        if not self._report_history_list or not self._project_manager:
+            return
+
+        item = self._report_history_list.currentItem()
+        if not item:
+            return
+
+        index = item.data(0, Qt.UserRole)
+        if index is None:
+            return
+        try:
+            entry = self._project_manager.report_state.history[int(index)]
+        except (ValueError, IndexError):
+            return
+
+        if self._report_open_draft_button and entry.draft_path:
+            self._report_open_draft_button.setEnabled(True)
+        if self._report_open_refined_button and entry.refined_path:
+            self._report_open_refined_button.setEnabled(True)
+        if self._report_open_reasoning_button and entry.reasoning_path:
+            self._report_open_reasoning_button.setEnabled(bool(entry.reasoning_path))
+        if self._report_open_manifest_button and entry.manifest_path:
+            self._report_open_manifest_button.setEnabled(True)
+        if self._report_open_inputs_button and entry.inputs_path:
+            self._report_open_inputs_button.setEnabled(True)
+
+    def _open_report_history_file(self, kind: str) -> None:
+        if not self._project_manager or not self._report_history_list:
+            return
+        item = self._report_history_list.currentItem()
+        if not item:
+            return
+        index = item.data(0, Qt.UserRole)
+        if index is None:
+            return
+        try:
+            entry = self._project_manager.report_state.history[int(index)]
+        except (ValueError, IndexError):
+            return
+
+        mapping = {
+            "draft": entry.draft_path,
+            "refined": entry.refined_path,
+            "reasoning": entry.reasoning_path,
+            "manifest": entry.manifest_path,
+            "inputs": entry.inputs_path,
+        }
+        target = mapping.get(kind)
+        if not target:
+            QMessageBox.information(self, "Report Files", "Requested file is not available.")
+            return
+        path = Path(target)
+        if not path.exists():
+            QMessageBox.warning(self, "Report Files", f"File not found: {path}")
+            return
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def _open_reports_folder(self) -> None:
+        if not self._project_manager or not self._project_manager.project_dir:
+            return
+        folder = Path(self._project_manager.project_dir) / "reports"
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def _load_report_preferences(self) -> None:
+        if not self._project_manager:
+            return
+        state = self._project_manager.report_state
+        self._report_selected_inputs = set(state.last_selected_inputs or [])
+
+        if self._report_model_combo:
+            if state.last_custom_model:
+                custom_index = self._report_model_combo.findData(("custom", ""))
+                if custom_index >= 0:
+                    self._report_model_combo.setCurrentIndex(custom_index)
+                if self._report_custom_model_edit:
+                    self._report_custom_model_edit.setText(state.last_custom_model)
+            else:
+                target = (state.last_provider or "anthropic", state.last_model or "claude-sonnet-4-5-20250929")
+                index = self._report_model_combo.findData(target)
+                if index >= 0:
+                    self._report_model_combo.setCurrentIndex(index)
+                else:
+                    self._report_model_combo.setCurrentIndex(1)
+
+        if self._report_custom_context_spin:
+            if state.last_context_window:
+                self._report_custom_context_spin.setValue(int(state.last_context_window))
+            else:
+                self._report_custom_context_spin.setValue(200_000)
+
+        if self._report_template_edit:
+            self._report_template_edit.setText(state.last_template or "")
+        if self._report_transcript_edit:
+            self._report_transcript_edit.setText(state.last_transcript or "")
+
+        default_instructions = self._get_default_report_instructions()
+        instructions_text = state.last_instructions or default_instructions
+        if self._report_instructions_edit:
+            self._report_instructions_edit.setPlainText(instructions_text)
+
+        self._on_report_model_changed()
+        self._update_report_controls()
+        self._update_report_history_buttons()
+
+
+
 
     def _refresh_summary_groups(self) -> None:
         if not self._feature_flags.summary_groups_enabled:

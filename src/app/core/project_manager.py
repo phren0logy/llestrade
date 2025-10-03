@@ -158,6 +158,149 @@ class DashboardState:
         return cls(**payload)
 
 
+@dataclass
+class HighlightState:
+    """Persisted information about highlight extraction runs."""
+
+    last_run_at: Optional[str] = None
+    documents_processed: int = 0
+    documents_with_highlights: int = 0
+    total_highlights: int = 0
+    color_files: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "HighlightState":
+        if not data:
+            return cls()
+        return cls(
+            last_run_at=data.get("last_run_at"),
+            documents_processed=int(data.get("documents_processed", 0) or 0),
+            documents_with_highlights=int(data.get("documents_with_highlights", 0) or 0),
+            total_highlights=int(data.get("total_highlights", 0) or 0),
+            color_files=int(data.get("color_files", 0) or 0),
+        )
+
+
+@dataclass
+class ReportHistoryEntry:
+    """Record of a generated report run."""
+
+    timestamp: str
+    draft_path: str
+    refined_path: str
+    reasoning_path: Optional[str] = None
+    manifest_path: Optional[str] = None
+    inputs_path: Optional[str] = None
+    provider: str = ""
+    model: str = ""
+    custom_model: Optional[str] = None
+    context_window: Optional[int] = None
+    inputs: List[str] = field(default_factory=list)
+    template_path: Optional[str] = None
+    transcript_path: Optional[str] = None
+    instructions: Optional[str] = None
+    draft_tokens: Optional[int] = None
+    refined_tokens: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload = asdict(self)
+        return payload
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ReportHistoryEntry":
+        if not data:
+            raise ValueError("ReportHistoryEntry data cannot be empty")
+        return cls(
+            timestamp=str(data.get("timestamp")),
+            draft_path=str(data.get("draft_path")),
+            refined_path=str(data.get("refined_path")),
+            reasoning_path=data.get("reasoning_path"),
+            manifest_path=data.get("manifest_path"),
+            inputs_path=data.get("inputs_path"),
+            provider=str(data.get("provider", "")),
+            model=str(data.get("model", "")),
+            custom_model=data.get("custom_model"),
+            context_window=(
+                int(data["context_window"])
+                if isinstance(data.get("context_window"), (int, float)) or str(data.get("context_window", "")).strip().isdigit()
+                else None
+            ),
+            inputs=list(data.get("inputs", [])),
+            template_path=data.get("template_path"),
+            transcript_path=data.get("transcript_path"),
+            instructions=data.get("instructions"),
+            draft_tokens=(
+                int(data["draft_tokens"])
+                if str(data.get("draft_tokens", "")).strip().isdigit()
+                else None
+            ),
+            refined_tokens=(
+                int(data["refined_tokens"])
+                if str(data.get("refined_tokens", "")).strip().isdigit()
+                else None
+            ),
+        )
+
+
+@dataclass
+class ReportState:
+    """Persisted preferences and history for report generation."""
+
+    last_selected_inputs: List[str] = field(default_factory=list)
+    last_provider: str = "anthropic"
+    last_model: str = "claude-sonnet-4-5-20250929"
+    last_custom_model: Optional[str] = None
+    last_context_window: Optional[int] = None
+    last_template: Optional[str] = None
+    last_transcript: Optional[str] = None
+    last_instructions: Optional[str] = None
+    history: List[ReportHistoryEntry] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "last_selected_inputs": list(self.last_selected_inputs),
+            "last_provider": self.last_provider,
+            "last_model": self.last_model,
+            "last_custom_model": self.last_custom_model,
+            "last_context_window": self.last_context_window,
+            "last_template": self.last_template,
+            "last_transcript": self.last_transcript,
+            "last_instructions": self.last_instructions,
+            "history": [entry.to_dict() for entry in self.history],
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ReportState":
+        if not data:
+            return cls()
+        history_payload = data.get("history", []) or []
+        history = []
+        for entry in history_payload:
+            try:
+                history.append(ReportHistoryEntry.from_dict(entry))
+            except Exception:
+                continue
+        state = cls(
+            last_selected_inputs=list(data.get("last_selected_inputs", [])),
+            last_provider=str(data.get("last_provider", "anthropic")),
+            last_model=str(data.get("last_model", "claude-sonnet-4-5-20250929")),
+            last_custom_model=data.get("last_custom_model"),
+            last_context_window=(
+                int(data["last_context_window"])
+                if str(data.get("last_context_window", "")).strip().isdigit()
+                else None
+            ),
+            last_template=data.get("last_template"),
+            last_transcript=data.get("last_transcript"),
+            last_instructions=data.get("last_instructions"),
+            history=history,
+        )
+        return state
+
+
 def _sanitize_project_folder(name: str) -> str:
     """Return a filesystem-friendly folder name derived from the project title."""
     if not name:
@@ -268,6 +411,10 @@ class ProjectManager(QObject):
         self.dashboard_metrics = DashboardMetrics.empty()
         self.workspace_metrics = None
         self.version_warning = None
+        self.highlight_state = HighlightState()
+        self.report_state = ReportState()
+        self.report_state = ReportState()
+        self.highlight_state = HighlightState()
         
         # Save initial project file
         self.save_project()
@@ -322,6 +469,8 @@ class ProjectManager(QObject):
             self.conversion_settings = ConversionSettings.from_dict(data.get("conversion", {}))
             self.dashboard_state = DashboardState.from_dict(data.get("dashboard_state", {}))
             self.dashboard_metrics = DashboardMetrics.from_dict(data.get("dashboard_metrics"))
+            self.highlight_state = HighlightState.from_dict(data.get("highlights", {}))
+            self.report_state = ReportState.from_dict(data.get("reports", {}))
             self.workspace_metrics = None
 
             # Update recent projects
@@ -371,6 +520,8 @@ class ProjectManager(QObject):
                 "conversion": self.conversion_settings.to_dict(),
                 "dashboard_state": self.dashboard_state.to_dict(),
                 "dashboard_metrics": self.dashboard_metrics.to_dict() if self.dashboard_metrics else None,
+                "highlights": self.highlight_state.to_dict(),
+                "reports": self.report_state.to_dict(),
             }
             
             # Write to temporary file first
@@ -682,6 +833,91 @@ class ProjectManager(QObject):
             if hasattr(self.dashboard_state, key):
                 setattr(self.dashboard_state, key, value)
         self.mark_modified()
+
+    def record_highlight_run(
+        self,
+        *,
+        generated_at: datetime,
+        documents_processed: int,
+        documents_with_highlights: int,
+        total_highlights: int,
+        color_files_written: int,
+    ) -> None:
+        """Persist details about the most recent highlight extraction."""
+
+        self.highlight_state.last_run_at = generated_at.isoformat()
+        self.highlight_state.documents_processed = documents_processed
+        self.highlight_state.documents_with_highlights = documents_with_highlights
+        self.highlight_state.total_highlights = total_highlights
+        self.highlight_state.color_files = color_files_written
+        self.mark_modified()
+
+    def update_report_preferences(
+        self,
+        *,
+        selected_inputs: List[str],
+        provider_id: str,
+        model: str,
+        custom_model: Optional[str],
+        context_window: Optional[int],
+        template_path: Optional[str],
+        transcript_path: Optional[str],
+        instructions: Optional[str],
+    ) -> None:
+        state = self.report_state
+        state.last_selected_inputs = list(selected_inputs)
+        state.last_provider = provider_id
+        state.last_model = model
+        state.last_custom_model = custom_model
+        state.last_context_window = context_window
+        state.last_template = template_path
+        state.last_transcript = transcript_path
+        state.last_instructions = instructions
+        self.mark_modified()
+
+    def record_report_run(
+        self,
+        *,
+        timestamp: datetime,
+        draft_path: Path,
+        refined_path: Path,
+        reasoning_path: Optional[Path],
+        manifest_path: Optional[Path],
+        inputs_path: Optional[Path],
+        provider: str,
+        model: str,
+        custom_model: Optional[str],
+        context_window: Optional[int],
+        inputs: List[str],
+        template_path: Optional[str],
+        transcript_path: Optional[str],
+        instructions: Optional[str],
+        draft_tokens: Optional[int] = None,
+        refined_tokens: Optional[int] = None,
+    ) -> None:
+        entry = ReportHistoryEntry(
+            timestamp=timestamp.isoformat(),
+            draft_path=str(draft_path),
+            refined_path=str(refined_path),
+            reasoning_path=str(reasoning_path) if reasoning_path else None,
+            manifest_path=str(manifest_path) if manifest_path else None,
+            inputs_path=str(inputs_path) if inputs_path else None,
+            provider=provider,
+            model=model,
+            custom_model=custom_model,
+            context_window=context_window,
+            inputs=list(inputs),
+            template_path=str(template_path) if template_path else None,
+            transcript_path=str(transcript_path) if transcript_path else None,
+            instructions=instructions,
+            draft_tokens=draft_tokens,
+            refined_tokens=refined_tokens,
+        )
+        state = self.report_state
+        state.history.insert(0, entry)
+        if len(state.history) > 10:
+            state.history = state.history[:10]
+        self.mark_modified()
     
     # File management
     def get_project_file(self, subdir: str, filename: str) -> Path:
@@ -721,6 +957,8 @@ class ProjectManager(QObject):
             'conversion': self.conversion_settings.to_dict(),
             'dashboard_state': self.dashboard_state.to_dict(),
             'dashboard_metrics': self.dashboard_metrics.to_dict() if self.dashboard_metrics else None,
+            'highlights': self.highlight_state.to_dict(),
+            'reports': self.report_state.to_dict(),
         }
     
     @property
