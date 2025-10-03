@@ -80,6 +80,12 @@ def app_prompts_root() -> Path:
     return p
 
 
+def app_templates_root() -> Path:
+    p = app_user_root() / "templates"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
 def app_logs_dir() -> Path:
     p = app_user_root() / "logs"
     p.mkdir(parents=True, exist_ok=True)
@@ -97,6 +103,7 @@ __all__ = [
     "app_user_root",
     "app_config_dir",
     "app_prompts_root",
+    "app_templates_root",
     "app_logs_dir",
     "app_crashes_dir",
 ]

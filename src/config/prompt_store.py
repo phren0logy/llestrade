@@ -19,11 +19,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-from .paths import app_prompts_root, app_user_root
+from .paths import app_prompts_root, app_templates_root
 
 
 def get_prompts_root() -> Path:
     return app_prompts_root()
+
+
+def get_templates_root() -> Path:
+    return app_templates_root()
 
 
 def get_bundled_dir() -> Path:
@@ -34,6 +38,18 @@ def get_bundled_dir() -> Path:
 
 def get_custom_dir() -> Path:
     path = get_prompts_root() / "custom"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_template_bundled_dir() -> Path:
+    path = get_templates_root() / "bundled"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_template_custom_dir() -> Path:
+    path = get_templates_root() / "custom"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -60,6 +76,21 @@ def get_repo_prompts_dir() -> Path:
     return candidates[1]
 
 
+def get_repo_templates_dir() -> Path:
+    """Return the path to templates bundled with the application source tree."""
+
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parents[1] / "app" / "resources" / "templates",
+        here.parents[2] / "src" / "app" / "resources" / "templates",
+        here.parents[2] / "app" / "resources" / "templates",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[1]
+
+
 def _hash_file(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as f:
@@ -78,12 +109,12 @@ def _collect_md_files(folder: Path) -> Dict[str, Path]:
     return files
 
 
-def _manifest_path() -> Path:
-    return get_bundled_dir() / ".manifest.json"
+def _manifest_path(bundled_dir: Path) -> Path:
+    return bundled_dir / ".manifest.json"
 
 
-def load_manifest() -> dict:
-    path = _manifest_path()
+def _load_manifest(bundled_dir: Path) -> dict:
+    path = _manifest_path(bundled_dir)
     if not path.exists():
         return {}
     try:
@@ -92,9 +123,25 @@ def load_manifest() -> dict:
         return {}
 
 
-def save_manifest(payload: dict) -> None:
-    path = _manifest_path()
+def _save_manifest(bundled_dir: Path, payload: dict) -> None:
+    path = _manifest_path(bundled_dir)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def load_manifest() -> dict:
+    return _load_manifest(get_bundled_dir())
+
+
+def save_manifest(payload: dict) -> None:
+    _save_manifest(get_bundled_dir(), payload)
+
+
+def load_template_manifest() -> dict:
+    return _load_manifest(get_template_bundled_dir())
+
+
+def save_template_manifest(payload: dict) -> None:
+    _save_manifest(get_template_bundled_dir(), payload)
 
 
 def compute_repo_digest(repo_dir: Path) -> dict:
@@ -111,21 +158,13 @@ def compute_repo_digest(repo_dir: Path) -> dict:
     }
 
 
-def sync_bundled_prompts(*, force: bool = False) -> dict:
-    """Sync bundled prompts from the app resources into the user store.
-
-    - Copies new files
-    - Updates changed files when force=True; otherwise leaves existing as-is
-    - Never touches custom/ directory
-
-    Returns a summary dict with keys: copied, updated, skipped, same
-    """
-    repo_dir = get_repo_prompts_dir()
-    bundled_dir = get_bundled_dir()
+def _sync_resource(repo_dir: Path, bundled_dir: Path, *, force: bool) -> dict:
     repo_files = _collect_md_files(repo_dir)
-    bundled_files = _collect_md_files(bundled_dir)
 
-    manifest = load_manifest()
+    # ensure directories exist even if empty
+    bundled_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = _load_manifest(bundled_dir)
     repo_digest = compute_repo_digest(repo_dir)
 
     copied: List[str] = []
@@ -145,20 +184,23 @@ def sync_bundled_prompts(*, force: bool = False) -> dict:
             same.append(name)
         else:
             if force:
-                # Overwrite only the managed bundled copy
                 dst.write_bytes(src.read_bytes())
                 updated.append(name)
             else:
                 skipped.append(name)
 
-    save_manifest({
-        "synced_at": datetime.now(timezone.utc).isoformat(),
-        "repo_digest": repo_digest,
-        "copied": copied,
-        "updated": updated,
-        "skipped": skipped,
-        "same": same,
-    })
+    _save_manifest(
+        bundled_dir,
+        {
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+            "repo_digest": repo_digest,
+            "copied": copied,
+            "updated": updated,
+            "skipped": skipped,
+            "same": same,
+            "previous_manifest": manifest,
+        },
+    )
 
     return {
         "copied": copied,
@@ -168,12 +210,31 @@ def sync_bundled_prompts(*, force: bool = False) -> dict:
     }
 
 
+def sync_bundled_prompts(*, force: bool = False) -> dict:
+    """Sync bundled prompts from the app resources into the user store."""
+
+    return _sync_resource(get_repo_prompts_dir(), get_bundled_dir(), force=force)
+
+
+def sync_bundled_templates(*, force: bool = False) -> dict:
+    """Sync bundled templates from the app resources into the user store."""
+
+    return _sync_resource(get_repo_templates_dir(), get_template_bundled_dir(), force=force)
+
+
 __all__ = [
     "get_prompts_root",
+    "get_templates_root",
     "get_bundled_dir",
     "get_custom_dir",
+    "get_template_bundled_dir",
+    "get_template_custom_dir",
     "get_repo_prompts_dir",
+    "get_repo_templates_dir",
     "sync_bundled_prompts",
+    "sync_bundled_templates",
     "load_manifest",
     "save_manifest",
+    "load_template_manifest",
+    "save_template_manifest",
 ]

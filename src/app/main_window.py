@@ -37,9 +37,12 @@ from src.app.ui.dialogs import NewProjectDialog
 from src.app.ui.stages.welcome_stage import WelcomeStage
 from src.config.prompt_store import (
     load_manifest as load_prompt_manifest,
+    load_template_manifest,
     compute_repo_digest,
     sync_bundled_prompts,
+    sync_bundled_templates,
     get_repo_prompts_dir,
+    get_repo_templates_dir,
 )
 
 
@@ -154,7 +157,7 @@ class SimplifiedMainWindow(QMainWindow):
 
         # Offer prompt sync on initial setup or when bundled prompts changed
         try:
-            self._maybe_offer_prompt_sync()
+            self._maybe_offer_resource_sync()
         except Exception as exc:
             self.logger.debug("Prompt sync check failed: %s", exc)
 
@@ -168,32 +171,64 @@ class SimplifiedMainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Prompt sync offer
     # ------------------------------------------------------------------
-    def _maybe_offer_prompt_sync(self) -> None:
-        manifest = load_prompt_manifest() or {}
-        previous = (manifest.get("repo_digest") or {}).get("digest")
-        current = compute_repo_digest(get_repo_prompts_dir()).get("digest")
-        if previous == current:
+    def _maybe_offer_resource_sync(self) -> None:
+        prompt_manifest = load_prompt_manifest() or {}
+        prompt_previous = (prompt_manifest.get("repo_digest") or {}).get("digest")
+        prompt_current = compute_repo_digest(get_repo_prompts_dir()).get("digest")
+        prompt_changed = prompt_previous != prompt_current
+
+        template_manifest = load_template_manifest() or {}
+        template_previous = (template_manifest.get("repo_digest") or {}).get("digest")
+        template_current = compute_repo_digest(get_repo_templates_dir()).get("digest")
+        template_changed = template_previous != template_current
+
+        if not prompt_changed and not template_changed:
             return
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("Update Bundled Prompts")
+        dialog.setWindowTitle("Update Bundled Resources")
         v = QVBoxLayout(dialog)
-        label = QLabel(
-            "Bundled prompt templates have changed.\n\n"
-            "You can sync the updated templates into your prompts folder. "
-            "Your custom prompts will not be modified."
-        )
+        if prompt_changed and template_changed:
+            text = (
+                "Bundled prompts and templates have changed.\n\n"
+                "You can sync the updated resources into your local folders. "
+                "Custom files will not be modified."
+            )
+        elif prompt_changed:
+            text = (
+                "Bundled prompts have changed.\n\n"
+                "You can sync the updated prompts into your prompts folder. "
+                "Your custom prompts will not be modified."
+            )
+        else:
+            text = (
+                "Bundled templates have changed.\n\n"
+                "You can sync the updated templates into your templates folder. "
+                "Your custom templates will not be modified."
+            )
+        label = QLabel(text)
         label.setWordWrap(True)
         v.addWidget(label)
 
         buttons = QDialogButtonBox()
-        sync_btn = buttons.addButton("Sync Bundled Prompts", QDialogButtonBox.AcceptRole)
+        sync_prompts_btn = None
+        sync_templates_btn = None
+        if prompt_changed:
+            sync_prompts_btn = buttons.addButton(
+                "Sync Bundled Prompts", QDialogButtonBox.ActionRole
+            )
+        if template_changed:
+            sync_templates_btn = buttons.addButton(
+                "Sync Bundled Templates", QDialogButtonBox.ActionRole
+            )
         later_btn = buttons.addButton("Later", QDialogButtonBox.RejectRole)
-        settings_btn = buttons.addButton("Open Prompts Settings", QDialogButtonBox.HelpRole)
+        settings_btn = buttons.addButton(
+            "Open Prompts & Templates Settings", QDialogButtonBox.HelpRole
+        )
         v.addWidget(buttons)
 
         def _on_clicked(btn):
-            if btn == sync_btn:
+            if btn == sync_prompts_btn:
                 try:
                     result = sync_bundled_prompts(force=False)
                     copied = len(result.get("copied", []))
@@ -206,7 +241,21 @@ class SimplifiedMainWindow(QMainWindow):
                     )
                 except Exception as exc:
                     QMessageBox.warning(self, "Prompt Sync Failed", str(exc))
-                dialog.accept()
+                btn.setEnabled(False)
+            elif btn == sync_templates_btn:
+                try:
+                    result = sync_bundled_templates(force=False)
+                    copied = len(result.get("copied", []))
+                    updated = len(result.get("updated", []))
+                    skipped = len(result.get("skipped", []))
+                    same = len(result.get("same", []))
+                    self.statusBar().showMessage(
+                        f"Templates synced (copied={copied}, updated={updated}, skipped={skipped}, unchanged={same})",
+                        5000,
+                    )
+                except Exception as exc:
+                    QMessageBox.warning(self, "Template Sync Failed", str(exc))
+                btn.setEnabled(False)
             elif btn == settings_btn:
                 dialog.accept()
                 self._open_settings()

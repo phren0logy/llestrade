@@ -67,7 +67,7 @@ from src.app.workers import (
     WorkerCoordinator,
     get_worker_pool,
 )
-from src.config.prompt_store import get_custom_dir
+from src.config.prompt_store import get_template_custom_dir
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 
 LOGGER = logging.getLogger(__name__)
@@ -1316,7 +1316,7 @@ class ProjectWorkspace(QWidget):
     def _browse_report_template(self) -> None:
         initial = None
         try:
-            initial = get_custom_dir()
+            initial = get_template_custom_dir()
         except Exception:
             if self._project_manager and self._project_manager.project_dir:
                 initial = self._project_manager.project_dir

@@ -15,7 +15,14 @@ from PySide6.QtCore import Qt, Signal, QUrl
 from PySide6.QtGui import QIcon, QDesktopServices
 
 from src.app.core import SecureSettings
-from src.config.prompt_store import get_bundled_dir, get_custom_dir, sync_bundled_prompts
+from src.config.prompt_store import (
+    get_bundled_dir,
+    get_custom_dir,
+    get_template_bundled_dir,
+    get_template_custom_dir,
+    sync_bundled_prompts,
+    sync_bundled_templates,
+)
 
 
 class SettingsDialog(QDialog):
@@ -52,8 +59,8 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(api_tab, "API Keys")
 
         # Prompts tab
-        prompts_tab = self._create_prompts_tab()
-        self.tab_widget.addTab(prompts_tab, "Prompts")
+        resources_tab = self._create_prompts_templates_tab()
+        self.tab_widget.addTab(resources_tab, "Prompts & Templates")
         
         layout.addWidget(self.tab_widget)
         
@@ -67,63 +74,113 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
         
         
-    def _create_prompts_tab(self) -> QWidget:
-        """Create the Prompts tab for managing bundled and custom prompt files."""
+    def _create_prompts_templates_tab(self) -> QWidget:
+        """Create the Prompts & Templates tab for managing shared resources."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
         info = QLabel(
-            "Prompts are stored outside the application bundle so you can edit them "
-            "with your preferred editor and keep custom files. Bundled prompts can be "
-            "updated on app updates without changing your custom prompts."
+            "Prompts and templates are stored outside the application bundle so you can "
+            "edit them with your preferred tools. Bundled copies can be refreshed after "
+            "updates without touching anything in your custom folders."
         )
         info.setWordWrap(True)
         info.setStyleSheet("color: #555;")
         layout.addWidget(info)
 
-        paths_group = QGroupBox("Prompt Folders")
-        paths_form = QFormLayout(paths_group)
+        # Prompt folders
+        prompt_paths_group = QGroupBox("Prompt Folders")
+        prompt_paths_form = QFormLayout(prompt_paths_group)
 
-        self.custom_dir = str(get_custom_dir())
-        self.bundled_dir = str(get_bundled_dir())
+        prompt_custom_dir = str(get_custom_dir())
+        prompt_bundled_dir = str(get_bundled_dir())
 
-        # Custom folder row
-        custom_row = QHBoxLayout()
-        self.custom_dir_edit = QLineEdit(self.custom_dir)
-        self.custom_dir_edit.setReadOnly(True)
-        open_custom_btn = QPushButton("Open Folder…")
-        open_custom_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.custom_dir)))
-        custom_row.addWidget(self.custom_dir_edit)
-        custom_row.addWidget(open_custom_btn)
-        paths_form.addRow("Custom prompts:", custom_row)
+        prompt_custom_row = QHBoxLayout()
+        prompt_custom_edit = QLineEdit(prompt_custom_dir)
+        prompt_custom_edit.setReadOnly(True)
+        prompt_open_custom_btn = QPushButton("Open Folder…")
+        prompt_open_custom_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(prompt_custom_dir))
+        )
+        prompt_custom_row.addWidget(prompt_custom_edit)
+        prompt_custom_row.addWidget(prompt_open_custom_btn)
+        prompt_paths_form.addRow("Custom prompts:", prompt_custom_row)
 
-        # Bundled folder row
-        bundled_row = QHBoxLayout()
-        self.bundled_dir_edit = QLineEdit(self.bundled_dir)
-        self.bundled_dir_edit.setReadOnly(True)
-        open_bundled_btn = QPushButton("Open Folder…")
-        open_bundled_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.bundled_dir)))
-        bundled_row.addWidget(self.bundled_dir_edit)
-        bundled_row.addWidget(open_bundled_btn)
-        paths_form.addRow("Bundled prompts:", bundled_row)
+        prompt_bundled_row = QHBoxLayout()
+        prompt_bundled_edit = QLineEdit(prompt_bundled_dir)
+        prompt_bundled_edit.setReadOnly(True)
+        prompt_open_bundled_btn = QPushButton("Open Folder…")
+        prompt_open_bundled_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(prompt_bundled_dir))
+        )
+        prompt_bundled_row.addWidget(prompt_bundled_edit)
+        prompt_bundled_row.addWidget(prompt_open_bundled_btn)
+        prompt_paths_form.addRow("Bundled prompts:", prompt_bundled_row)
 
-        layout.addWidget(paths_group)
+        layout.addWidget(prompt_paths_group)
 
-        # Sync controls
-        sync_group = QGroupBox("Update Bundled Prompts")
-        sync_layout = QVBoxLayout(sync_group)
-        sync_row = QHBoxLayout()
-        self.sync_btn = QPushButton("Sync (non-destructive)")
-        self.sync_btn.clicked.connect(self._sync_prompts)
-        self.sync_force_btn = QPushButton("Force Update (overwrite bundled)")
-        self.sync_force_btn.clicked.connect(lambda: self._sync_prompts(force=True))
-        sync_row.addWidget(self.sync_btn)
-        sync_row.addWidget(self.sync_force_btn)
-        sync_layout.addLayout(sync_row)
-        self.sync_result_label = QLabel("")
-        self.sync_result_label.setStyleSheet("color: #666;")
-        sync_layout.addWidget(self.sync_result_label)
-        layout.addWidget(sync_group)
+        # Template folders
+        template_paths_group = QGroupBox("Template Folders")
+        template_paths_form = QFormLayout(template_paths_group)
+
+        template_custom_dir = str(get_template_custom_dir())
+        template_bundled_dir = str(get_template_bundled_dir())
+
+        template_custom_row = QHBoxLayout()
+        template_custom_edit = QLineEdit(template_custom_dir)
+        template_custom_edit.setReadOnly(True)
+        template_open_custom_btn = QPushButton("Open Folder…")
+        template_open_custom_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(template_custom_dir))
+        )
+        template_custom_row.addWidget(template_custom_edit)
+        template_custom_row.addWidget(template_open_custom_btn)
+        template_paths_form.addRow("Custom templates:", template_custom_row)
+
+        template_bundled_row = QHBoxLayout()
+        template_bundled_edit = QLineEdit(template_bundled_dir)
+        template_bundled_edit.setReadOnly(True)
+        template_open_bundled_btn = QPushButton("Open Folder…")
+        template_open_bundled_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(template_bundled_dir))
+        )
+        template_bundled_row.addWidget(template_bundled_edit)
+        template_bundled_row.addWidget(template_open_bundled_btn)
+        template_paths_form.addRow("Bundled templates:", template_bundled_row)
+
+        layout.addWidget(template_paths_group)
+
+        # Prompt sync controls
+        prompt_sync_group = QGroupBox("Update Bundled Prompts")
+        prompt_sync_layout = QVBoxLayout(prompt_sync_group)
+        prompt_sync_row = QHBoxLayout()
+        prompt_sync_btn = QPushButton("Sync (non-destructive)")
+        prompt_sync_btn.clicked.connect(self._sync_prompts)
+        prompt_sync_force_btn = QPushButton("Force Update (overwrite bundled)")
+        prompt_sync_force_btn.clicked.connect(lambda: self._sync_prompts(force=True))
+        prompt_sync_row.addWidget(prompt_sync_btn)
+        prompt_sync_row.addWidget(prompt_sync_force_btn)
+        prompt_sync_layout.addLayout(prompt_sync_row)
+        self.prompt_sync_result_label = QLabel("")
+        self.prompt_sync_result_label.setStyleSheet("color: #666;")
+        prompt_sync_layout.addWidget(self.prompt_sync_result_label)
+        layout.addWidget(prompt_sync_group)
+
+        # Template sync controls
+        template_sync_group = QGroupBox("Update Bundled Templates")
+        template_sync_layout = QVBoxLayout(template_sync_group)
+        template_sync_row = QHBoxLayout()
+        template_sync_btn = QPushButton("Sync (non-destructive)")
+        template_sync_btn.clicked.connect(self._sync_templates)
+        template_sync_force_btn = QPushButton("Force Update (overwrite bundled)")
+        template_sync_force_btn.clicked.connect(lambda: self._sync_templates(force=True))
+        template_sync_row.addWidget(template_sync_btn)
+        template_sync_row.addWidget(template_sync_force_btn)
+        template_sync_layout.addLayout(template_sync_row)
+        self.template_sync_result_label = QLabel("")
+        self.template_sync_result_label.setStyleSheet("color: #666;")
+        template_sync_layout.addWidget(self.template_sync_result_label)
+        layout.addWidget(template_sync_group)
 
         layout.addStretch()
         return widget
@@ -139,11 +196,28 @@ class SettingsDialog(QDialog):
             summary = (
                 f"Copied: {copied}  •  Updated: {updated}  •  Skipped: {skipped}  •  Unchanged: {same}"
             )
-            self.sync_result_label.setText(summary)
+            self.prompt_sync_result_label.setText(summary)
             self.logger.info("Prompt sync completed: %s", summary)
         except Exception as exc:
-            self.sync_result_label.setText(f"Sync failed: {exc}")
+            self.prompt_sync_result_label.setText(f"Sync failed: {exc}")
             self.logger.exception("Prompt sync failed")
+
+    def _sync_templates(self, force: bool = False) -> None:
+        """Run the bundled template sync and display a summary."""
+        try:
+            result = sync_bundled_templates(force=force)
+            copied = len(result.get("copied", []))
+            updated = len(result.get("updated", []))
+            skipped = len(result.get("skipped", []))
+            same = len(result.get("same", []))
+            summary = (
+                f"Copied: {copied}  •  Updated: {updated}  •  Skipped: {skipped}  •  Unchanged: {same}"
+            )
+            self.template_sync_result_label.setText(summary)
+            self.logger.info("Template sync completed: %s", summary)
+        except Exception as exc:
+            self.template_sync_result_label.setText(f"Sync failed: {exc}")
+            self.logger.exception("Template sync failed")
 
     def _create_defaults_tab(self) -> QWidget:
         """Create the defaults tab."""
