@@ -329,6 +329,7 @@ class WorkspaceGroupMetrics:
     converted_count: int
     bulk_analysis_total: int
     pending_bulk_analysis: int
+    pending_files: tuple[str, ...]
     # Operation type and combined-operation metrics
     operation: str = "per_document"
     combined_input_count: int = 0
@@ -345,6 +346,7 @@ class WorkspaceGroupMetrics:
             "converted_count": self.converted_count,
             "bulk_analysis_total": self.bulk_analysis_total,
             "pending_bulk_analysis": self.pending_bulk_analysis,
+            "pending_files": list(self.pending_files),
             "operation": self.operation,
             "combined_input_count": self.combined_input_count,
             "combined_latest_path": self.combined_latest_path,
@@ -424,6 +426,7 @@ def build_workspace_metrics(
         bulk_subset = {path for path in converted_subset if path in group_outputs}
 
         pending_bulk = len(converted_subset) - len(bulk_subset)
+        pending_files = tuple(sorted(converted_subset - bulk_subset))
 
         # Defaults for combined fields
         op_type = getattr(group, "operation", "per_document") or "per_document"
@@ -446,6 +449,7 @@ def build_workspace_metrics(
             converted_count=len(converted_subset),
             bulk_analysis_total=len(bulk_subset),
             pending_bulk_analysis=max(pending_bulk, 0),
+            pending_files=pending_files,
             operation=op_type,
             combined_input_count=combined_input_count,
             combined_latest_path=combined_latest_path,

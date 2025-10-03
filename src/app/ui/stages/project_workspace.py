@@ -65,6 +65,25 @@ from src.config.prompt_store import get_custom_dir
 
 LOGGER = logging.getLogger(__name__)
 
+def _qt_flag(*names: str):
+    """Return the first matching Qt ItemFlag for backwards compatibility."""
+
+    item_flag_container = getattr(Qt, "ItemFlag", None)
+    for name in names:
+        if item_flag_container is not None and hasattr(item_flag_container, name):
+            return getattr(item_flag_container, name)
+        if hasattr(Qt, name):
+            return getattr(Qt, name)
+    # Fallback to zero-value flag
+    if item_flag_container is not None:
+        return item_flag_container(0)
+    return 0
+
+
+_ITEM_IS_USER_CHECKABLE = _qt_flag("ItemIsUserCheckable")
+_ITEM_IS_TRISTATE = _qt_flag("ItemIsTristate", "ItemIsAutoTristate")
+_ITEM_IS_ENABLED = _qt_flag("ItemIsEnabled")
+
 
 class ProjectWorkspace(QWidget):
     """Dashboard workspace showing documents and bulk analysis groups."""
@@ -149,11 +168,11 @@ class ProjectWorkspace(QWidget):
         self._tabs.addTab(self._documents_tab, "Documents")
         self._highlights_tab = self._build_highlights_tab()
         self._tabs.addTab(self._highlights_tab, "Highlights")
-        self._reports_tab = self._build_reports_tab()
-        self._tabs.addTab(self._reports_tab, "Reports")
         if self._feature_flags.summary_groups_enabled:
             self._summary_tab = self._build_summary_groups_tab()
             self._tabs.addTab(self._summary_tab, "Bulk Analysis")
+        self._reports_tab = self._build_reports_tab()
+        self._tabs.addTab(self._reports_tab, "Reports")
         layout.addWidget(self._project_path_label)
         metadata_row = QHBoxLayout()
         metadata_row.setContentsMargins(0, 0, 0, 0)
@@ -1393,13 +1412,13 @@ class ProjectWorkspace(QWidget):
             if not entries:
                 continue
             parent = QTreeWidgetItem([label, ""])
-            parent.setFlags(parent.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsTristate)
+            parent.setFlags(parent.flags() | _ITEM_IS_USER_CHECKABLE | _ITEM_IS_TRISTATE)
             parent.setCheckState(0, Qt.Unchecked)
             tree.addTopLevelItem(parent)
 
             for descriptor in entries:
                 child = QTreeWidgetItem([descriptor.label, descriptor.relative_path])
-                child.setFlags(child.flags() | Qt.ItemIsUserCheckable)
+                child.setFlags(child.flags() | _ITEM_IS_USER_CHECKABLE)
                 key = descriptor.key()
                 child.setData(0, Qt.UserRole, key)
                 state = Qt.Checked if key in self._report_selected_inputs else Qt.Unchecked
@@ -2035,7 +2054,28 @@ class ProjectWorkspace(QWidget):
         if self._workspace_metrics:
             group_metrics = self._workspace_metrics.groups.get(group.group_id)
 
-        files = sorted(group_metrics.converted_files) if group_metrics else []
+        files: List[str] = []
+        if group_metrics:
+            pending = list(group_metrics.pending_files)
+            if pending:
+                files = pending
+            else:
+                # Everything already processed; ask whether to re-run
+                rerun = QMessageBox.question(
+                    self,
+                    "Bulk Analysis",
+                    (
+                        "All documents in this group already have bulk analysis results.\n\n"
+                        "Do you want to re-process all documents and overwrite existing outputs?"
+                    ),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if rerun == QMessageBox.Yes:
+                    files = list(group_metrics.converted_files)
+                else:
+                    return
+
         if not files:
             QMessageBox.warning(
                 self,
