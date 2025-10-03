@@ -203,6 +203,8 @@ class ReportHistoryEntry:
     transcript_path: Optional[str] = None
     instructions: Optional[str] = None
     refinement_prompt: Optional[str] = None
+    generation_system_prompt: Optional[str] = None
+    refinement_system_prompt: Optional[str] = None
     draft_tokens: Optional[int] = None
     refined_tokens: Optional[int] = None
 
@@ -234,6 +236,8 @@ class ReportHistoryEntry:
             transcript_path=data.get("transcript_path"),
             instructions=data.get("instructions"),
             refinement_prompt=data.get("refinement_prompt"),
+            generation_system_prompt=data.get("generation_system_prompt"),
+            refinement_system_prompt=data.get("refinement_system_prompt"),
             draft_tokens=(
                 int(data["draft_tokens"])
                 if str(data.get("draft_tokens", "")).strip().isdigit()
@@ -259,6 +263,8 @@ class ReportState:
     last_template: Optional[str] = None
     last_transcript: Optional[str] = None
     last_refinement_prompt: Optional[str] = None
+    last_generation_system_prompt: Optional[str] = None
+    last_refinement_system_prompt: Optional[str] = None
     history: List[ReportHistoryEntry] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -271,6 +277,8 @@ class ReportState:
             "last_template": self.last_template,
             "last_transcript": self.last_transcript,
             "last_refinement_prompt": self.last_refinement_prompt,
+            "last_generation_system_prompt": self.last_generation_system_prompt,
+            "last_refinement_system_prompt": self.last_refinement_system_prompt,
             "history": [entry.to_dict() for entry in self.history],
         }
 
@@ -298,6 +306,8 @@ class ReportState:
             last_template=data.get("last_template"),
             last_transcript=data.get("last_transcript"),
             last_refinement_prompt=data.get("last_refinement_prompt"),
+            last_generation_system_prompt=data.get("last_generation_system_prompt"),
+            last_refinement_system_prompt=data.get("last_refinement_system_prompt"),
             history=history,
         )
         return state
@@ -865,6 +875,8 @@ class ProjectManager(QObject):
         template_path: Optional[str],
         transcript_path: Optional[str],
         refinement_prompt: Optional[str],
+        generation_system_prompt: Optional[str],
+        refinement_system_prompt: Optional[str],
     ) -> None:
         state = self.report_state
         state.last_selected_inputs = list(selected_inputs)
@@ -875,6 +887,8 @@ class ProjectManager(QObject):
         state.last_template = template_path
         state.last_transcript = transcript_path
         state.last_refinement_prompt = refinement_prompt
+        state.last_generation_system_prompt = generation_system_prompt
+        state.last_refinement_system_prompt = refinement_system_prompt
         self.mark_modified()
 
     def record_report_run(
@@ -895,6 +909,8 @@ class ProjectManager(QObject):
         transcript_path: Optional[str],
         instructions: Optional[str],
         refinement_prompt: Optional[str],
+        generation_system_prompt: Optional[str],
+        refinement_system_prompt: Optional[str],
         draft_tokens: Optional[int] = None,
         refined_tokens: Optional[int] = None,
     ) -> None:
@@ -914,6 +930,8 @@ class ProjectManager(QObject):
             transcript_path=str(transcript_path) if transcript_path else None,
             instructions=instructions,
             refinement_prompt=refinement_prompt,
+            generation_system_prompt=generation_system_prompt,
+            refinement_system_prompt=refinement_system_prompt,
             draft_tokens=draft_tokens,
             refined_tokens=refined_tokens,
         )

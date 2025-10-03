@@ -19,7 +19,7 @@ from src.app.core.report_inputs import (
     category_display_name,
 )
 from src.app.core.prompt_manager import PromptManager
-from src.app.core.refinement_prompt import load_refinement_prompt
+from src.app.core.refinement_prompt import read_refinement_prompt, validate_refinement_prompt
 from src.app.core.report_template_sections import (
     TemplateSection,
     load_template_sections,
@@ -50,6 +50,8 @@ class ReportWorker(DashboardWorker):
         template_path: Optional[Path],
         transcript_path: Optional[Path],
         refinement_prompt_path: Path,
+        generation_system_prompt_path: Path,
+        refinement_system_prompt_path: Path,
         metadata: ProjectMetadata,
         max_report_tokens: int = 60_000,
     ) -> None:
@@ -63,6 +65,8 @@ class ReportWorker(DashboardWorker):
         self._template_path = Path(template_path) if template_path else None
         self._transcript_path = Path(transcript_path) if transcript_path else None
         self._refinement_prompt_path = Path(refinement_prompt_path).expanduser()
+        self._generation_system_prompt_path = Path(generation_system_prompt_path).expanduser()
+        self._refinement_system_prompt_path = Path(refinement_system_prompt_path).expanduser()
         self._instructions: str = ""
         self._metadata = metadata
         self._max_report_tokens = max_report_tokens
@@ -79,6 +83,14 @@ class ReportWorker(DashboardWorker):
                 raise FileNotFoundError(f"Report template not found: {self._template_path}")
             if not self._refinement_prompt_path.exists():
                 raise FileNotFoundError(f"Refinement prompt not found: {self._refinement_prompt_path}")
+            if not self._generation_system_prompt_path.exists():
+                raise FileNotFoundError(
+                    f"Generation system prompt not found: {self._generation_system_prompt_path}"
+                )
+            if not self._refinement_system_prompt_path.exists():
+                raise FileNotFoundError(
+                    f"Refinement system prompt not found: {self._refinement_system_prompt_path}"
+                )
             if not self._inputs and not self._transcript_path:
                 raise RuntimeError(
                     "Select at least one input or provide a transcript before generating a report"
@@ -106,18 +118,22 @@ class ReportWorker(DashboardWorker):
             self.log_message.emit(f"Combined inputs written to {inputs_path.name}.")
 
             prompt_manager = PromptManager()
-            instructions_text, refinement_template = load_refinement_prompt(
-                self._refinement_prompt_path
-            )
-            self._instructions = instructions_text.strip()
-            refinement_template = refinement_template.strip()
-            if not self._instructions:
+            refinement_template = read_refinement_prompt(self._refinement_prompt_path)
+            validate_refinement_prompt(refinement_template)
+            self._instructions = refinement_template
+            generation_system_prompt = self._generation_system_prompt_path.read_text(
+                encoding="utf-8"
+            ).strip()
+            refinement_system_prompt = self._refinement_system_prompt_path.read_text(
+                encoding="utf-8"
+            ).strip()
+            if not generation_system_prompt:
                 raise RuntimeError(
-                    "Refinement instructions cannot be empty. Update the refinement prompt file."
+                    "Generation system prompt cannot be empty. Update the selected file."
                 )
-            if not refinement_template.strip():
+            if not refinement_system_prompt:
                 raise RuntimeError(
-                    "Refinement prompt template cannot be empty. Update the refinement prompt file."
+                    "Refinement system prompt cannot be empty. Update the selected file."
                 )
 
             sections = load_template_sections(self._template_path)
@@ -143,6 +159,7 @@ class ReportWorker(DashboardWorker):
                 instructions=section_instructions,
                 document_content=combined_content.strip(),
                 transcript_text=transcript_text,
+                system_prompt=generation_system_prompt,
             )
 
             draft_content = self._combine_section_outputs(section_outputs)
@@ -157,6 +174,7 @@ class ReportWorker(DashboardWorker):
             refined_content, reasoning_content = self._run_refinement(
                 refinement_template=refinement_template,
                 draft_content=draft_content,
+                system_prompt=refinement_system_prompt,
             )
             refined_path.write_text(refined_content, encoding="utf-8")
             self.log_message.emit(f"Refined report saved to {refined_path.name}.")
@@ -193,6 +211,8 @@ class ReportWorker(DashboardWorker):
                 "context_window": self._context_window,
                 "inputs": [item[1] for item in self._inputs],
                 "refinement_prompt": str(self._refinement_prompt_path),
+                "generation_system_prompt": str(self._generation_system_prompt_path),
+                "refinement_system_prompt": str(self._refinement_system_prompt_path),
                 "instructions": self._instructions,
             }
             self.progress.emit(100, "Report generated")
@@ -252,8 +272,8 @@ class ReportWorker(DashboardWorker):
         instructions: str,
         document_content: str,
         transcript_text: str,
+        system_prompt: str,
     ) -> List[dict]:
-        system_prompt = PromptManager().get_system_prompt()
         provider = self._create_provider(system_prompt)
         outputs: List[dict] = []
 
@@ -375,31 +395,23 @@ class ReportWorker(DashboardWorker):
         *,
         refinement_template: str,
         draft_content: str,
+        system_prompt: str,
     ) -> tuple[str, Optional[str]]:
         template_raw = ""
-        template_section = ""
         if self._template_path and self._template_path.exists():
             template_raw = self._template_path.read_text(encoding="utf-8")
-            template_section = f"<template>\n{template_raw}\n</template>"
         transcript_raw = ""
-        transcript_section = ""
         if self._transcript_path and self._transcript_path.exists():
             transcript_raw = self._transcript_path.read_text(encoding="utf-8")
-            transcript_section = f"<transcript>\n{transcript_raw}\n</transcript>"
 
         refine_prompt = self._format_prompt(
             refinement_template,
             {
-                "instructions": self._instructions,
-                "report_content": draft_content,
-                "template_section": template_section,
-                "transcript_section": transcript_section,
                 "draft_report": draft_content,
                 "template": template_raw,
                 "transcript": transcript_raw,
             },
         )
-        system_prompt = PromptManager().get_system_prompt()
         provider = self._create_provider(system_prompt)
         model = self._custom_model or self._model
         response = provider.generate(
@@ -453,6 +465,8 @@ class ReportWorker(DashboardWorker):
             "template_path": str(self._template_path) if self._template_path else None,
             "transcript_path": str(self._transcript_path) if self._transcript_path else None,
             "refinement_prompt": str(self._refinement_prompt_path),
+             "generation_system_prompt": str(self._generation_system_prompt_path),
+             "refinement_system_prompt": str(self._refinement_system_prompt_path),
             "instructions": self._instructions,
             "inputs": list(inputs_metadata),
             "sections": [

@@ -126,9 +126,19 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
         "Please help refine the following draft report, following these instructions:\n\n"
         "{instructions}\n\n"
         "Here is the draft report:\n\n<draft>{draft_report}</draft>\n\n"
-        "<template>{template}</template>\n\n"
-        "<transcript>{transcript}</transcript>",
+        "If a template is provided, it is wrapped below:\n\n<template>{template}</template>\n\n"
+        "If a transcript is provided, it is wrapped below:\n\n<transcript>{transcript}</transcript>",
         encoding="utf-8",
+    )
+    system_prompt_dir = project_dir / "system_prompts"
+    system_prompt_dir.mkdir(parents=True, exist_ok=True)
+    generation_system_prompt_path = system_prompt_dir / "generation.md"
+    generation_system_prompt_path.write_text(
+        "You are helping draft a report section.", encoding="utf-8"
+    )
+    refinement_system_prompt_path = system_prompt_dir / "refinement.md"
+    refinement_system_prompt_path.write_text(
+        "You are refining a report.", encoding="utf-8"
     )
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
@@ -145,6 +155,8 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
         template_path=template_path,
         transcript_path=None,
         refinement_prompt_path=refinement_prompt_path,
+        generation_system_prompt_path=generation_system_prompt_path,
+        refinement_system_prompt_path=refinement_system_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -170,7 +182,8 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert "Section output" in draft_path.read_text(encoding="utf-8")
     assert "Refined content" in refined_path.read_text(encoding="utf-8")
     assert "Reasoning trace" in reasoning_path.read_text(encoding="utf-8")
-    assert result["instructions"] == "Follow instructions carefully."
+    assert result["generation_system_prompt"].endswith("generation.md")
+    assert result["refinement_system_prompt"].endswith("refinement.md")
 
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["provider"] == "anthropic"
@@ -178,7 +191,8 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert manifest["inputs"]
     assert len(manifest["sections"]) == 2
     assert manifest["refinement_prompt"].endswith("refinement_prompt.md")
-    assert manifest["instructions"] == "Follow instructions carefully."
+    assert manifest["generation_system_prompt"].endswith("generation.md")
+    assert manifest["refinement_system_prompt"].endswith("refinement.md")
 
 
 def test_report_worker_requires_generation_instructions(
@@ -204,6 +218,12 @@ def test_report_worker_requires_generation_instructions(
         "Refine\n<draft>{draft_report}</draft>\n{template}{transcript}",
         encoding="utf-8",
     )
+    system_prompt_dir = project_dir / "system_prompts"
+    system_prompt_dir.mkdir(parents=True, exist_ok=True)
+    generation_system_prompt_path = system_prompt_dir / "generation.md"
+    generation_system_prompt_path.write_text("Gen", encoding="utf-8")
+    refinement_system_prompt_path = system_prompt_dir / "refinement.md"
+    refinement_system_prompt_path.write_text("Ref", encoding="utf-8")
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -219,6 +239,8 @@ def test_report_worker_requires_generation_instructions(
         template_path=template_path,
         transcript_path=None,
         refinement_prompt_path=refinement_prompt_path,
+        generation_system_prompt_path=generation_system_prompt_path,
+        refinement_system_prompt_path=refinement_system_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -246,6 +268,12 @@ def test_report_worker_requires_template(tmp_path: Path, qt_app: QApplication, m
         "Refine\n<draft>{draft_report}</draft>\n{template}{transcript}",
         encoding="utf-8",
     )
+    system_prompt_dir = project_dir / "system_prompts"
+    system_prompt_dir.mkdir(parents=True, exist_ok=True)
+    generation_system_prompt_path = system_prompt_dir / "generation.md"
+    generation_system_prompt_path.write_text("Gen", encoding="utf-8")
+    refinement_system_prompt_path = system_prompt_dir / "refinement.md"
+    refinement_system_prompt_path.write_text("Ref", encoding="utf-8")
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -261,6 +289,8 @@ def test_report_worker_requires_template(tmp_path: Path, qt_app: QApplication, m
         template_path=None,
         transcript_path=None,
         refinement_prompt_path=refinement_prompt_path,
+        generation_system_prompt_path=generation_system_prompt_path,
+        refinement_system_prompt_path=refinement_system_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -295,6 +325,12 @@ def test_report_worker_supports_transcript_without_inputs(
         "Refine\n<draft>{draft_report}</draft>\n{template}{transcript}",
         encoding="utf-8",
     )
+    system_prompt_dir = project_dir / "system_prompts"
+    system_prompt_dir.mkdir(parents=True, exist_ok=True)
+    generation_system_prompt_path = system_prompt_dir / "generation.md"
+    generation_system_prompt_path.write_text("Gen", encoding="utf-8")
+    refinement_system_prompt_path = system_prompt_dir / "refinement.md"
+    refinement_system_prompt_path.write_text("Ref", encoding="utf-8")
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -310,6 +346,8 @@ def test_report_worker_supports_transcript_without_inputs(
         template_path=template_path,
         transcript_path=transcript_path,
         refinement_prompt_path=refinement_prompt_path,
+        generation_system_prompt_path=generation_system_prompt_path,
+        refinement_system_prompt_path=refinement_system_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -322,4 +360,5 @@ def test_report_worker_supports_transcript_without_inputs(
     result = finished_results[0]
     assert result["inputs"] == []
     assert Path(result["manifest_path"]).exists()
-    assert result["instructions"] == "Provide polished output."
+    assert result["generation_system_prompt"].endswith("generation.md")
+    assert result["refinement_system_prompt"].endswith("refinement.md")
