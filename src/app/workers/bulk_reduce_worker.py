@@ -13,6 +13,12 @@ from PySide6.QtCore import Signal
 
 from src.common.llm.base import BaseLLMProvider
 from src.common.llm.factory import create_provider
+from src.app.core.bulk_paths import (
+    iter_map_outputs,
+    iter_map_outputs_under,
+    normalize_map_relative,
+    resolve_map_output_path,
+)
 from src.app.core.bulk_analysis_runner import (
     BulkAnalysisCancelled,
     PromptBundle,
@@ -194,24 +200,28 @@ class BulkReduceWorker(DashboardWorker):
                     items.append(("converted", f, f"converted/{f.relative_to(conv_root).as_posix()}"))
 
         # Map outputs under bulk_analysis
-        ba_root = self._project_dir / "bulk_analysis"
         for slug in (self._group.combine_map_groups or []):
-            outputs = ba_root / slug / "outputs"
-            if outputs.exists():
-                for f in outputs.rglob("*.md"):
-                    rel = f.relative_to(outputs).as_posix()
-                    items.append(("map", f, f"map/{slug}/{rel}"))
+            slug = slug.strip()
+            if not slug:
+                continue
+            for path, rel in iter_map_outputs(self._project_dir, slug):
+                items.append(("map", path, f"map/{slug}/{rel}"))
+
         for rel_dir in (self._group.combine_map_directories or []):
             rel_dir = rel_dir.strip("/")
+            if not rel_dir:
+                continue
             parts = rel_dir.split("/", 1)
             if len(parts) != 2:
                 continue
             slug, remainder = parts
-            base = ba_root / slug / "outputs" / remainder
-            if base.exists():
-                for f in base.rglob("*.md"):
-                    rel = f.relative_to(ba_root / slug / "outputs").as_posix()
-                    items.append(("map", f, f"map/{slug}/{rel}"))
+            slug = slug.strip()
+            if not slug:
+                continue
+            normalized = normalize_map_relative(remainder)
+            for path, rel in iter_map_outputs_under(self._project_dir, slug, normalized):
+                items.append(("map", path, f"map/{slug}/{rel}"))
+
         for rel in (self._group.combine_map_files or []):
             rel = rel.strip("/")
             if not rel:
@@ -220,8 +230,14 @@ class BulkReduceWorker(DashboardWorker):
             if len(parts) != 2:
                 continue
             slug, remainder = parts
-            f = ba_root / slug / "outputs" / remainder
-            items.append(("map", f, f"map/{slug}/{remainder}"))
+            slug = slug.strip()
+            if not slug:
+                continue
+            normalized = normalize_map_relative(remainder)
+            if not normalized:
+                continue
+            path = resolve_map_output_path(self._project_dir, slug, normalized)
+            items.append(("map", path, f"map/{slug}/{normalized}"))
 
         # De-duplicate exact same files (by abs path) but keep list order stable
         seen: set[Path] = set()

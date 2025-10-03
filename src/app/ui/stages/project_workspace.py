@@ -40,6 +40,7 @@ from src.app.core.feature_flags import FeatureFlags
 from src.app.core.file_tracker import WorkspaceMetrics, WorkspaceGroupMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.prompt_manager import PromptManager
 from src.app.core.report_inputs import (
     REPORT_CATEGORY_BULK_COMBINED,
@@ -1353,14 +1354,13 @@ class ProjectWorkspace(QWidget):
             for slug_dir in sorted(bulk_root.iterdir()):
                 if not slug_dir.is_dir():
                     continue
-                outputs_dir = slug_dir / "outputs"
-                if outputs_dir.exists():
-                    for path in sorted(outputs_dir.rglob("*.md")):
-                        add_descriptor(
-                            REPORT_CATEGORY_BULK_MAP,
-                            path,
-                            f"{slug_dir.name}/outputs/{path.relative_to(outputs_dir).as_posix()}",
-                        )
+                slug = slug_dir.name
+                for path, rel in sorted(iter_map_outputs(project_dir, slug), key=lambda item: item[1]):
+                    add_descriptor(
+                        REPORT_CATEGORY_BULK_MAP,
+                        path,
+                        f"{slug}/{rel}",
+                    )
                 reduce_dir = slug_dir / "reduce"
                 if reduce_dir.exists():
                     for path in sorted(reduce_dir.rglob("*.md")):

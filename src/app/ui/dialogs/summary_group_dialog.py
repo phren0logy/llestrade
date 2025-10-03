@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from src.config.app_config import get_available_providers_and_models
 from src.config.prompt_store import get_bundled_dir, get_custom_dir
+from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.summary_groups import SummaryGroup
 
 DEFAULT_SYSTEM_PROMPT = "resources/prompts/document_analysis_system_prompt.md"
@@ -407,25 +408,32 @@ class SummaryGroupDialog(QDialog):
             info.setFlags(Qt.NoItemFlags)
             self.map_tree.addTopLevelItem(info)
             return
+
+        added = False
         for slug_dir in sorted(ba_root.iterdir()):
             if not slug_dir.is_dir():
                 continue
-            outputs = slug_dir / "outputs"
-            if not outputs.exists():
+            slug = slug_dir.name
+            outputs = list(iter_map_outputs(self._project_dir, slug))
+            if not outputs:
                 continue
-            # Top-level group node (tri-state)
-            group_item = QTreeWidgetItem([slug_dir.name])
-            group_item.setData(0, Qt.UserRole, ("map-group", slug_dir.name))
+
+            added = True
+            group_item = QTreeWidgetItem([slug])
+            group_item.setData(0, Qt.UserRole, ("map-group", slug))
             flags = group_item.flags() | Qt.ItemFlag.ItemIsUserCheckable | Qt.ItemFlag.ItemIsAutoTristate
             group_item.setFlags(flags)
             group_item.setCheckState(0, Qt.Unchecked)
             self.map_tree.addTopLevelItem(group_item)
 
-            # Build hierarchical tree under the group, mirroring outputs structure
             tree_nodes: dict[tuple[str, bool], QTreeWidgetItem] = {}
-            for path in sorted(outputs.rglob("*.md")):
-                rel = path.relative_to(outputs).as_posix()
-                self._add_map_path_to_tree(group_item, slug_dir.name, rel, tree_nodes)
+            for _, rel in sorted(outputs, key=lambda item: item[1]):
+                self._add_map_path_to_tree(group_item, slug, rel, tree_nodes)
+
+        if not added:
+            info = QTreeWidgetItem(["No per-document outputs found."])
+            info.setFlags(Qt.NoItemFlags)
+            self.map_tree.addTopLevelItem(info)
 
     def _add_path_to_tree(self, relative_path: str) -> None:
         parts = relative_path.split("/")

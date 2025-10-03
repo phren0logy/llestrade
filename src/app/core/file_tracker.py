@@ -10,6 +10,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, TYPE_CHECKING
 
+from src.app.core.bulk_paths import (
+    iter_map_outputs,
+    iter_map_outputs_under,
+    normalize_map_relative,
+    resolve_map_output_path,
+)
+
 if TYPE_CHECKING:
     from .summary_groups import SummaryGroup
 
@@ -498,13 +505,17 @@ def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[
     # Build selection from per-document outputs under bulk_analysis
     ba_root = project_dir / "bulk_analysis"
     map_selected: set[str] = set()
-    # Entire groups
+    map_paths: Dict[str, Path] = {}
+
     for slug in group.combine_map_groups or []:
-        outputs = ba_root / slug / "outputs"
-        if outputs.exists():
-            for f in outputs.rglob("*.md"):
-                map_selected.add(f"{slug}/" + f.relative_to(outputs).as_posix())
-    # Directories
+        slug = slug.strip()
+        if not slug:
+            continue
+        for path, rel in iter_map_outputs(project_dir, slug):
+            key = f"{slug}/{rel}"
+            map_selected.add(key)
+            map_paths.setdefault(key, path)
+
     for rel in group.combine_map_directories or []:
         rel = rel.strip("/")
         if not rel:
@@ -513,15 +524,32 @@ def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[
         if len(parts) != 2:
             continue
         slug, remainder = parts
-        base = ba_root / slug / "outputs" / remainder
-        if base.exists():
-            for f in base.rglob("*.md"):
-                map_selected.add(f"{slug}/" + f.relative_to(ba_root / slug / "outputs").as_posix())
-    # Files
+        slug = slug.strip()
+        if not slug:
+            continue
+        normalized = normalize_map_relative(remainder)
+        for path, rel_path in iter_map_outputs_under(project_dir, slug, normalized):
+            key = f"{slug}/{rel_path}"
+            map_selected.add(key)
+            map_paths.setdefault(key, path)
+
     for rel in group.combine_map_files or []:
         rel = rel.strip("/")
-        if rel:
-            map_selected.add(rel)
+        if not rel:
+            continue
+        parts = rel.split("/", 1)
+        if len(parts) != 2:
+            continue
+        slug, remainder = parts
+        slug = slug.strip()
+        if not slug:
+            continue
+        normalized = normalize_map_relative(remainder)
+        if not normalized:
+            continue
+        key = f"{slug}/{normalized}"
+        map_selected.add(key)
+        map_paths.setdefault(key, resolve_map_output_path(project_dir, slug, normalized))
 
     # Latest combined artifact under reduce/
     reduce_dir = ba_root / (getattr(group, "slug", None) or group.folder_name) / "reduce"
@@ -602,7 +630,12 @@ def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[
             parts = rel.split("/", 1)
             slug = parts[0]
             remainder = parts[1] if len(parts) == 2 else ""
-            current = _current_mtime(ba_root / slug / "outputs" / remainder)
+            normalized = normalize_map_relative(remainder)
+            path = map_paths.get(rel)
+            if path is None:
+                path = resolve_map_output_path(project_dir, slug, normalized)
+                map_paths[rel] = path
+            current = _current_mtime(path)
             recorded_m = recorded.get(key)
             if recorded_m is None or recorded_m <= 0:
                 stale = True
