@@ -1,5 +1,5 @@
 """
-Global exception handler with crash reporting for the Forensic Psych Report Drafter.
+Global exception handler with crash reporting for Llestrade (formerly Forensic Psych Report Drafter).
 Captures uncaught exceptions and generates detailed crash reports.
 """
 

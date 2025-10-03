@@ -1,8 +1,8 @@
 #!/bin/bash
-# Debug launch script for Forensic Report Drafter
+# Debug launch script for Llestrade
 # This script enables various debugging options to help diagnose crashes
 
-echo "🔍 Starting Forensic Report Drafter in DEBUG MODE..."
+echo "🔍 Starting Llestrade in DEBUG MODE..."
 echo "================================================"
 
 # Enable Python fault handler

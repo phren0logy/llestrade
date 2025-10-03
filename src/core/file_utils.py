@@ -1,5 +1,5 @@
 """
-File utility module for the Forensic Psych Report Drafter.
+File utility module for Llestrade (formerly Forensic Psych Report Drafter).
 Provides functions for file operations, including reading, writing, and previewing file content.
 """
 

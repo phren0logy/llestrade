@@ -1,5 +1,5 @@
 """
-Centralized logging configuration for the Forensic Psych Report Drafter application.
+Centralized logging configuration for the Llestrade application (formerly Forensic Psych Report Drafter).
 Provides consistent logging setup with file rotation and configurable log levels.
 """
 

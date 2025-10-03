@@ -1,5 +1,5 @@
 """
-Configuration module for the Forensic Psych Report Drafter.
+Configuration module for Llestrade (formerly Forensic Psych Report Drafter).
 Centralizes all configuration settings and environment setup.
 """
 
@@ -115,8 +115,8 @@ def find_pyqt_paths() -> Optional[str]:
 
 
 # Application constants
-APP_NAME = "Forensic Psych Report Drafter"
-APP_TITLE = "Forensic Psych Report Drafter"  # Application title
+APP_NAME = "Llestrade"
+APP_TITLE = "Llestrade"  # Application title
 APP_VERSION = "1.1.0"
 DEFAULT_WINDOW_SIZE = (1000, 800)
 DEFAULT_FONT_FAMILY = "Arial"

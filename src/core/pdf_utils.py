@@ -1,5 +1,5 @@
 """
-PDF utility functions for the Forensic Psych Report Drafter.
+PDF utility functions for Llestrade (formerly Forensic Psych Report Drafter).
 Handles PDF file operations like splitting and merging.
 """
 

@@ -1,6 +1,7 @@
-# Forensic Psych Report Drafter
+# Llestrade (formerly Forensic Psych Report Drafter)
 
-A professional PySide6 (Qt) desktop application for analyzing and summarizing forensic psychological reports using multiple LLM providers (Anthropic Claude, Google Gemini, Azure OpenAI).
+Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing forensic psychological reports using multiple LLM providers (Anthropic Claude, Google Gemini, Azure OpenAI).
+Note: The application was previously named “Forensic Psych Report Drafter.”
 
 ## Features
 
@@ -59,6 +60,16 @@ A professional PySide6 (Qt) desktop application for analyzing and summarizing fo
    uv run main.py --debug
    ```
 
+### Migrating from Forensic Report Drafter
+
+If you used the previous app name and paths (~/.forensic_report_drafter), run the one-time migration script to move data to the new locations and update the keyring namespace:
+
+```bash
+uv run scripts/migrate_llestrade_from_legacy.py --yes
+```
+
+This will move `prompts/`, `config/`, `logs/`, and `crashes/` under `~/Documents/llestrade/` and copy API keys in your system keychain from the legacy service name (`ForensicReportDrafter`) to `Llestrade`.
+
 ## Quick Start
 
 ### Interactive Setup
@@ -102,7 +113,7 @@ The original tabbed UI has been removed from the repository as of commit 6401a40
 ## Project Structure
 
 ```
-forensic-report-drafter/
+llestrade/
 ├── main.py                    # Application entry point (launches src.app)
 ├── src/
 │   ├── app/
@@ -220,7 +231,7 @@ DEBUG=true uv run main.py
 
 Debug mode features:
 - Debug Dashboard with real-time monitoring
-- Detailed logging to `~/.forensic_report_drafter/logs/`
+- Detailed logging to `~/Documents/llestrade/logs/` (previously `~/.forensic_report_drafter/logs/`)
 - System resource tracking
 - Operation timing and performance metrics
 
@@ -282,11 +293,11 @@ Built-in resilience features:
 ### Log Files
 
 Logs are stored in:
-- macOS/Linux: `~/.forensic_report_drafter/logs/`
-- Windows: `%USERPROFILE%\.forensic_report_drafter\logs\`
+- macOS/Linux: `~/Documents/llestrade/logs/` (previously `~/.forensic_report_drafter/logs/`)
+- Windows: `%USERPROFILE%\\Documents\\llestrade\\logs\\` (previously `%USERPROFILE%\\.forensic_report_drafter\\logs\\`)
 
 Crash reports are saved to:
-- `~/.forensic_report_drafter/crashes/`
+- `~/Documents/llestrade/crashes/` (previously `~/.forensic_report_drafter/crashes/`)
 
 ## Development
 

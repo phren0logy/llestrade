@@ -1,6 +1,6 @@
 # Development Progress
 
-This document tracks completed work on the Forensic Psych Report Drafter.
+This document tracks completed work on Llestrade (formerly Forensic Psych Report Drafter).
 
 ## 2025-07-04 - Fixed Project Advancement from Setup to Import Stage
 - Added `project_data` property to ProjectManager to provide data in format expected by stages

@@ -71,7 +71,7 @@ class WelcomeStage(QWidget):
     def _build_header(self) -> QWidget:
         header = QWidget()
         h_layout = QVBoxLayout(header)
-        title = QLabel("Welcome to Forensic Report Drafter")
+        title = QLabel("Welcome to Llestrade")
         font = QFont(title.font())
         font.setPointSize(24)
         font.setBold(True)

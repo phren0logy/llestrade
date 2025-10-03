@@ -18,7 +18,7 @@ except ImportError:
     logging.warning("keyring module not available - API keys will be stored in plain text")
 
 from PySide6.QtCore import QObject, Signal, QSettings
-from src.config.paths import app_config_dir, maybe_migrate_legacy
+from src.config.paths import app_config_dir
 
 
 class SecureSettings(QObject):
@@ -35,8 +35,7 @@ class SecureSettings(QObject):
         self.logger = logging.getLogger(__name__)
         
         # Determine settings directory
-        maybe_migrate_legacy()
-        env_override = os.getenv("LLESTRADE_SETTINGS_DIR") or os.getenv("FRD_SETTINGS_DIR")
+        env_override = os.getenv("LLESTRADE_SETTINGS_DIR")
         if settings_dir:
             self.settings_dir = settings_dir
         elif env_override:
@@ -138,9 +137,6 @@ class SecureSettings(QObject):
         if KEYRING_AVAILABLE:
             try:
                 key = keyring.get_password(self.SERVICE_NAME, f"api_key_{provider}")
-                if not key:
-                    # Fallback to legacy service name for migration
-                    key = keyring.get_password("ForensicReportDrafter", f"api_key_{provider}")
                 if key:
                     self._api_key_cache[provider] = key
                 return key

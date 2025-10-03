@@ -65,7 +65,7 @@ class SimplifiedMainWindow(QMainWindow):
         self._configure_observability()
 
         # Base window configuration
-        self.setWindowTitle("Forensic Report Drafter")
+        self.setWindowTitle("Llestrade")
         self.resize(1200, 800)
         geometry = self.settings.get_window_geometry()
         if geometry:
@@ -352,8 +352,8 @@ class SimplifiedMainWindow(QMainWindow):
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
-            "About Forensic Report Drafter",
-            "<h3>Forensic Report Drafter</h3>"
+            "About Llestrade",
+            "<h3>Llestrade</h3>"
             "<p>Dashboard prototype in development.</p>"
             "<p>A professional tool for forensic psychologists to analyze complex records.</p>",
         )
@@ -362,9 +362,9 @@ class SimplifiedMainWindow(QMainWindow):
         project_manager = project_manager or self.project_manager
         if project_manager and project_manager.metadata:
             case_name = project_manager.metadata.case_name
-            self.setWindowTitle(f"Forensic Report Drafter — {case_name}")
+            self.setWindowTitle(f"Llestrade — {case_name}")
         else:
-            self.setWindowTitle("Forensic Report Drafter")
+            self.setWindowTitle("Llestrade")
 
     def closeEvent(self, event) -> None:  # noqa: N802
         self.settings.save_window_geometry(self.saveGeometry())
@@ -378,12 +378,12 @@ def main() -> int:
     configure_startup_logging()
     setup_logging()
     logger = logging.getLogger(__name__)
-    logger.info("Starting Forensic Report Drafter (New UI)")
+    logger.info("Starting Llestrade (Dashboard UI)")
 
     app = QApplication.instance() or QApplication(sys.argv)
-    app.setApplicationName("Forensic Report Drafter")
+    app.setApplicationName("Llestrade")
     app.setOrganizationName("Forensic Psychology Tools")
-    app.setApplicationDisplayName("Forensic Report Drafter")
+    app.setApplicationDisplayName("Llestrade")
 
     window = SimplifiedMainWindow()
     window.show()

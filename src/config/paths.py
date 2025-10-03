@@ -15,7 +15,7 @@ from typing import Optional
 
 
 APP_FOLDER_NAME = "llestrade"
-LEGACY_HIDDEN_ROOT = Path.home() / ".forensic_report_drafter"
+LEGACY_HIDDEN_ROOT = Path.home() / ".forensic_report_drafter"  # legacy reference (for scripts only)
 
 
 def _xdg_documents_dir() -> Optional[Path]:
@@ -92,28 +92,6 @@ def app_crashes_dir() -> Path:
     return p
 
 
-def maybe_migrate_legacy() -> None:
-    """Move legacy hidden app folder into the new visible Documents root.
-
-    Copies prompts/, config/, logs/, crashes/ subfolders if present and the target
-    folders do not yet exist. Legacy folder is left in place to avoid destructive
-    behavior; users can remove it after confirming everything is in place.
-    """
-    if not LEGACY_HIDDEN_ROOT.exists():
-        return
-    target = app_user_root()
-    for name in ("prompts", "config", "logs", "crashes"):
-        src = LEGACY_HIDDEN_ROOT / name
-        dst = target / name
-        try:
-            if src.exists() and not dst.exists():
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(src), str(dst))
-        except Exception:
-            # Best-effort migration; ignore failures
-            continue
-
-
 __all__ = [
     "documents_dir",
     "app_user_root",
@@ -121,6 +99,4 @@ __all__ = [
     "app_prompts_root",
     "app_logs_dir",
     "app_crashes_dir",
-    "maybe_migrate_legacy",
 ]
-

@@ -11,6 +11,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication, QPushButton, QVBoxLayout, QWidget, QTextEdit, QLabel
 
 from src.config.logging_config import ApplicationLogger
+from src.config.paths import app_logs_dir, app_crashes_dir
 from src.core.exception_handler import GlobalExceptionHandler
 
 
@@ -112,7 +113,7 @@ def test_logging_without_gui():
     llm_logger.info("Testing LLM provider info logging")
     
     # Test log file location
-    log_dir = Path.home() / ".forensic_report_drafter" / "logs"
+    log_dir = app_logs_dir()
     print(f"\nLog files location: {log_dir}")
     
     if log_dir.exists():
@@ -146,7 +147,7 @@ def main():
         app.setApplicationName("Logging Test App")
         
         # Install exception handler
-        crash_dir = Path.home() / ".forensic_report_drafter" / "crashes"
+        crash_dir = app_crashes_dir()
         exception_handler = GlobalExceptionHandler(crash_dir)
         exception_handler.install()
         

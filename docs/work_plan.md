@@ -1,4 +1,4 @@
-# Forensic Report Drafter - Consolidated Work Plan
+# Llestrade - Consolidated Work Plan (formerly Forensic Report Drafter)
 
 ## Priority 0: Dashboard UI Refactoring (IMMEDIATE)
 

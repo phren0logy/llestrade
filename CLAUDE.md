@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Forensic Psych Report Drafter - a PySide6 (Qt) desktop application for analyzing and summarizing forensic psychological reports using multiple LLM providers (Anthropic Claude, Google Gemini, Azure OpenAI).
+This is Llestrade (formerly Forensic Psych Report Drafter) — a PySide6 (Qt) desktop application for analyzing and summarizing forensic psychological reports using multiple LLM providers (Anthropic Claude, Google Gemini, Azure OpenAI).
 
 ## Key Commands
 
@@ -232,7 +232,7 @@ To enable debug output, set these environment variables:
 - `DEBUG_LLM=true` - LLM provider debug logging
 - `DEBUG_QT=true` - Qt plugin debug output
 
-Logs and crash reports are in `~/.forensic_report_drafter/`
+Logs and crash reports are in `~/Documents/llestrade/` (previously `~/.forensic_report_drafter/`)
 
 ## LLM Module Architecture
 

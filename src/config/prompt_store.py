@@ -19,11 +19,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-from .paths import app_prompts_root, app_user_root, get_repo_prompts_dir as _repo_prompts_dir, maybe_migrate_legacy
+from .paths import app_prompts_root, app_user_root
 
 
 def get_prompts_root() -> Path:
-    maybe_migrate_legacy()
     return app_prompts_root()
 
 
@@ -40,7 +39,11 @@ def get_custom_dir() -> Path:
 
 
 def get_repo_prompts_dir() -> Path:
-    return _repo_prompts_dir()
+    """Return the path to prompts bundled with the application source tree.
+
+    Repo layout: src/app/resources/prompts
+    """
+    return Path(__file__).resolve().parents[2] / "app" / "resources" / "prompts"
 
 
 def _hash_file(path: Path) -> str:

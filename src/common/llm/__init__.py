@@ -1,5 +1,5 @@
 """
-LLM provider system for Forensic Psych Report Drafter.
+LLM provider system for Llestrade (formerly Forensic Psych Report Drafter).
 
 This package provides a clean, modular interface for working with various LLM providers
 (Anthropic, Google Gemini, Azure OpenAI) following Qt/PySide6 patterns.
