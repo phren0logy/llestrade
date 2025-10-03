@@ -104,6 +104,10 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     converted_dir = project_dir / "converted_documents"
     converted_dir.mkdir(parents=True, exist_ok=True)
     (converted_dir / "doc.md").write_text("# Heading\nBody", encoding="utf-8")
+    template_dir = project_dir / "templates"
+    template_dir.mkdir(parents=True, exist_ok=True)
+    template_path = template_dir / "report-template.md"
+    template_path.write_text("Template body", encoding="utf-8")
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -117,7 +121,7 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
         custom_model=None,
         context_window=None,
         instructions="Follow instructions",
-        template_path=None,
+        template_path=template_path,
         transcript_path=None,
         metadata=ProjectMetadata(case_name="Case"),
     )
@@ -162,6 +166,10 @@ def test_report_worker_requires_document_content_placeholder(
     converted_dir = project_dir / "converted_documents"
     converted_dir.mkdir(parents=True, exist_ok=True)
     (converted_dir / "doc.md").write_text("Body", encoding="utf-8")
+    template_dir = project_dir / "templates"
+    template_dir.mkdir(parents=True, exist_ok=True)
+    template_path = template_dir / "report-template.md"
+    template_path.write_text("Template body", encoding="utf-8")
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -175,7 +183,7 @@ def test_report_worker_requires_document_content_placeholder(
         custom_model=None,
         context_window=None,
         instructions="Follow instructions",
-        template_path=None,
+        template_path=template_path,
         transcript_path=None,
         metadata=ProjectMetadata(case_name="Case"),
     )
@@ -187,3 +195,80 @@ def test_report_worker_requires_document_content_placeholder(
 
     assert failures, "Expected failure signal when placeholder missing"
     assert "{document_content}" in failures[0]
+
+
+def test_report_worker_requires_template(tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert qt_app is not None
+
+    project_dir = tmp_path
+    converted_dir = project_dir / "converted_documents"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    (converted_dir / "doc.md").write_text("Content", encoding="utf-8")
+
+    monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
+    monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
+    monkeypatch.setattr(report_worker, "PromptManager", lambda: _StubPromptManager())
+
+    worker = ReportWorker(
+        project_dir=project_dir,
+        inputs=[(REPORT_CATEGORY_CONVERTED, "converted_documents/doc.md")],
+        provider_id="anthropic",
+        model="claude-sonnet-4-5-20250929",
+        custom_model=None,
+        context_window=None,
+        instructions="Do it",
+        template_path=None,
+        transcript_path=None,
+        metadata=ProjectMetadata(case_name="Case"),
+    )
+
+    failures: list[str] = []
+    worker.failed.connect(failures.append)
+
+    worker.run()
+
+    assert failures, "Expected failure signal when template missing"
+    assert "template" in failures[0].lower()
+
+
+def test_report_worker_supports_transcript_without_inputs(
+    tmp_path: Path,
+    qt_app: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert qt_app is not None
+
+    project_dir = tmp_path
+    transcript_path = project_dir / "call-transcript.md"
+    transcript_path.write_text("Transcript content", encoding="utf-8")
+    template_dir = project_dir / "templates"
+    template_dir.mkdir(parents=True, exist_ok=True)
+    template_path = template_dir / "report-template.md"
+    template_path.write_text("Template body", encoding="utf-8")
+
+    monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
+    monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
+    monkeypatch.setattr(report_worker, "PromptManager", lambda: _StubPromptManager())
+
+    worker = ReportWorker(
+        project_dir=project_dir,
+        inputs=[],
+        provider_id="anthropic",
+        model="claude-sonnet-4-5-20250929",
+        custom_model=None,
+        context_window=None,
+        instructions="Follow",
+        template_path=template_path,
+        transcript_path=transcript_path,
+        metadata=ProjectMetadata(case_name="Case"),
+    )
+
+    finished_results: list[dict] = []
+    worker.finished.connect(lambda payload: finished_results.append(payload))
+
+    worker.run()
+
+    assert finished_results, "Expected finished signal when only transcript provided"
+    result = finished_results[0]
+    assert result["inputs"] == []
+    assert Path(result["manifest_path"]).exists()

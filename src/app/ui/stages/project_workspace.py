@@ -350,7 +350,7 @@ class ProjectWorkspace(QWidget):
         context_row.addWidget(QLabel("tokens"))
         config_layout.addLayout(context_row)
 
-        template_label = QLabel("Template (optional):")
+        template_label = QLabel("Template (required):")
         config_layout.addWidget(template_label)
         self._report_template_edit = QLineEdit()
         template_browse = QPushButton("Browse…")
@@ -1475,13 +1475,22 @@ class ProjectWorkspace(QWidget):
             self._report_generate_button.setEnabled(False)
             return
         has_inputs = bool(self._report_selected_inputs)
+        transcript_ok = bool(self._report_transcript_edit and self._report_transcript_edit.text().strip())
         instructions_ok = bool(self._report_instructions_edit and self._report_instructions_edit.toPlainText().strip())
+        template_text = self._report_template_edit.text().strip() if self._report_template_edit else ""
+        template_ok = bool(template_text)
         model_ok = True
         if self._report_model_combo:
             data = self._report_model_combo.currentData()
             if data and data[0] == "custom":
                 model_ok = bool(self._report_custom_model_edit and self._report_custom_model_edit.text().strip())
-        enabled = has_inputs and instructions_ok and model_ok and not self._report_running
+        enabled = (
+            (has_inputs or transcript_ok)
+            and instructions_ok
+            and model_ok
+            and template_ok
+            and not self._report_running
+        )
         self._report_generate_button.setEnabled(enabled)
 
     def _refresh_reports_tab(self) -> None:
@@ -1508,10 +1517,6 @@ class ProjectWorkspace(QWidget):
             return
         if not self._project_manager or not self._project_manager.project_dir:
             QMessageBox.warning(self, "Report Generator", "No project is currently loaded.")
-            return
-
-        if not self._report_selected_inputs:
-            QMessageBox.warning(self, "Report Generator", "Select at least one input to include in the report.")
             return
 
         instructions = self._report_instructions_edit.toPlainText().strip() if self._report_instructions_edit else ""
@@ -1543,12 +1548,29 @@ class ProjectWorkspace(QWidget):
             text = self._report_template_edit.text().strip()
             if text:
                 template_path = Path(text)
+        if not template_path:
+            QMessageBox.warning(self, "Report Generator", "Select a report template before generating a report.")
+            return
+        if not template_path.is_file():
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                f"The selected template does not exist:\n{template_path}",
+            )
+            return
 
         transcript_path = None
         if self._report_transcript_edit:
             text = self._report_transcript_edit.text().strip()
             if text:
                 transcript_path = Path(text)
+                if not transcript_path.is_file():
+                    QMessageBox.warning(
+                        self,
+                        "Report Generator",
+                        f"The selected transcript does not exist:\n{transcript_path}",
+                    )
+                    return
 
         selected_pairs: List[tuple[str, str]] = []
         for key in sorted(self._report_selected_inputs):
@@ -1557,8 +1579,12 @@ class ProjectWorkspace(QWidget):
             category, relative = key.split(":", 1)
             selected_pairs.append((category, relative))
 
-        if not selected_pairs:
-            QMessageBox.warning(self, "Report Generator", "Unable to resolve selected inputs.")
+        if not selected_pairs and not transcript_path:
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                "Select at least one input or provide a transcript before generating a report.",
+            )
             return
 
         project_dir = Path(self._project_manager.project_dir)

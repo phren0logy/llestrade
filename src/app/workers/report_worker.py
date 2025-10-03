@@ -67,8 +67,16 @@ class ReportWorker(DashboardWorker):
     # ------------------------------------------------------------------
     def _run(self) -> None:  # pragma: no cover - exercised via tests
         try:
-            if not self._inputs:
-                raise RuntimeError("No inputs selected for report generation")
+            if self._template_path is None:
+                raise RuntimeError("A report template must be provided before generating a report")
+            if not self._template_path.exists():
+                raise FileNotFoundError(f"Report template not found: {self._template_path}")
+            if not self._inputs and not self._transcript_path:
+                raise RuntimeError(
+                    "Select at least one input or provide a transcript before generating a report"
+                )
+            if self._transcript_path and not self._transcript_path.exists():
+                raise FileNotFoundError(f"Transcript not found: {self._transcript_path}")
             if not self._instructions:
                 raise RuntimeError("Refinement instructions must not be empty")
 
@@ -82,7 +90,10 @@ class ReportWorker(DashboardWorker):
             manifest_path = report_dir / f"{base_name}.manifest.json"
             inputs_path = report_dir / f"{base_name}-inputs.md"
 
-            self.log_message.emit(f"Preparing report run with {len(self._inputs)} input(s).")
+            transcript_note = " and transcript" if self._transcript_path else ""
+            self.log_message.emit(
+                f"Preparing report run with {len(self._inputs)} input(s){transcript_note}."
+            )
             self.progress.emit(5, "Reading inputs…")
             combined_content, inputs_metadata = self._combine_inputs()
             inputs_path.write_text(combined_content, encoding="utf-8")
@@ -197,6 +208,8 @@ class ReportWorker(DashboardWorker):
                     "token_count": token_count,
                 }
             )
+        if not lines:
+            return "", metadata
         combined = "\n".join(lines).strip() + "\n"
         return combined, metadata
 
