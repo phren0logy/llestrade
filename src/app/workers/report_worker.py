@@ -19,6 +19,10 @@ from src.app.core.report_inputs import (
     category_display_name,
 )
 from src.app.core.prompt_manager import PromptManager
+from src.app.core.report_template_sections import (
+    TemplateSection,
+    load_template_sections,
+)
 from src.app.core.secure_settings import SecureSettings
 from src.common.llm.factory import create_provider
 from src.common.llm.tokens import TokenCounter
@@ -45,6 +49,7 @@ class ReportWorker(DashboardWorker):
         instructions: str,
         template_path: Optional[Path],
         transcript_path: Optional[Path],
+        refinement_prompt_name: str,
         metadata: ProjectMetadata,
         max_report_tokens: int = 60_000,
     ) -> None:
@@ -58,6 +63,7 @@ class ReportWorker(DashboardWorker):
         self._instructions = instructions.strip()
         self._template_path = Path(template_path) if template_path else None
         self._transcript_path = Path(transcript_path) if transcript_path else None
+        self._refinement_prompt_name = refinement_prompt_name
         self._metadata = metadata
         self._max_report_tokens = max_report_tokens
         self._refine_usage: Optional[int] = None
@@ -100,39 +106,43 @@ class ReportWorker(DashboardWorker):
             self.log_message.emit(f"Combined inputs written to {inputs_path.name}.")
 
             prompt_manager = PromptManager()
-            template_bundle = prompt_manager.get_prompt_template("integrated_analysis_prompt")
-            system_prompt = template_bundle.get("system_prompt", "" )
-            user_prompt_template = template_bundle.get("user_prompt", "")
-            if "{document_content}" not in user_prompt_template:
-                raise ValueError(
-                    "Integrated analysis prompt must include the {document_content} placeholder."
-                )
-            user_prompt = self._render_integrated_prompt(user_prompt_template, combined_content)
+            sections = load_template_sections(self._template_path)
+            if not sections:
+                raise RuntimeError("Template does not contain any sections to process")
 
-            prompt_tokens = self._count_tokens(system_prompt, user_prompt)
-            max_context = self._context_window or 200_000
-            if prompt_tokens and prompt_tokens > max_context:
-                raise RuntimeError(
-                    f"Combined content is {prompt_tokens:,} tokens which exceeds the configured context window ({max_context:,})."
-                )
+            transcript_text = ""
+            if self._transcript_path:
+                transcript_text = self._transcript_path.read_text(encoding="utf-8").strip()
 
-            self.log_message.emit("Generating initial draft report…")
-            self.progress.emit(25, "Generating draft report…")
-            draft_result = self._invoke_provider(
-                prompt=user_prompt,
-                system_prompt=system_prompt,
-                max_tokens=self._max_report_tokens,
+            self.log_message.emit(
+                f"Generating draft content across {len(sections)} template section(s)…"
             )
-            draft_content = draft_result.get("content") or ""
+            try:
+                section_instructions = prompt_manager.get_template(
+                    "report_generation_instructions"
+                )
+            except KeyError as err:
+                raise RuntimeError("Missing report_generation_instructions prompt") from err
+
+            section_outputs = self._generate_section_outputs(
+                sections=sections,
+                instructions=section_instructions,
+                document_content=combined_content.strip(),
+                transcript_text=transcript_text,
+            )
+
+            draft_content = self._combine_section_outputs(section_outputs)
             if not draft_content.strip():
-                raise RuntimeError("Model returned empty draft content")
+                raise RuntimeError("Section generation produced empty draft content")
 
             draft_path.write_text(self._format_draft_header(draft_content), encoding="utf-8")
             self.log_message.emit(f"Draft saved to {draft_path.name}.")
 
             self.log_message.emit("Refining draft report…")
             self.progress.emit(65, "Refining draft…")
-            refined_content, reasoning_content = self._run_refinement(prompt_manager, draft_content)
+            refined_content, reasoning_content = self._run_refinement(
+                prompt_manager, draft_content
+            )
             refined_path.write_text(refined_content, encoding="utf-8")
             self.log_message.emit(f"Refined report saved to {refined_path.name}.")
             reasoning_written: Optional[Path] = None
@@ -148,8 +158,9 @@ class ReportWorker(DashboardWorker):
                 reasoning_path=reasoning_written,
                 inputs_path=inputs_path,
                 inputs_metadata=inputs_metadata,
-                draft_tokens=draft_result.get("usage", {}).get("output_tokens"),
+                draft_tokens=None,
                 refined_tokens=self._refine_usage,
+                sections=section_outputs,
             )
             manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
             self.log_message.emit(f"Manifest written to {manifest_path.name}.")
@@ -166,6 +177,7 @@ class ReportWorker(DashboardWorker):
                 "custom_model": self._custom_model,
                 "context_window": self._context_window,
                 "inputs": [item[1] for item in self._inputs],
+                "refinement_prompt": self._refinement_prompt_name,
             }
             self.progress.emit(100, "Report generated")
             self.finished.emit(result)
@@ -217,18 +229,78 @@ class ReportWorker(DashboardWorker):
         title = category_display_name(category)
         return f"# {title}: {relative}\n"
 
-    def _render_integrated_prompt(self, template: str, combined: str) -> str:
-        metadata = self._metadata or ProjectMetadata(case_name="")
-        subject_name = metadata.subject_name or metadata.case_name or "Unknown"
-        subject_dob = metadata.date_of_birth or "Unknown"
-        case_info = metadata.case_description or ""
-        return template.format(
-            subject_name=subject_name,
-            subject_dob=subject_dob,
-            case_info=case_info,
-            document_content=combined,
-            combined_summaries=combined,
-        )
+    def _generate_section_outputs(
+        self,
+        *,
+        sections: Sequence[TemplateSection],
+        instructions: str,
+        document_content: str,
+        transcript_text: str,
+    ) -> List[dict]:
+        system_prompt = PromptManager().get_system_prompt()
+        provider = self._create_provider(system_prompt)
+        outputs: List[dict] = []
+
+        total = len(sections)
+        for index, section in enumerate(sections, start=1):
+            prompt = self._render_section_prompt(
+                section=section,
+                instructions=instructions,
+                document_content=document_content,
+                transcript_text=transcript_text,
+            )
+
+            pct = 5 + int(40 * index / max(total, 1))
+            self.progress.emit(pct, f"Generating section {index} of {total}: {section.title}")
+            response = provider.generate(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                model=self._custom_model or self._model,
+                temperature=0.2,
+                max_tokens=self._max_report_tokens,
+            )
+            if not response.get("success"):
+                raise RuntimeError(
+                    response.get("error", f"Failed to generate section: {section.title}")
+                )
+            content = (response.get("content") or "").strip()
+            if not content:
+                raise RuntimeError(f"Generated section is empty: {section.title}")
+            outputs.append(
+                {
+                    "title": section.title,
+                    "prompt": prompt,
+                    "content": content,
+                }
+            )
+            self.log_message.emit(f"Section generated: {section.title}")
+
+        return outputs
+
+    def _render_section_prompt(
+        self,
+        *,
+        section: TemplateSection,
+        instructions: str,
+        document_content: str,
+        transcript_text: str,
+    ) -> str:
+        parts: List[str] = []
+        parts.append("<template>\n" + section.body.strip() + "\n</template>")
+        if document_content:
+            parts.append("<documents>\n" + document_content + "\n</documents>")
+        if transcript_text:
+            parts.append("<transcript>\n" + transcript_text + "\n</transcript>")
+        parts.append(instructions.strip())
+        return "\n\n".join(part for part in parts if part.strip()) + "\n"
+
+    def _combine_section_outputs(self, outputs: Sequence[dict]) -> str:
+        combined_sections = []
+        for payload in outputs:
+            content = payload.get("content", "").strip()
+            if content:
+                combined_sections.append(content)
+        return "\n\n".join(combined_sections)
 
     def _format_draft_header(self, content: str) -> str:
         metadata = self._metadata or ProjectMetadata(case_name="")
@@ -287,7 +359,7 @@ class ReportWorker(DashboardWorker):
         prompt_manager: PromptManager,
         draft_content: str,
     ) -> tuple[str, Optional[str]]:
-        refinement_template = prompt_manager.get_template("refinement_prompt")
+        refinement_template = prompt_manager.get_template(self._refinement_prompt_name)
         template_section = ""
         if self._template_path and self._template_path.exists():
             template_content = self._template_path.read_text(encoding="utf-8")
@@ -343,6 +415,7 @@ class ReportWorker(DashboardWorker):
         inputs_metadata: Iterable[dict],
         draft_tokens: Optional[int],
         refined_tokens: Optional[int],
+        sections: Sequence[dict],
     ) -> dict:
         return {
             "version": 1,
@@ -357,8 +430,16 @@ class ReportWorker(DashboardWorker):
             "inputs_path": str(inputs_path),
             "template_path": str(self._template_path) if self._template_path else None,
             "transcript_path": str(self._transcript_path) if self._transcript_path else None,
+            "refinement_prompt": self._refinement_prompt_name,
             "instructions": self._instructions,
             "inputs": list(inputs_metadata),
+            "sections": [
+                {
+                    "title": payload.get("title"),
+                    "content": payload.get("content"),
+                }
+                for payload in sections
+            ],
             "usage": {
                 "draft_tokens": draft_tokens,
                 "refined_tokens": refined_tokens,

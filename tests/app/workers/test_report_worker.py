@@ -46,13 +46,15 @@ class _StubProvider(BaseLLMProvider):
         lower_prompt = (prompt or "").lower()
         if "refine" in lower_prompt or "<draft>" in lower_prompt:
             content = "Refined content"
+            reasoning = "Reasoning trace"
         else:
-            content = "Draft content"
+            content = f"Section output {self._call_index}"
+            reasoning = ""
         response = {
             "success": True,
             "content": content,
             "usage": {"output_tokens": 100 + self._call_index},
-            "reasoning": "Reasoning trace",
+            "reasoning": reasoning,
         }
         return response
 
@@ -71,30 +73,27 @@ class _StubProvider(BaseLLMProvider):
 
 class _StubPromptManager:
     def get_prompt_template(self, name: str) -> dict:
-        if name == "integrated_analysis_prompt":
-            return {
-                "system_prompt": "System",
-                "user_prompt": "Draft prompt {document_content}",
-            }
         raise KeyError(name)
 
     def get_template(self, name: str) -> str:
         if name == "refinement_prompt":
             return "Refine using {instructions}\n<draft>{report_content}</draft>{template_section}{transcript_section}"
+        if name == "report_generation_instructions":
+            return (
+                "Generate the report section using the supplied template. "
+                "Incorporate material from <documents> and <transcript> when present."
+            )
         raise KeyError(name)
 
     def get_system_prompt(self) -> str:
         return "System"
 
 
-class _StubPromptManagerMissingContent(_StubPromptManager):
-    def get_prompt_template(self, name: str) -> dict:
-        if name == "integrated_analysis_prompt":
-            return {
-                "system_prompt": "System",
-                "user_prompt": "Draft prompt without placeholder",
-            }
-        return super().get_prompt_template(name)
+class _StubPromptManagerMissingInstructions(_StubPromptManager):
+    def get_template(self, name: str) -> str:
+        if name == "report_generation_instructions":
+            raise KeyError(name)
+        return super().get_template(name)
 
 
 def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -107,7 +106,10 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     template_dir = project_dir / "templates"
     template_dir.mkdir(parents=True, exist_ok=True)
     template_path = template_dir / "report-template.md"
-    template_path.write_text("Template body", encoding="utf-8")
+    template_path.write_text(
+        "# Section One\n\nDetails for section one.\n\n# Section Two\n\nDetails for section two.",
+        encoding="utf-8",
+    )
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
@@ -123,6 +125,7 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
         instructions="Follow instructions",
         template_path=template_path,
         transcript_path=None,
+        refinement_prompt_name="refinement_prompt",
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -145,7 +148,7 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert manifest_path.exists()
     assert inputs_path.exists()
 
-    assert "Draft content" in draft_path.read_text(encoding="utf-8")
+    assert "Section output" in draft_path.read_text(encoding="utf-8")
     assert "Refined content" in refined_path.read_text(encoding="utf-8")
     assert "Reasoning trace" in reasoning_path.read_text(encoding="utf-8")
 
@@ -153,9 +156,10 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert manifest["provider"] == "anthropic"
     assert manifest["draft_path"].endswith("-draft.md")
     assert manifest["inputs"]
+    assert len(manifest["sections"]) == 2
 
 
-def test_report_worker_requires_document_content_placeholder(
+def test_report_worker_requires_generation_instructions(
     tmp_path: Path,
     qt_app: QApplication,
     monkeypatch: pytest.MonkeyPatch,
@@ -169,11 +173,11 @@ def test_report_worker_requires_document_content_placeholder(
     template_dir = project_dir / "templates"
     template_dir.mkdir(parents=True, exist_ok=True)
     template_path = template_dir / "report-template.md"
-    template_path.write_text("Template body", encoding="utf-8")
+    template_path.write_text("# Only Section\n\nDetails", encoding="utf-8")
 
     monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
-    monkeypatch.setattr(report_worker, "PromptManager", lambda: _StubPromptManagerMissingContent())
+    monkeypatch.setattr(report_worker, "PromptManager", lambda: _StubPromptManagerMissingInstructions())
 
     worker = ReportWorker(
         project_dir=project_dir,
@@ -185,6 +189,7 @@ def test_report_worker_requires_document_content_placeholder(
         instructions="Follow instructions",
         template_path=template_path,
         transcript_path=None,
+        refinement_prompt_name="refinement_prompt",
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -193,8 +198,8 @@ def test_report_worker_requires_document_content_placeholder(
 
     worker.run()
 
-    assert failures, "Expected failure signal when placeholder missing"
-    assert "{document_content}" in failures[0]
+    assert failures, "Expected failure signal when section instructions missing"
+    assert "report_generation_instructions" in failures[0]
 
 
 def test_report_worker_requires_template(tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,6 +224,7 @@ def test_report_worker_requires_template(tmp_path: Path, qt_app: QApplication, m
         instructions="Do it",
         template_path=None,
         transcript_path=None,
+        refinement_prompt_name="refinement_prompt",
         metadata=ProjectMetadata(case_name="Case"),
     )
 
@@ -260,6 +266,7 @@ def test_report_worker_supports_transcript_without_inputs(
         instructions="Follow",
         template_path=template_path,
         transcript_path=transcript_path,
+        refinement_prompt_name="refinement_prompt",
         metadata=ProjectMetadata(case_name="Case"),
     )
 
