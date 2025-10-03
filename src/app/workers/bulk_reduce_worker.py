@@ -84,10 +84,22 @@ class BulkReduceWorker(DashboardWorker):
             if self.is_cancelled():
                 raise BulkAnalysisCancelled
 
-            # Chunk if needed
-            needs_chunking, token_count, max_tokens = should_chunk(
-                combined_content, provider_cfg.provider_id, provider_cfg.model
-            )
+            # Chunk if needed, allow custom context window override
+            override_window = getattr(self._group, "model_context_window", None)
+            if isinstance(override_window, int) and override_window > 0:
+                from src.common.llm.tokens import TokenCounter
+                token_info = TokenCounter.count(
+                    text=combined_content,
+                    provider=provider_cfg.provider_id,
+                    model=provider_cfg.model or "",
+                )
+                token_count = token_info.get("token_count") if token_info.get("success") else len(combined_content) // 4
+                max_tokens = max(int(override_window * 0.5), 4000)
+                needs_chunking = token_count > max_tokens
+            else:
+                needs_chunking, token_count, max_tokens = should_chunk(
+                    combined_content, provider_cfg.provider_id, provider_cfg.model
+                )
             self.log_message.emit(
                 f"Combined content tokens={token_count}, chunking={'yes' if needs_chunking else 'no'}"
             )
@@ -332,4 +344,3 @@ class BulkReduceWorker(DashboardWorker):
             "system_prompt_path": self._group.system_prompt_path,
             "user_prompt_path": self._group.user_prompt_path,
         }
-

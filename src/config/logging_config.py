@@ -8,15 +8,15 @@ import logging.handlers
 import sys
 from pathlib import Path
 from datetime import datetime
+from src.config.paths import app_logs_dir
 
 
 class ApplicationLogger:
     """Centralized logging configuration for the application."""
     
-    def __init__(self, app_name="forensic_report_drafter"):
+    def __init__(self, app_name="llestrade"):
         self.app_name = app_name
-        self.log_dir = Path.home() / f".{app_name}" / "logs"
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir = app_logs_dir()
         
     def setup(self, debug=False):
         """Configure application-wide logging."""

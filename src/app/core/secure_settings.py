@@ -18,6 +18,7 @@ except ImportError:
     logging.warning("keyring module not available - API keys will be stored in plain text")
 
 from PySide6.QtCore import QObject, Signal, QSettings
+from src.config.paths import app_config_dir, maybe_migrate_legacy
 
 
 class SecureSettings(QObject):
@@ -26,7 +27,7 @@ class SecureSettings(QObject):
     settings_changed = Signal()
     api_key_changed = Signal(str)  # provider name
     
-    SERVICE_NAME = "ForensicReportDrafter"
+    SERVICE_NAME = "Llestrade"
     SETTINGS_FILE = "app_settings.json"
     
     def __init__(self, settings_dir: Optional[Path] = None):
@@ -34,14 +35,14 @@ class SecureSettings(QObject):
         self.logger = logging.getLogger(__name__)
         
         # Determine settings directory
-        env_override = os.getenv("FRD_SETTINGS_DIR")
+        maybe_migrate_legacy()
+        env_override = os.getenv("LLESTRADE_SETTINGS_DIR") or os.getenv("FRD_SETTINGS_DIR")
         if settings_dir:
             self.settings_dir = settings_dir
         elif env_override:
             self.settings_dir = Path(env_override).expanduser()
         else:
-            # Use user's config directory
-            self.settings_dir = Path.home() / ".forensic_report_drafter" / "config"
+            self.settings_dir = app_config_dir()
         
         self.settings_dir.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.settings_dir / self.SETTINGS_FILE
@@ -53,7 +54,7 @@ class SecureSettings(QObject):
         self._settings = self._load_settings()
         
         # Qt settings for UI preferences
-        self.qt_settings = QSettings("ForensicReportDrafter", "Settings")
+        self.qt_settings = QSettings("Llestrade", "Settings")
         
     def _load_settings(self) -> Dict[str, Any]:
         """Load settings from JSON file."""
@@ -136,10 +137,10 @@ class SecureSettings(QObject):
         
         if KEYRING_AVAILABLE:
             try:
-                key = keyring.get_password(
-                    self.SERVICE_NAME,
-                    f"api_key_{provider}"
-                )
+                key = keyring.get_password(self.SERVICE_NAME, f"api_key_{provider}")
+                if not key:
+                    # Fallback to legacy service name for migration
+                    key = keyring.get_password("ForensicReportDrafter", f"api_key_{provider}")
                 if key:
                     self._api_key_cache[provider] = key
                 return key

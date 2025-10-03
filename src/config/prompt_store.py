@@ -19,19 +19,12 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-
-
-def _app_config_root() -> Path:
-    # Use the same base as SecureSettings for consistency
-    root = Path.home() / ".forensic_report_drafter"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+from .paths import app_prompts_root, app_user_root, get_repo_prompts_dir as _repo_prompts_dir, maybe_migrate_legacy
 
 
 def get_prompts_root() -> Path:
-    root = _app_config_root() / "prompts"
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    maybe_migrate_legacy()
+    return app_prompts_root()
 
 
 def get_bundled_dir() -> Path:
@@ -47,8 +40,7 @@ def get_custom_dir() -> Path:
 
 
 def get_repo_prompts_dir() -> Path:
-    # Repo layout: src/app/resources/prompts
-    return Path(__file__).resolve().parents[2] / "app" / "resources" / "prompts"
+    return _repo_prompts_dir()
 
 
 def _hash_file(path: Path) -> str:
@@ -168,4 +160,3 @@ __all__ = [
     "load_manifest",
     "save_manifest",
 ]
-

@@ -10,6 +10,7 @@ from pathlib import Path
 from datetime import datetime
 from PySide6.QtWidgets import QMessageBox, QApplication
 from PySide6.QtCore import QObject, Signal, QMetaObject, Qt, Q_ARG
+from src.config.paths import app_crashes_dir
 
 
 class GlobalExceptionHandler(QObject):
@@ -20,7 +21,7 @@ class GlobalExceptionHandler(QObject):
     
     def __init__(self, crash_dir: Path = None):
         super().__init__()
-        self.crash_dir = crash_dir or Path.home() / ".forensic_report_drafter" / "crashes"
+        self.crash_dir = crash_dir or app_crashes_dir()
         self.crash_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
         self._original_hook = sys.excepthook

@@ -3,7 +3,8 @@
 Sync bundled prompt templates into the user prompt store.
 
 This copies prompts from src/app/resources/prompts into
-~/.forensic_report_drafter/prompts/bundled without touching custom prompts.
+~/Documents/llestrade/prompts/bundled (or platform equivalent) without
+touching custom prompts.
 
 Usage:
   uv run scripts/sync_prompts.py           # Copy new files, skip changed
@@ -39,4 +40,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

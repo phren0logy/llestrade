@@ -25,10 +25,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QGroupBox,
     QCheckBox,
+    QSpinBox,
 )
 
 from src.config.app_config import get_available_providers_and_models
-from src.config.prompt_store import get_bundled_dir
+from src.config.prompt_store import get_bundled_dir, get_custom_dir
 from src.app.core.summary_groups import SummaryGroup
 
 DEFAULT_SYSTEM_PROMPT = "resources/prompts/document_analysis_system_prompt.md"
@@ -129,6 +130,13 @@ class SummaryGroupDialog(QDialog):
         self.custom_model_edit.setPlaceholderText("e.g., claude-sonnet-4-5-20250929")
         form.addRow(self.custom_model_label, self.custom_model_edit)
 
+        self.custom_context_label = QLabel("Custom context window (tokens)")
+        self.custom_context_spin = QSpinBox()
+        self.custom_context_spin.setRange(10000, 4000000)
+        self.custom_context_spin.setSingleStep(1000)
+        self.custom_context_spin.setValue(200000)
+        form.addRow(self.custom_context_label, self.custom_context_spin)
+
         # Combined options
         self.order_combo = QComboBox()
         self.order_combo.addItem("By path", "path")
@@ -189,9 +197,15 @@ class SummaryGroupDialog(QDialog):
         is_custom = bool(data) and data[0] == "custom"
         self.custom_model_label.setVisible(is_custom)
         self.custom_model_edit.setVisible(is_custom)
+        self.custom_context_label.setVisible(is_custom)
+        self.custom_context_spin.setVisible(is_custom)
 
     def _choose_prompt_file(self, line_edit: QLineEdit) -> None:
-        initial_dir = self._project_dir if self._project_dir else Path.cwd()
+        # Default browse folder to user prompt store (custom), with safe fallbacks
+        try:
+            initial_dir = get_custom_dir()
+        except Exception:
+            initial_dir = self._project_dir if self._project_dir else Path.cwd()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Prompt File",
@@ -263,6 +277,9 @@ class SummaryGroupDialog(QDialog):
             if not model:
                 QMessageBox.warning(self, "Missing Model", "Please enter a model id for the custom option.")
                 return
+            custom_window = int(self.custom_context_spin.value())
+        else:
+            custom_window = None
         description = self.description_edit.toPlainText().strip()
         system_prompt = self._normalise_text(self.system_prompt_edit.text().strip())
         user_prompt = self._normalise_text(self.user_prompt_edit.text().strip())
@@ -313,6 +330,7 @@ class SummaryGroupDialog(QDialog):
             templ = self.output_template_edit.text().strip() or "combined_{timestamp}.md"
             group.combine_output_template = templ
             group.use_reasoning = self.reasoning_checkbox.isChecked()
+            group.model_context_window = custom_window
             self._group = group
         else:
             self._group = SummaryGroup.create(
@@ -325,6 +343,7 @@ class SummaryGroupDialog(QDialog):
                 system_prompt_path=system_prompt,
                 user_prompt_path=user_prompt,
             )
+            self._group.model_context_window = custom_window
         self.accept()
 
     # ------------------------------------------------------------------

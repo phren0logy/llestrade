@@ -61,6 +61,8 @@ class SummaryGroup:
     prompt_template: str = ""
     provider_id: str = ""
     model: str = ""
+    # Optional explicit context window (tokens) for custom models
+    model_context_window: Optional[int] = None
     system_prompt_path: str = ""
     user_prompt_path: str = ""
     created_at: datetime = field(default_factory=_utcnow)
@@ -128,6 +130,7 @@ class SummaryGroup:
             "prompt_template": self.prompt_template,
             "provider_id": self.provider_id,
             "model": self.model,
+            "model_context_window": self.model_context_window,
             "system_prompt_path": self.system_prompt_path,
             "user_prompt_path": self.user_prompt_path,
             "created_at": self.created_at.isoformat(),
@@ -162,6 +165,11 @@ class SummaryGroup:
             prompt_template=str(payload.get("prompt_template", "")),
             provider_id=str(payload.get("provider_id", "")),
             model=str(payload.get("model", "")),
+            model_context_window=(
+                int(payload.get("model_context_window"))
+                if str(payload.get("model_context_window", "")).strip().isdigit()
+                else None
+            ),
             system_prompt_path=str(payload.get("system_prompt_path", "")),
             user_prompt_path=str(payload.get("user_prompt_path", "")),
             created_at=_parse_datetime(payload.get("created_at")),
