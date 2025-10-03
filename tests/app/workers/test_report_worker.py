@@ -74,7 +74,7 @@ class _StubPromptManager:
         if name == "integrated_analysis_prompt":
             return {
                 "system_prompt": "System",
-                "user_prompt": "Draft prompt {combined_summaries}",
+                "user_prompt": "Draft prompt {document_content}",
             }
         raise KeyError(name)
 
@@ -85,6 +85,16 @@ class _StubPromptManager:
 
     def get_system_prompt(self) -> str:
         return "System"
+
+
+class _StubPromptManagerMissingContent(_StubPromptManager):
+    def get_prompt_template(self, name: str) -> dict:
+        if name == "integrated_analysis_prompt":
+            return {
+                "system_prompt": "System",
+                "user_prompt": "Draft prompt without placeholder",
+            }
+        return super().get_prompt_template(name)
 
 
 def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -139,3 +149,41 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert manifest["provider"] == "anthropic"
     assert manifest["draft_path"].endswith("-draft.md")
     assert manifest["inputs"]
+
+
+def test_report_worker_requires_document_content_placeholder(
+    tmp_path: Path,
+    qt_app: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert qt_app is not None
+
+    project_dir = tmp_path
+    converted_dir = project_dir / "converted_documents"
+    converted_dir.mkdir(parents=True, exist_ok=True)
+    (converted_dir / "doc.md").write_text("Body", encoding="utf-8")
+
+    monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
+    monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
+    monkeypatch.setattr(report_worker, "PromptManager", lambda: _StubPromptManagerMissingContent())
+
+    worker = ReportWorker(
+        project_dir=project_dir,
+        inputs=[(REPORT_CATEGORY_CONVERTED, "converted_documents/doc.md")],
+        provider_id="anthropic",
+        model="claude-sonnet-4-5-20250929",
+        custom_model=None,
+        context_window=None,
+        instructions="Follow instructions",
+        template_path=None,
+        transcript_path=None,
+        metadata=ProjectMetadata(case_name="Case"),
+    )
+
+    failures: list[str] = []
+    worker.failed.connect(failures.append)
+
+    worker.run()
+
+    assert failures, "Expected failure signal when placeholder missing"
+    assert "{document_content}" in failures[0]

@@ -153,10 +153,10 @@ class BulkAnalysisWorker(DashboardWorker):
             raise BulkAnalysisCancelled
 
         content = document.source_path.read_text(encoding="utf-8")
-        # Allow custom context window override when set on the group
         override_window = getattr(self._group, "model_context_window", None)
         if isinstance(override_window, int) and override_window > 0:
             from src.common.llm.tokens import TokenCounter
+
             token_info = TokenCounter.count(
                 text=content,
                 provider=provider_config.provider_id,

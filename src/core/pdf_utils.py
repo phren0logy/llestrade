@@ -396,36 +396,36 @@ def process_pdf_with_azure(
             # Reset file pointer for JSON processing
             file.seek(0)
             
-            # Process for JSON with retries
-            json_result = None
-            proc_retry_delay = 3  # Reset delay for JSON processing
+        json_result = None
+        if json_path is not None:
+            proc_retry_delay = 3
             for attempt in range(1, max_proc_retries + 1):
                 try:
                     print(f"JSON processing attempt {attempt}/{max_proc_retries}")
-                    # Process for JSON
                     print(
                         f"Starting Azure Document Intelligence processing for {os.path.basename(pdf_path)} in JSON format"
                     )
                     json_poller = document_intelligence_client.begin_analyze_document(
                         "prebuilt-layout", file
                     )
-                    
-                    # Get the JSON results with timeout handling
-                    print(f"Waiting for Azure Document Intelligence JSON results...")
-                    json_result = json_poller.result(timeout=1800)  # 30 minute timeout
-                    print(f"Received Azure Document Intelligence JSON results")
-                    break  # Success, exit the retry loop
+                    print("Waiting for Azure Document Intelligence JSON results...")
+                    json_result = json_poller.result(timeout=1800)
+                    print("Received Azure Document Intelligence JSON results")
+                    break
                 except Exception as e:
                     if attempt == max_proc_retries:
-                        raise Exception(f"Failed to process PDF for JSON after {max_proc_retries} attempts: {str(e)}")
-                    print(f"JSON processing attempt {attempt} failed: {str(e)}. Retrying in {proc_retry_delay} seconds...")
+                        raise Exception(
+                            f"Failed to process PDF for JSON after {max_proc_retries} attempts: {str(e)}"
+                        )
+                    print(
+                        f"JSON processing attempt {attempt} failed: {str(e)}. Retrying in {proc_retry_delay} seconds..."
+                    )
                     time.sleep(proc_retry_delay)
-                    proc_retry_delay *= 1.5  # Increase delay for next attempt
-                    file.seek(0)  # Reset file pointer for next attempt
+                    proc_retry_delay *= 1.5
+                    file.seek(0)
 
-        # Verify we have both results
-        if not markdown_result or not json_result:
-            raise Exception("Failed to get either Markdown or JSON results from Azure")
+        if not markdown_result:
+            raise Exception("Failed to get Markdown results from Azure")
 
         # Save markdown content
         try:
@@ -437,7 +437,7 @@ def process_pdf_with_azure(
             raise Exception(f"Error saving Markdown results: {str(e)}")
 
         # Save JSON content only if requested
-        if json_path is not None:
+        if json_path is not None and json_result is not None:
             try:
                 with open(json_path, "w", encoding="utf-8") as f:
                     json.dump(json_result.as_dict(), f, indent=4)

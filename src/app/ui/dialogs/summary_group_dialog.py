@@ -36,8 +36,8 @@ from src.app.core.project_manager import ProjectMetadata
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 from .prompt_preview_dialog import PromptPreviewDialog
 
-DEFAULT_SYSTEM_PROMPT = "resources/prompts/document_analysis_system_prompt.md"
-DEFAULT_USER_PROMPT = "resources/prompts/document_summary_prompt.md"
+DEFAULT_SYSTEM_PROMPT = "src/app/resources/prompts/document_analysis_system_prompt.md"
+DEFAULT_USER_PROMPT = "src/app/resources/prompts/document_summary_prompt.md"
 
 
 class SummaryGroupDialog(QDialog):
@@ -118,19 +118,21 @@ class SummaryGroupDialog(QDialog):
         self.system_prompt_button = QPushButton("Browse…")
         self.system_prompt_button.clicked.connect(lambda: self._choose_prompt_file(self.system_prompt_edit))
         form.addRow("System Prompt", self._wrap_with_button(self.system_prompt_edit, self.system_prompt_button))
-        try:
-            self.system_prompt_edit.setText(str(get_bundled_dir() / "document_analysis_system_prompt.md"))
-        except Exception:
-            self.system_prompt_edit.setText(DEFAULT_SYSTEM_PROMPT)
+        self._initialise_prompt_path(
+            self.system_prompt_edit,
+            "document_analysis_system_prompt.md",
+            DEFAULT_SYSTEM_PROMPT,
+        )
 
         self.user_prompt_edit = QLineEdit()
         self.user_prompt_button = QPushButton("Browse…")
         self.user_prompt_button.clicked.connect(lambda: self._choose_prompt_file(self.user_prompt_edit))
         form.addRow("User Prompt", self._wrap_with_button(self.user_prompt_edit, self.user_prompt_button))
-        try:
-            self.user_prompt_edit.setText(str(get_bundled_dir() / "document_summary_prompt.md"))
-        except Exception:
-            self.user_prompt_edit.setText(DEFAULT_USER_PROMPT)
+        self._initialise_prompt_path(
+            self.user_prompt_edit,
+            "document_summary_prompt.md",
+            DEFAULT_USER_PROMPT,
+        )
 
         self.preview_prompt_button = QPushButton("Preview Prompt")
         self.preview_prompt_button.clicked.connect(self._preview_prompt)
@@ -229,6 +231,25 @@ class SummaryGroupDialog(QDialog):
         )
         if file_path:
             line_edit.setText(self._normalise_path(Path(file_path)))
+
+    def _initialise_prompt_path(self, line_edit: QLineEdit, filename: str, fallback: str) -> None:
+        path: Optional[Path] = None
+        try:
+            candidate = get_bundled_dir() / filename
+            if candidate.exists():
+                path = candidate
+        except Exception:
+            path = None
+
+        if path is None:
+            alt = Path(fallback)
+            if alt.exists():
+                path = alt
+
+        if path is None:
+            path = Path(fallback)
+
+        line_edit.setText(self._normalise_path(path))
 
     def _on_operation_changed(self) -> None:
         combined = self.operation_combo.currentData() == "combined"

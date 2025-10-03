@@ -99,6 +99,8 @@ def load_prompts(
                 "and clinical details.\n\n{document_content}"
             )
 
+    _ensure_document_placeholder(user_template, source=group.user_prompt_path or "document_summary_prompt")
+
     return PromptBundle(system_template=system_template, user_template=user_template)
 
 
@@ -201,6 +203,14 @@ def _safe_format(template: str, context: Dict[str, object]) -> str:
 
     safe_context = _SafeDict({k: v for k, v in context.items() if v is not None})
     return template.format_map(safe_context)
+
+
+def _ensure_document_placeholder(template: str, *, source: str) -> None:
+    if "{document_content}" not in template:
+        raise ValueError(
+            "User prompt template must include the {document_content} placeholder. "
+            f"Template source: {source or 'embedded default'}"
+        )
 
 
 def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:

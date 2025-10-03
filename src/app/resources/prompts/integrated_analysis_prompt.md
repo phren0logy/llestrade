@@ -25,7 +25,7 @@ You are an advanced assistant designed to help a forensic psychiatrist create co
 
 The following are summaries of individual documents that have been analyzed:
 
-{combined_summaries}
+{document_content}
 
 ## Instructions for Integrated Analysis
 

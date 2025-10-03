@@ -6,7 +6,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, List, Sequence, Set
+from typing import Dict, Optional, List, Sequence, Set, Tuple
 
 from PySide6.QtCore import Qt, QUrl
 from shiboken6 import isValid
@@ -35,7 +35,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtWidgets import QHeaderView
 
-from src.app.core.conversion_manager import ConversionJob, build_conversion_jobs
+from src.app.core.conversion_manager import (
+    ConversionJob,
+    DuplicateSource,
+    build_conversion_jobs,
+)
 from src.app.core.feature_flags import FeatureFlags
 from src.app.core.file_tracker import WorkspaceMetrics, WorkspaceGroupMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
@@ -638,9 +642,11 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        jobs = self._collect_conversion_jobs()
+        jobs, duplicates = self._collect_conversion_jobs()
+        if duplicates:
+            self._show_duplicate_notice(duplicates)
         if not jobs:
-            if not auto_run:
+            if not auto_run and not duplicates:
                 QMessageBox.information(self, "Conversion", "No new files detected.")
             return
 
@@ -908,13 +914,12 @@ class ProjectWorkspace(QWidget):
         selected.sort()
         return selected
 
-    def _collect_conversion_jobs(self) -> List[ConversionJob]:
+    def _collect_conversion_jobs(self) -> Tuple[List[ConversionJob], Sequence[DuplicateSource]]:
         if not self._project_manager:
-            return []
-        jobs = build_conversion_jobs(self._project_manager)
-        if not jobs:
-            return []
-        return [job for job in jobs if job.source_path not in self._inflight_sources]
+            return [], []
+        plan = build_conversion_jobs(self._project_manager)
+        jobs = [job for job in plan.jobs if job.source_path not in self._inflight_sources]
+        return jobs, plan.duplicates
 
     def _set_root_warning(self, warnings: List[str]) -> None:
         if warnings:
@@ -923,6 +928,27 @@ class ProjectWorkspace(QWidget):
         else:
             self._root_warning_label.clear()
             self._root_warning_label.hide()
+
+    def _show_duplicate_notice(self, duplicates: Sequence[DuplicateSource]) -> None:
+        if not duplicates:
+            return
+
+        preview_limit = 10
+        listed = list(duplicates[:preview_limit])
+        lines = [
+            f"- {duplicate.duplicate_relative} matches {duplicate.primary_relative}"
+            for duplicate in listed
+        ]
+        remaining = len(duplicates) - len(listed)
+        if remaining > 0:
+            lines.append(f"…and {remaining} more duplicate files.")
+
+        message = (
+            "Duplicate files detected. Matching documents will be skipped to avoid converting"
+            " the same content twice.\n\n"
+            + "\n".join(lines)
+        )
+        QMessageBox.warning(self, "Duplicate Files Skipped", message)
 
     def _compute_root_warnings(self, root_path: Path) -> List[str]:
         warnings: List[str] = []

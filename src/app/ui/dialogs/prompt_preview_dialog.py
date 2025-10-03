@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
@@ -43,7 +43,7 @@ class PromptPreviewDialog(QDialog):
         font = QFont("Courier New")
         font.setStyleHint(QFont.Monospace)
         container.setFont(font)
-        container.setLineWrapMode(QPlainTextEdit.NoWrap)
+        container.setLineWrapMode(QPlainTextEdit.WidgetWidth)
         container.setPlaceholderText(title)
         container.setToolTip(title)
         return container
@@ -51,9 +51,8 @@ class PromptPreviewDialog(QDialog):
     def set_prompts(self, system_prompt: str, user_prompt: str) -> None:
         self._system_edit.setPlainText(system_prompt)
         self._user_edit.setPlainText(user_prompt)
-        self._system_edit.moveCursor(self._system_edit.textCursor().Start)
-        self._user_edit.moveCursor(self._user_edit.textCursor().Start)
+        self._system_edit.moveCursor(QTextCursor.Start)
+        self._user_edit.moveCursor(QTextCursor.Start)
 
 
 __all__ = ["PromptPreviewDialog"]
-

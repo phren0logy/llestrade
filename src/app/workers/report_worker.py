@@ -92,6 +92,10 @@ class ReportWorker(DashboardWorker):
             template_bundle = prompt_manager.get_prompt_template("integrated_analysis_prompt")
             system_prompt = template_bundle.get("system_prompt", "" )
             user_prompt_template = template_bundle.get("user_prompt", "")
+            if "{document_content}" not in user_prompt_template:
+                raise ValueError(
+                    "Integrated analysis prompt must include the {document_content} placeholder."
+                )
             user_prompt = self._render_integrated_prompt(user_prompt_template, combined_content)
 
             prompt_tokens = self._count_tokens(system_prompt, user_prompt)
@@ -209,6 +213,7 @@ class ReportWorker(DashboardWorker):
             subject_name=subject_name,
             subject_dob=subject_dob,
             case_info=case_info,
+            document_content=combined,
             combined_summaries=combined,
         )
 

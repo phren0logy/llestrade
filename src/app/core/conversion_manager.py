@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, List
+from typing import Iterable, List, Sequence
 
 from .project_manager import ProjectManager
 
@@ -30,27 +31,50 @@ class ConversionJob:
         return self.relative_path or self.source_path.name
 
 
-def build_conversion_jobs(project_manager: ProjectManager) -> List[ConversionJob]:
+@dataclass(frozen=True)
+class DuplicateSource:
+    """Record that two source files share identical content."""
+
+    digest: str
+    primary_relative: str
+    duplicate_relative: str
+
+
+@dataclass(frozen=True)
+class ConversionPlan:
+    """Conversion work along with any duplicate notices discovered."""
+
+    jobs: Sequence[ConversionJob]
+    duplicates: Sequence[DuplicateSource]
+
+    @classmethod
+    def empty(cls) -> "ConversionPlan":
+        return cls(jobs=(), duplicates=())
+
+
+def build_conversion_jobs(project_manager: ProjectManager) -> ConversionPlan:
     """Return jobs required to bring selected folders into converted_documents."""
     project_dir = project_manager.project_dir
     if not project_dir:
-        return []
+        return ConversionPlan.empty()
 
     state = project_manager.source_state
     if not state.root:
-        return []
+        return ConversionPlan.empty()
 
     root_path = _resolve_root(project_dir, state.root)
     if not root_path or not root_path.exists():
         LOGGER.warning("Source root %s is not accessible", state.root)
-        return []
+        return ConversionPlan.empty()
 
     selected = state.selected_folders or []
     if not selected:
-        return []
+        return ConversionPlan.empty()
 
     jobs: List[ConversionJob] = []
+    duplicates: List[DuplicateSource] = []
     seen_sources: set[Path] = set()
+    seen_hashes: dict[str, str] = {}
     for folder in selected:
         folder_path = root_path / folder
         if not folder_path.exists() or not folder_path.is_dir():
@@ -64,6 +88,19 @@ def build_conversion_jobs(project_manager: ProjectManager) -> List[ConversionJob
             conversion_type = _classify_conversion(source_file)
             if conversion_type is None:
                 continue
+            digest = _hash_source(source_file)
+            if digest:
+                primary = seen_hashes.get(digest)
+                if primary:
+                    duplicates.append(
+                        DuplicateSource(
+                            digest=digest,
+                            primary_relative=primary,
+                            duplicate_relative=relative,
+                        )
+                    )
+                    continue
+                seen_hashes[digest] = relative
             destination = _destination_for(project_dir, relative, conversion_type)
             if not _needs_conversion(source_file, destination):
                 continue
@@ -75,7 +112,7 @@ def build_conversion_jobs(project_manager: ProjectManager) -> List[ConversionJob
                     conversion_type=conversion_type,
                 )
             )
-    return jobs
+    return ConversionPlan(jobs=tuple(jobs), duplicates=tuple(duplicates))
 
 
 def _resolve_root(project_dir: Path, root_spec: str) -> Path | None:
@@ -124,6 +161,21 @@ def _needs_conversion(source: Path, destination: Path) -> bool:
         return source.stat().st_mtime > destination.stat().st_mtime
     except OSError:
         return True
+
+
+def _hash_source(path: Path) -> str | None:
+    """Compute a SHA256 digest for the provided file, returning None on failure."""
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        LOGGER.warning("Unable to hash %s; skipping duplicate detection", path)
+        return None
 
 
 def copy_existing_markdown(source: Path, destination: Path) -> None:

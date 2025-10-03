@@ -94,10 +94,10 @@ class BulkReduceWorker(DashboardWorker):
             if self.is_cancelled():
                 raise BulkAnalysisCancelled
 
-            # Chunk if needed, allow custom context window override
             override_window = getattr(self._group, "model_context_window", None)
             if isinstance(override_window, int) and override_window > 0:
                 from src.common.llm.tokens import TokenCounter
+
                 token_info = TokenCounter.count(
                     text=combined_content,
                     provider=provider_cfg.provider_id,
