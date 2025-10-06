@@ -151,10 +151,11 @@ class SimplifiedMainWindow(QMainWindow):
         except Exception as exc:
             self.logger.debug("Prompt sync check failed: %s", exc)
 
-    def _show_welcome(self) -> None:
+    def _show_welcome(self, *, close_project: bool = False) -> None:
+        if close_project or self._workspace_widget is not None:
+            self._teardown_workspace(close_project=close_project)
         if self._welcome_stage:
             self._stack.setCurrentWidget(self._welcome_stage)
-        self._workspace_widget = None
         self._update_window_title()
         self.statusBar().showMessage("Ready")
 
@@ -347,6 +348,8 @@ class SimplifiedMainWindow(QMainWindow):
         self.project_manager = project_manager
         workspace = self.workspace_controller.create_workspace(project_manager)
         workspace.set_project(project_manager)
+        if hasattr(workspace, "home_requested"):
+            workspace.home_requested.connect(self._handle_workspace_home)
         self._display_workspace(workspace)
         self._update_window_title(project_manager)
 
@@ -371,6 +374,23 @@ class SimplifiedMainWindow(QMainWindow):
         self._workspace_widget = workspace
         self._stack.addWidget(workspace)
         self._stack.setCurrentWidget(workspace)
+
+    def _handle_workspace_home(self) -> None:
+        self._show_welcome(close_project=True)
+
+    def _teardown_workspace(self, *, close_project: bool = False) -> None:
+        if self._workspace_widget is not None:
+            index = self._stack.indexOf(self._workspace_widget)
+            if index != -1:
+                widget = self._stack.widget(index)
+                self._stack.removeWidget(widget)
+                widget.deleteLater()
+            self._workspace_widget = None
+        if close_project and self.project_manager:
+            try:
+                self.project_manager.close_project()
+            finally:
+                self.project_manager = None
 
     def _on_workspace_created(self, workspace: QWidget) -> None:  # pragma: no cover - hook for future extensions
         self.logger.debug("Workspace widget created: %s", workspace)

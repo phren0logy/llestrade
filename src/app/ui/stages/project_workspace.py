@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, List, Sequence, Set, Tuple
 
-from PySide6.QtCore import Qt, QUrl
+from PySide6.QtCore import Qt, QUrl, Signal
 from shiboken6 import isValid
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
@@ -106,6 +106,8 @@ _ITEM_IS_ENABLED = _qt_flag("ItemIsEnabled")
 class ProjectWorkspace(QWidget):
     """Dashboard workspace showing documents and bulk analysis groups."""
 
+    home_requested = Signal()
+
     def __init__(
         self,
         project_manager: Optional[ProjectManager] = None,
@@ -119,6 +121,7 @@ class ProjectWorkspace(QWidget):
         self._project_path_label = QLabel()
         self._metadata_label: QLabel | None = None
         self._edit_metadata_button: QPushButton | None = None
+        self._home_button: QPushButton | None = None
         self._workspace_metrics: WorkspaceMetrics | None = None
         self._current_warnings: List[str] = []
         self._thread_pool = get_worker_pool()
@@ -182,6 +185,22 @@ class ProjectWorkspace(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
 
+        top_bar = QHBoxLayout()
+        top_bar.setContentsMargins(0, 0, 0, 0)
+        top_bar.setSpacing(8)
+
+        self._home_button = QPushButton("home")
+        self._home_button.setCursor(Qt.PointingHandCursor)
+        self._home_button.setFlat(True)
+        self._home_button.clicked.connect(self.home_requested.emit)
+        top_bar.addWidget(self._home_button)
+
+        self._project_path_label.setStyleSheet("font-weight: 600;")
+        top_bar.addWidget(self._project_path_label)
+        top_bar.addStretch()
+
+        layout.addLayout(top_bar)
+
         self._tabs = QTabWidget()
         self._documents_tab = self._build_documents_tab()
         self._tabs.addTab(self._documents_tab, "Documents")
@@ -192,7 +211,6 @@ class ProjectWorkspace(QWidget):
             self._tabs.addTab(self._summary_tab, "Bulk Analysis")
         self._reports_tab = self._build_reports_tab()
         self._tabs.addTab(self._reports_tab, "Reports")
-        layout.addWidget(self._project_path_label)
         metadata_row = QHBoxLayout()
         metadata_row.setContentsMargins(0, 0, 0, 0)
         self._metadata_label = QLabel("Subject: — | DOB: —")
