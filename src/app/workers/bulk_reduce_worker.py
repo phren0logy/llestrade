@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import logging
+import hashlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, Sequence, Tuple
+from typing import Dict, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Signal
 
@@ -37,6 +38,93 @@ from .base import DashboardWorker
 LOGGER = logging.getLogger(__name__)
 
 
+_MANIFEST_VERSION = 1
+
+
+def _manifest_path(project_dir: Path, group: SummaryGroup) -> Path:
+    slug = getattr(group, "slug", None) or group.folder_name
+    return project_dir / "bulk_analysis" / slug / "reduce" / "manifest.json"
+
+
+def _default_manifest() -> Dict[str, object]:
+    return {"version": _MANIFEST_VERSION, "signature": None}
+
+
+def _load_manifest(path: Path) -> Dict[str, object]:
+    if not path.exists():
+        return _default_manifest()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _default_manifest()
+    if not isinstance(data, dict):
+        return _default_manifest()
+    return {
+        "version": data.get("version", _MANIFEST_VERSION),
+        "signature": data.get("signature"),
+    }
+
+
+def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
+    payload = {
+        "version": _MANIFEST_VERSION,
+        "signature": manifest.get("signature"),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _compute_prompt_hash(
+    bundle: PromptBundle,
+    provider_cfg: ProviderConfig,
+    group: SummaryGroup,
+    metadata: Optional[ProjectMetadata],
+) -> str:
+    metadata_summary: Dict[str, str] = {}
+    if metadata:
+        metadata_summary = {
+            "case_name": metadata.case_name,
+            "subject_name": metadata.subject_name,
+            "date_of_birth": metadata.date_of_birth,
+            "case_description": metadata.case_description,
+        }
+    payload = {
+        "system_template": bundle.system_template,
+        "user_template": bundle.user_template,
+        "provider_id": provider_cfg.provider_id,
+        "model": provider_cfg.model,
+        "temperature": provider_cfg.temperature,
+        "group_operation": group.operation,
+        "use_reasoning": group.use_reasoning,
+        "model_context_window": group.model_context_window,
+        "system_prompt_path": group.system_prompt_path,
+        "user_prompt_path": group.user_prompt_path,
+        "metadata": metadata_summary,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def _inputs_signature(inputs: Sequence[tuple[str, Path, str]]) -> list[dict[str, object]]:
+    signature: list[dict[str, object]] = []
+    for kind, path, rel in inputs:
+        try:
+            stat_result = path.stat()
+            mtime = float(stat_result.st_mtime)
+            mtime_ns = getattr(stat_result, "st_mtime_ns", None)
+        except OSError:
+            mtime = 0.0
+            mtime_ns = None
+        entry: dict[str, object] = {"kind": kind, "path": rel, "mtime": round(mtime, 6)}
+        if mtime_ns is not None:
+            try:
+                entry["mtime_ns"] = int(mtime_ns)
+            except (TypeError, ValueError):
+                pass
+        signature.append(entry)
+    signature.sort(key=lambda item: (item["kind"], item["path"]))
+    return signature
+
+
 @dataclass(frozen=True)
 class ProviderConfig:
     provider_id: str
@@ -58,11 +146,13 @@ class BulkReduceWorker(DashboardWorker):
         project_dir: Path,
         group: SummaryGroup,
         metadata: Optional[ProjectMetadata],
+        force_rerun: bool = False,
     ) -> None:
         super().__init__(worker_name="bulk_reduce")
         self._project_dir = project_dir
         self._group = group
         self._metadata = metadata
+        self._force_rerun = force_rerun
 
     # ------------------------------------------------------------------
     # QRunnable API
@@ -72,6 +162,7 @@ class BulkReduceWorker(DashboardWorker):
             provider_cfg = self._resolve_provider()
             bundle = load_prompts(self._project_dir, self._group, self._metadata)
             system_prompt = render_system_prompt(bundle, self._metadata)
+            prompt_hash = _compute_prompt_hash(bundle, provider_cfg, self._group, self._metadata)
 
             provider = self._create_provider(provider_cfg, system_prompt)
             if provider is None:
@@ -83,6 +174,20 @@ class BulkReduceWorker(DashboardWorker):
                 self.log_message.emit("No inputs selected for combined operation.")
                 self.finished.emit(0, 0)
                 return
+
+            signature_inputs = _inputs_signature(inputs)
+            state_manifest_path = _manifest_path(self._project_dir, self._group)
+            previous = _load_manifest(state_manifest_path)
+            current_signature = {"prompt_hash": prompt_hash, "inputs": signature_inputs}
+
+            if not self._force_rerun and previous.get("signature") == current_signature:
+                self.log_message.emit("Combined inputs unchanged; skipping run.")
+                self.finished.emit(0, 0)
+                return
+
+            self.log_message.emit(
+                f"Starting combined bulk analysis for '{self._group.name}' ({total} input file(s))."
+            )
 
             if total == 1:
                 status_message = "Reading 1 input file…"
@@ -156,11 +261,13 @@ class BulkReduceWorker(DashboardWorker):
                     result = self._invoke_provider(provider, provider_cfg, combine_prompt, system_prompt)
 
             # Persist
-            output_path, manifest_path = self._output_paths()
+            output_path, run_manifest_path = self._output_paths()
             output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(result, encoding="utf-8")
-            manifest = self._build_manifest(inputs, provider_cfg)
-            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            run_manifest = self._build_run_manifest(inputs, provider_cfg)
+            run_manifest_path.write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
+            state_manifest = self._build_state_manifest(current_signature)
+            _save_manifest(state_manifest_path, state_manifest)
 
             self.progress.emit(1, 1, "Completed")
             self.finished.emit(1, 0)
@@ -343,31 +450,30 @@ class BulkReduceWorker(DashboardWorker):
         out_manifest = out_md.with_suffix(".manifest.json")
         return out_md, out_manifest
 
-    def _build_manifest(self, inputs: Sequence[tuple[str, Path, str]], provider_cfg: ProviderConfig) -> dict:
+    def _build_state_manifest(self, signature: dict[str, object]) -> dict:
+        return {
+            "version": _MANIFEST_VERSION,
+            "group_id": self._group.group_id,
+            "group_slug": getattr(self._group, "slug", None) or self._group.folder_name,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "signature": signature,
+        }
+
+    def _build_run_manifest(self, inputs: Sequence[tuple[str, Path, str]], provider_cfg: ProviderConfig) -> dict:
         manifest_inputs = []
-        for _, path, key in inputs:
+        for kind, path, rel in inputs:
             try:
                 stat_result = path.stat()
                 mtime = float(stat_result.st_mtime)
-                mtime_ns = getattr(stat_result, "st_mtime_ns", None)
             except OSError:
                 mtime = 0.0
-                mtime_ns = None
-
-            entry = {"path": key, "mtime": mtime}
-            if mtime_ns is not None:
-                try:
-                    entry["mtime_ns"] = int(mtime_ns)
-                except (TypeError, ValueError):
-                    # st_mtime_ns may not be an int on all platforms
-                    pass
-            manifest_inputs.append(entry)
+            manifest_inputs.append({"kind": kind, "path": rel, "mtime": round(mtime, 6)})
 
         return {
             "version": 1,
             "group_id": self._group.group_id,
             "group_slug": getattr(self._group, "slug", None) or self._group.folder_name,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "inputs": manifest_inputs,
             "provider": provider_cfg.provider_id,
             "model": provider_cfg.model,

@@ -10,7 +10,7 @@ from typing import Dict, Optional, List, Sequence, Set, Tuple
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from shiboken6 import isValid
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -163,6 +163,7 @@ class ProjectWorkspace(QWidget):
         self._report_refinement_prompt_edit: QLineEdit | None = None
         self._report_generate_button: QPushButton | None = None
         self._report_progress_bar: QProgressBar | None = None
+        self._summary_log: QTextEdit | None = None
         self._report_log: QTextEdit | None = None
         self._report_template_edit: QLineEdit | None = None
         self._report_transcript_edit: QLineEdit | None = None
@@ -548,6 +549,12 @@ class ProjectWorkspace(QWidget):
         self._summary_info_label = QLabel("No bulk analysis groups yet.")
         layout.addWidget(self._summary_info_label)
 
+        self._summary_log = QTextEdit()
+        self._summary_log.setReadOnly(True)
+        self._summary_log.setMaximumHeight(120)
+        self._summary_log.setStyleSheet("font-family: monospace; font-size: 11px;")
+        layout.addWidget(self._summary_log)
+
         content_layout = QHBoxLayout()
         content_layout.setSpacing(12)
 
@@ -614,6 +621,8 @@ class ProjectWorkspace(QWidget):
         self._update_source_root_label()
         self._update_last_scan_label()
         self._load_report_preferences()
+        if self._summary_log:
+            self._summary_log.clear()
         self.refresh()
 
     def project_manager(self) -> Optional[ProjectManager]:
@@ -2589,11 +2598,18 @@ class ProjectWorkspace(QWidget):
         action_layout.setSpacing(6)
 
         if op_type == "combined":
-            run_button = QPushButton("Run Combined")
-            run_enabled = (metrics and getattr(metrics, "combined_input_count", 0) > 0) and group.group_id not in self._running_groups
-            run_button.setEnabled(bool(run_enabled))
-            run_button.clicked.connect(lambda _, g=group: self._start_combined_run(g))
-            action_layout.addWidget(run_button)
+            input_count = getattr(metrics, "combined_input_count", 0) if metrics else 0
+            is_running = group.group_id in self._running_groups
+
+            run_pending = QPushButton("Run Combined")
+            run_pending.setEnabled(input_count > 0 and not is_running)
+            run_pending.clicked.connect(lambda _, g=group: self._start_combined_run(g, force_rerun=False))
+            action_layout.addWidget(run_pending)
+
+            run_all = QPushButton("Run Combined All")
+            run_all.setEnabled(input_count > 0 and not is_running)
+            run_all.clicked.connect(lambda _, g=group: self._start_combined_run(g, force_rerun=True))
+            action_layout.addWidget(run_all)
         else:
             pending_count = metrics.pending_bulk_analysis if metrics else None
             converted_count = metrics.converted_count if metrics else 0
@@ -2850,7 +2866,7 @@ class ProjectWorkspace(QWidget):
         self._refresh_summary_groups()
         self._workers.start(key, worker)
 
-    def _start_combined_run(self, group: SummaryGroup) -> None:
+    def _start_combined_run(self, group: SummaryGroup, *, force_rerun: bool = False) -> None:
         if not self._feature_flags.summary_groups_enabled:
             return
         if group.group_id in self._running_groups:
@@ -2859,10 +2875,25 @@ class ProjectWorkspace(QWidget):
         if not self._project_manager or not self._project_manager.project_dir:
             QMessageBox.warning(self, "Missing Project", "The project directory is not available.")
             return
+        if force_rerun:
+            confirm = QMessageBox.question(
+                self,
+                "Force Combined Re-run",
+                (
+                    "This will recompute the combined analysis and overwrite the latest output.\n\n"
+                    "Do you want to proceed?"
+                ),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if confirm != QMessageBox.Yes:
+                return
+
         worker = BulkReduceWorker(
             project_dir=self._project_manager.project_dir,
             group=group,
             metadata=self._project_manager.metadata,
+            force_rerun=force_rerun,
         )
         gid = group.group_id
         key = f"combine:{gid}"
@@ -2870,8 +2901,8 @@ class ProjectWorkspace(QWidget):
         self._bulk_progress[gid] = (0, 1)
         self._bulk_failures[gid] = []
         self._cancelling_groups.discard(gid)
-        if self._summary_info_label:
-            self._summary_info_label.setText("Running combined operation…")
+        mode_label = "force" if force_rerun else "standard"
+        self._on_bulk_log(gid, f"Starting combined operation for '{group.name}' ({mode_label}).")
         worker.progress.connect(lambda done, total, msg, g=gid: self._on_bulk_progress(g, done, total, msg))
         worker.file_failed.connect(lambda rel, err, g=gid: self._on_bulk_failed(g, rel, err))
         worker.log_message.connect(lambda message, g=gid: self._on_bulk_log(g, message))
@@ -2912,6 +2943,10 @@ class ProjectWorkspace(QWidget):
 
     def _on_bulk_log(self, group_id: str, message: str) -> None:  # noqa: ARG002 - future use
         LOGGER.info("[BulkAnalysis][%s] %s", group_id, message)
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        if self._summary_log:
+            self._summary_log.append(f"[{timestamp}] {message}")
+            self._summary_log.moveCursor(QTextCursor.End)
         if self._summary_info_label:
             self._summary_info_label.setText(message)
 
@@ -2930,15 +2965,13 @@ class ProjectWorkspace(QWidget):
         if was_cancelled:
             self._cancelling_groups.discard(group_id)
 
-        if self._summary_info_label:
-            if was_cancelled:
-                self._summary_info_label.setText("Bulk analysis cancelled.")
-            elif failures:
-                self._summary_info_label.setText(
-                    f"Bulk analysis completed with {failures} error(s)."
-                )
-            else:
-                self._summary_info_label.setText("Bulk analysis completed.")
+        if was_cancelled:
+            completion_message = "Bulk analysis cancelled."
+        elif failures:
+            completion_message = f"Bulk analysis completed with {failures} error(s)."
+        else:
+            completion_message = "Bulk analysis completed."
+        self._on_bulk_log(group_id, completion_message)
 
         if errors:
             QMessageBox.warning(

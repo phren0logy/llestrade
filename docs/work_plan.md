@@ -95,6 +95,8 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Offer system/user prompt file pickers per group (stored as relative paths)
   - [x] Provide run/stop controls that enqueue work on the shared worker pool and surface concise logs *(uses real workers with cancellation)*
   - [x] Split run actions into "Run Pending" and "Run All" with explicit confirmation for force re-runs
+  - [x] Mirror the split controls for combined operations (standard vs. force) with manifest-based skipping
+  - [x] Add an inline activity log so bulk-analysis messages remain visible during long runs
 - [ ] Progress Tab *(descoped; future activity feed will live in Bulk Analysis tab)*
 
 #### Step 4 - Automated Conversion & Bulk Analysis
