@@ -81,14 +81,15 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 - [x] Create tabbed workspace (`src/app/ui/stages/project_workspace.py`)
   - [x] Replace linear stages with QTabWidget
   - [x] Create Documents and Bulk Analysis tabs *(progress feed handled within Bulk Analysis; separate tab descoped)*
+  - [x] Provide "home" navigation to return to the welcome screen
   - [ ] Default to Bulk Analysis tab on open once setup is complete
-- [ ] Documents Tab
+- [x] Documents Tab
   - [x] Source folder picker with tree view checkboxes (folder-level only, default to all selected)
   - [x] Store selections as relative paths and surface manual "Re-scan for new files" action with last-scan timestamp
   - [x] Warn when files exist in the source root but no folders are selected (conversion requires subfolders)
   - [x] Display `X of Y` counts from FileTracker for files converted vs. pending (including converted_documents)
   - [x] Keep batch operations non-blocking and track in-flight conversions to avoid duplicate submissions
-- [ ] Bulk Analysis Tab
+- [x] Bulk Analysis Tab
   - [x] List bulk analysis groups with `X of Y` document coverage using FileTracker data
   - [x] Reuse folder tree with greyed-out (tooltip: "Enable in Documents → Sources") entries for folders not selected for conversion *(simplified to converted_documents tree only)*
   - [x] Offer system/user prompt file pickers per group (stored as relative paths)
@@ -126,13 +127,17 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
 - [ ] Connect bulk analysis workflow to groups
   - [x] Modify worker threads to accept group metadata and prompt file paths
   - [x] Update output structure to use `bulk_analysis/<group_name>/` directories
-  - [ ] Add skip logic for existing analyses (based on timestamp + prompt hash)
+  - [x] Add skip logic for existing analyses (based on timestamp + prompt hash)
   - [ ] Test with multiple groups and overlapping folders
 - [x] Consolidate worker infrastructure under `src/app/workers/`
   - [x] Move document processing/summarization threads into shared base classes
   - [x] Register workers with a `QThreadPool` (max 3) and add cancellation hooks
   - [ ] Emit consistent debug logging (job id + status transitions) for traceability
   - [x] Add unit tests for worker lifecycle and error propagation
+- [x] Normalize highlight color outputs
+  - [x] Write color aggregates to `highlights/colors` instead of `highlights/documents/colors`
+  - [x] Migrate legacy color files on extraction and clean up obsolete folders
+  - [x] Add regression tests covering the migration and color aggregate writes
 - [ ] Phoenix integration for LLM calls
   - [ ] Keep existing observability.py setup
   - [ ] Add bulk analysis group context to traces
@@ -209,6 +214,9 @@ project_dir/
 - [x] Breaking changes implemented cleanly
 - [x] Business logic tests passing
 - [ ] Phoenix tracing working for LLM calls with group context
+
+- [x] Documentation: add `highlights/` to the folder structure diagram; clarify that highlight counts use PDFs only.
+- [ ] Highlights UX: add "Re-extract highlights" action and surface reasons when a file remains pending.
 
 Note: Highlights denominator uses PDFs only (pending/highlights reflect PDF-eligible files).
 
@@ -397,6 +405,17 @@ _The wizard-style UI with linear stages has been replaced by the dashboard appro
 - [ ] Create user guide for new UI
 - [ ] Document API for developers
 - [ ] Add inline code documentation
+
+## Distribution & Packaging
+
+- [x] Centralize resource lookup for frozen bundles (`app_resource_root`, prompt/resource helpers)
+- [x] Add PyInstaller spec for the dashboard (`scripts/build_dashboard.spec`)
+- [x] Provide per-platform build wrappers (`scripts/build_macos.sh`, `scripts/build_linux.sh`, `scripts/build_windows.ps1`)
+- [ ] Validate macOS bundle end-to-end (launch, highlights, bulk analysis)
+- [ ] Produce and validate Windows bundle
+- [ ] Produce and validate Linux bundle
+- [ ] Add packaging jobs to CI with artifact uploads
+- [ ] Plan code signing / notarization strategy per platform
 
 ## Success Metrics
 

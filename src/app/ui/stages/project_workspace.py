@@ -2764,12 +2764,12 @@ class ProjectWorkspace(QWidget):
             group_metrics = self._workspace_metrics.groups.get(group.group_id)
 
         files: List[str] = []
+        force_rerun = False
         if group_metrics:
             pending = list(group_metrics.pending_files)
             if pending:
                 files = pending
             else:
-                # Everything already processed; ask whether to re-run
                 rerun = QMessageBox.question(
                     self,
                     "Bulk Analysis",
@@ -2781,7 +2781,24 @@ class ProjectWorkspace(QWidget):
                     QMessageBox.No,
                 )
                 if rerun == QMessageBox.Yes:
-                    files = list(group_metrics.converted_files)
+                    if group_metrics.converted_files:
+                        confirm = QMessageBox.question(
+                            self,
+                            "Force Re-run",
+                            (
+                                "This will re-run bulk analysis for all documents in the group and overwrite existing outputs.\n\n"
+                                "Do you want to proceed?"
+                            ),
+                            QMessageBox.Yes | QMessageBox.No,
+                            QMessageBox.No,
+                        )
+                        if confirm == QMessageBox.Yes:
+                            files = list(group_metrics.converted_files)
+                            force_rerun = True
+                        else:
+                            return
+                    else:
+                        return
                 else:
                     return
 
@@ -2807,6 +2824,7 @@ class ProjectWorkspace(QWidget):
             files=files,
             metadata=self._project_manager.metadata,
             default_provider=provider_default,
+            force_rerun=force_rerun,
         )
         worker.progress.connect(lambda done, total, path, gid=group.group_id: self._on_bulk_progress(gid, done, total, path))
         worker.file_failed.connect(lambda rel, err, gid=group.group_id: self._on_bulk_failed(gid, rel, err))

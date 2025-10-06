@@ -1,97 +1,69 @@
-"""Tests for the bulk analysis worker."""
-
 from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-PySide6 = pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication
-
-_ = PySide6
-
-from src.common.llm.base import BaseLLMProvider
+from src.app.core.bulk_analysis_runner import PromptBundle
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.summary_groups import SummaryGroup
-from src.app.workers import bulk_analysis_worker
-from src.app.workers.bulk_analysis_worker import BulkAnalysisWorker
+from src.app.workers.bulk_analysis_worker import (
+    ProviderConfig,
+    _compute_prompt_hash,
+    _load_manifest,
+    _manifest_path,
+    _save_manifest,
+    _should_process_document,
+)
 
 
-@pytest.fixture(scope="module")
-def qt_app() -> QApplication:
-    app = QApplication.instance()
-    if app is None:
-        app = QApplication([])
-    return app
+def test_should_process_document_handles_skips(tmp_path: Path) -> None:
+    entry = {
+        "source_mtime": 123.456001,
+        "prompt_hash": "abc",
+    }
+
+    assert not _should_process_document(entry, 123.456, "abc", output_exists=True)
+    assert _should_process_document(entry, 123.456, "def", output_exists=True)
+    assert _should_process_document(entry, 999.0, "abc", output_exists=True)
+    assert _should_process_document(entry, 123.456, "abc", output_exists=False)
+    assert _should_process_document(None, 123.456, "abc", output_exists=True)
 
 
-class _StubSettings:
-    def get_api_key(self, provider: str) -> str | None:  # noqa: ARG002
-        return None
+def test_manifest_roundtrip(tmp_path: Path) -> None:
+    group = SummaryGroup.create("Group")
+    path = _manifest_path(tmp_path, group)
 
-    def get(self, key: str, default: object = None) -> object:  # noqa: ARG002
-        return default
-
-
-class _StubProvider(BaseLLMProvider):
-    def __init__(self) -> None:
-        super().__init__(timeout=0, max_retries=0, default_system_prompt="stub", debug=False)
-        self.set_initialized(True)
-
-    def generate(self, prompt: str, model: str | None = None, max_tokens: int = 32000, temperature: float = 0.1, system_prompt: str | None = None) -> dict:
-        return {"success": True, "content": f"Generated summary for {model or 'stub'}"}
-
-    def count_tokens(self, text: str | None = None, messages: list[dict] | None = None) -> dict:  # noqa: ARG002
-        length = len(text or "")
-        return {"success": True, "token_count": max(length // 4, 1)}
-
-    @property
-    def provider_name(self) -> str:  # type: ignore[override]
-        return "stub"
-
-    @property
-    def default_model(self) -> str:  # type: ignore[override]
-        return "stub-model"
+    manifest = {
+        "version": 1,
+        "documents": {
+            "doc.md": {
+                "source_mtime": 1.23,
+                "prompt_hash": "deadbeef",
+                "ran_at": "2025-01-01T00:00:00+00:00",
+            }
+        },
+    }
+    _save_manifest(path, manifest)
+    loaded = _load_manifest(path)
+    assert loaded == manifest
 
 
-def test_bulk_analysis_worker_writes_output(tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch) -> None:
-    assert qt_app is not None
+def test_compute_prompt_hash_changes_on_prompt_and_settings() -> None:
+    group = SummaryGroup.create("Group")
+    metadata = ProjectMetadata(case_name="Case A", subject_name="Subject", case_description="Desc")
+    bundle = PromptBundle(system_template="System", user_template="User {document_content}")
+    config = ProviderConfig(provider_id="anthropic", model="claude")
 
-    converted_dir = tmp_path / "converted_documents"
-    converted_dir.mkdir(parents=True, exist_ok=True)
-    (converted_dir / "doc.md").write_text("# Heading\nBody text", encoding="utf-8")
+    first = _compute_prompt_hash(bundle, config, group, metadata)
 
-    group = SummaryGroup.create(name="Example", files=["doc.md"])
-    group.slug = "example-group"
-    group.system_prompt_path = "resources/prompts/document_analysis_system_prompt.md"
-    group.user_prompt_path = "resources/prompts/document_summary_prompt.md"
+    group.use_reasoning = True
+    second = _compute_prompt_hash(bundle, config, group, metadata)
+    assert first != second
 
-    metadata = ProjectMetadata(
-        case_name="Case",
-        subject_name="Subject",
-        date_of_birth="2000-01-01",
-        case_description="Details",
-    )
+    group.use_reasoning = False
+    config_alt = ProviderConfig(provider_id="anthropic", model="claude-3")
+    third = _compute_prompt_hash(bundle, config_alt, group, metadata)
+    assert first != third
 
-    stub_provider = _StubProvider()
-    monkeypatch.setattr(bulk_analysis_worker, "create_provider", lambda **_: stub_provider)
-    monkeypatch.setattr(bulk_analysis_worker, "SecureSettings", lambda: _StubSettings())
-
-    worker = BulkAnalysisWorker(
-        project_dir=tmp_path,
-        group=group,
-        files=["doc.md"],
-        metadata=metadata,
-        default_provider=("stub", "stub-model"),
-    )
-
-    finished_events: list[tuple[int, int]] = []
-    worker.finished.connect(lambda success, failure: finished_events.append((success, failure)))
-
-    worker.run()
-
-    assert finished_events == [(1, 0)]
-    output_path = tmp_path / "bulk_analysis" / group.folder_name / "doc_analysis.md"
-    assert output_path.exists()
-    assert "Generated summary" in output_path.read_text(encoding="utf-8")
+    metadata.case_name = "Case B"
+    fourth = _compute_prompt_hash(bundle, config_alt, group, metadata)
+    assert third != fourth

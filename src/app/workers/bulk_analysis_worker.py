@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import hashlib
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Signal
 
@@ -34,6 +37,105 @@ class ProviderConfig:
     model: Optional[str]
 
 
+
+
+_MANIFEST_VERSION = 1
+_MTIME_TOLERANCE = 1e-6
+
+
+def _manifest_path(project_dir: Path, group: SummaryGroup) -> Path:
+    return project_dir / "bulk_analysis" / group.folder_name / "manifest.json"
+
+
+def _default_manifest() -> Dict[str, object]:
+    return {"version": _MANIFEST_VERSION, "documents": {}}
+
+
+def _load_manifest(path: Path) -> Dict[str, object]:
+    if not path.exists():
+        return _default_manifest()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return _default_manifest()
+
+    if not isinstance(data, dict):
+        return _default_manifest()
+
+    documents = data.get("documents", {})
+    if not isinstance(documents, dict):
+        documents = {}
+
+    return {
+        "version": data.get("version", _MANIFEST_VERSION),
+        "documents": documents,
+    }
+
+
+def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
+    payload = {
+        "version": _MANIFEST_VERSION,
+        "documents": manifest.get("documents", {}),
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+
+
+def _compute_prompt_hash(
+    bundle: PromptBundle,
+    provider_config: ProviderConfig,
+    group: SummaryGroup,
+    metadata: Optional[ProjectMetadata],
+) -> str:
+    metadata_summary: Dict[str, str] = {}
+    if metadata:
+        metadata_summary = {
+            "case_name": metadata.case_name,
+            "subject_name": metadata.subject_name,
+            "date_of_birth": metadata.date_of_birth,
+            "case_description": metadata.case_description,
+        }
+
+    payload = {
+        "system_template": bundle.system_template,
+        "user_template": bundle.user_template,
+        "provider_id": provider_config.provider_id,
+        "model": provider_config.model,
+        "group_operation": group.operation,
+        "use_reasoning": group.use_reasoning,
+        "model_context_window": group.model_context_window,
+        "metadata": metadata_summary,
+    }
+
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _should_process_document(
+    entry: Optional[Dict[str, object]],
+    source_mtime: float,
+    prompt_hash: str,
+    output_exists: bool,
+) -> bool:
+    if not output_exists:
+        return True
+    if entry is None:
+        return True
+
+    stored_mtime = entry.get("source_mtime")
+    stored_hash = entry.get("prompt_hash")
+
+    if stored_mtime is None or stored_hash is None:
+        return True
+
+    try:
+        if abs(float(stored_mtime) - float(source_mtime)) > _MTIME_TOLERANCE:
+            return True
+    except (TypeError, ValueError):
+        return True
+
+    return stored_hash != prompt_hash
+
 class BulkAnalysisWorker(DashboardWorker):
     """Run bulk analysis summaries on the thread pool."""
 
@@ -50,6 +152,7 @@ class BulkAnalysisWorker(DashboardWorker):
         files: Sequence[str],
         metadata: Optional[ProjectMetadata],
         default_provider: Tuple[str, Optional[str]] = ("anthropic", None),
+        force_rerun: bool = False,
     ) -> None:
         super().__init__(worker_name="bulk_analysis")
 
@@ -58,6 +161,7 @@ class BulkAnalysisWorker(DashboardWorker):
         self._files = list(files)
         self._metadata = metadata
         self._default_provider = default_provider
+        self._force_rerun = force_rerun
 
     # ------------------------------------------------------------------
     # QRunnable API
@@ -66,6 +170,9 @@ class BulkAnalysisWorker(DashboardWorker):
         provider: Optional[BaseLLMProvider] = None
         successes = 0
         failures = 0
+        skipped = 0
+        manifest: Optional[Dict[str, object]] = None
+        manifest_path: Optional[Path] = None
 
         try:
             documents = prepare_documents(self._project_dir, self._group, self._files)
@@ -84,9 +191,37 @@ class BulkAnalysisWorker(DashboardWorker):
             if provider is None:
                 raise RuntimeError("Bulk analysis provider failed to initialise")
 
+            prompt_hash = _compute_prompt_hash(bundle, provider_config, self._group, self._metadata)
+            manifest_path = _manifest_path(self._project_dir, self._group)
+            manifest = _load_manifest(manifest_path)
+            entries = manifest.setdefault("documents", {})  # type: ignore[arg-type]
+
             for index, document in enumerate(documents, start=1):
                 if self.is_cancelled():
                     raise BulkAnalysisCancelled
+
+                try:
+                    source_mtime = document.source_path.stat().st_mtime
+                except FileNotFoundError:
+                    source_mtime = 0.0
+
+                entry = entries.get(document.relative_path)
+                output_exists = document.output_path.exists()
+                if not self._force_rerun and not _should_process_document(entry, source_mtime, prompt_hash, output_exists):
+                    skipped += 1
+                    self.log_message.emit(f"Skipping {document.relative_path} (unchanged)")
+                    if isinstance(entry, dict):
+                        entry["ran_at"] = datetime.now(timezone.utc).isoformat()
+                    progress_count = successes + failures + skipped
+                    self.logger.debug(
+                        "%s progress %s/%s %s",
+                        self.job_tag,
+                        progress_count,
+                        total,
+                        document.relative_path,
+                    )
+                    self.progress.emit(progress_count, total, document.relative_path)
+                    continue
 
                 try:
                     summary = self._process_document(
@@ -112,15 +247,21 @@ class BulkAnalysisWorker(DashboardWorker):
                         self.file_failed.emit(document.relative_path, str(exc))
                     else:
                         successes += 1
+                        entries[document.relative_path] = {
+                            "source_mtime": round(source_mtime, 6),
+                            "prompt_hash": prompt_hash,
+                            "ran_at": datetime.now(timezone.utc).isoformat(),
+                        }
 
+                progress_count = successes + failures + skipped
                 self.logger.debug(
                     "%s progress %s/%s %s",
                     self.job_tag,
-                    successes + failures,
+                    progress_count,
                     total,
                     document.relative_path,
                 )
-                self.progress.emit(successes + failures, total, document.relative_path)
+                self.progress.emit(progress_count, total, document.relative_path)
 
         except BulkAnalysisCancelled:
             self.log_message.emit("Bulk analysis run cancelled.")
@@ -132,9 +273,15 @@ class BulkAnalysisWorker(DashboardWorker):
         finally:
             if provider and isinstance(provider, BaseLLMProvider) and hasattr(provider, "deleteLater"):
                 provider.deleteLater()
-            self.logger.info("%s finished: successes=%s failures=%s", self.job_tag, successes, failures)
+            if manifest is not None and manifest_path is not None:
+                try:
+                    _save_manifest(manifest_path, manifest)
+                except Exception:
+                    self.logger.debug("%s failed to save bulk analysis manifest", self.job_tag, exc_info=True)
+            if skipped:
+                self.log_message.emit(f"Skipped {skipped} document(s) (no changes detected)")
+            self.logger.info("%s finished: successes=%s failures=%s skipped=%s", self.job_tag, successes, failures, skipped)
             self.finished.emit(successes, failures)
-
     def cancel(self) -> None:
         super().cancel()
 
