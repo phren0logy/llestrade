@@ -202,7 +202,8 @@ class ReportHistoryEntry:
     template_path: Optional[str] = None
     transcript_path: Optional[str] = None
     instructions: Optional[str] = None
-    refinement_prompt: Optional[str] = None
+    generation_user_prompt: Optional[str] = None
+    refinement_user_prompt: Optional[str] = None
     generation_system_prompt: Optional[str] = None
     refinement_system_prompt: Optional[str] = None
     draft_tokens: Optional[int] = None
@@ -235,7 +236,10 @@ class ReportHistoryEntry:
             template_path=data.get("template_path"),
             transcript_path=data.get("transcript_path"),
             instructions=data.get("instructions"),
-            refinement_prompt=data.get("refinement_prompt"),
+            generation_user_prompt=data.get("generation_user_prompt"),
+            refinement_user_prompt=(
+                data.get("refinement_user_prompt") or data.get("refinement_prompt")
+            ),
             generation_system_prompt=data.get("generation_system_prompt"),
             refinement_system_prompt=data.get("refinement_system_prompt"),
             draft_tokens=(
@@ -262,7 +266,8 @@ class ReportState:
     last_context_window: Optional[int] = None
     last_template: Optional[str] = None
     last_transcript: Optional[str] = None
-    last_refinement_prompt: Optional[str] = None
+    last_generation_user_prompt: Optional[str] = None
+    last_refinement_user_prompt: Optional[str] = None
     last_generation_system_prompt: Optional[str] = None
     last_refinement_system_prompt: Optional[str] = None
     history: List[ReportHistoryEntry] = field(default_factory=list)
@@ -276,7 +281,8 @@ class ReportState:
             "last_context_window": self.last_context_window,
             "last_template": self.last_template,
             "last_transcript": self.last_transcript,
-            "last_refinement_prompt": self.last_refinement_prompt,
+            "last_generation_user_prompt": self.last_generation_user_prompt,
+            "last_refinement_user_prompt": self.last_refinement_user_prompt,
             "last_generation_system_prompt": self.last_generation_system_prompt,
             "last_refinement_system_prompt": self.last_refinement_system_prompt,
             "history": [entry.to_dict() for entry in self.history],
@@ -305,7 +311,10 @@ class ReportState:
             ),
             last_template=data.get("last_template"),
             last_transcript=data.get("last_transcript"),
-            last_refinement_prompt=data.get("last_refinement_prompt"),
+            last_generation_user_prompt=data.get("last_generation_user_prompt"),
+            last_refinement_user_prompt=(
+                data.get("last_refinement_user_prompt") or data.get("last_refinement_prompt")
+            ),
             last_generation_system_prompt=data.get("last_generation_system_prompt"),
             last_refinement_system_prompt=data.get("last_refinement_system_prompt"),
             history=history,
@@ -874,7 +883,8 @@ class ProjectManager(QObject):
         context_window: Optional[int],
         template_path: Optional[str],
         transcript_path: Optional[str],
-        refinement_prompt: Optional[str],
+        generation_user_prompt: Optional[str],
+        refinement_user_prompt: Optional[str],
         generation_system_prompt: Optional[str],
         refinement_system_prompt: Optional[str],
     ) -> None:
@@ -886,7 +896,8 @@ class ProjectManager(QObject):
         state.last_context_window = context_window
         state.last_template = template_path
         state.last_transcript = transcript_path
-        state.last_refinement_prompt = refinement_prompt
+        state.last_generation_user_prompt = generation_user_prompt
+        state.last_refinement_user_prompt = refinement_user_prompt
         state.last_generation_system_prompt = generation_system_prompt
         state.last_refinement_system_prompt = refinement_system_prompt
         self.mark_modified()
@@ -908,7 +919,8 @@ class ProjectManager(QObject):
         template_path: Optional[str],
         transcript_path: Optional[str],
         instructions: Optional[str],
-        refinement_prompt: Optional[str],
+        generation_user_prompt: Optional[str],
+        refinement_user_prompt: Optional[str],
         generation_system_prompt: Optional[str],
         refinement_system_prompt: Optional[str],
         draft_tokens: Optional[int] = None,
@@ -929,7 +941,8 @@ class ProjectManager(QObject):
             template_path=str(template_path) if template_path else None,
             transcript_path=str(transcript_path) if transcript_path else None,
             instructions=instructions,
-            refinement_prompt=refinement_prompt,
+            generation_user_prompt=generation_user_prompt,
+            refinement_user_prompt=refinement_user_prompt,
             generation_system_prompt=generation_system_prompt,
             refinement_system_prompt=refinement_system_prompt,
             draft_tokens=draft_tokens,

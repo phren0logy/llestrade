@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, List, Sequence, Set, Tuple
 
@@ -45,7 +45,6 @@ from src.app.core.file_tracker import WorkspaceMetrics, WorkspaceGroupMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.core.summary_groups import SummaryGroup
 from src.app.core.bulk_paths import iter_map_outputs
-from src.app.core.prompt_manager import PromptManager
 from src.app.core.report_inputs import (
     REPORT_CATEGORY_BULK_COMBINED,
     REPORT_CATEGORY_BULK_MAP,
@@ -55,6 +54,13 @@ from src.app.core.report_inputs import (
     ReportInputDescriptor,
     category_display_name,
 )
+from src.app.core.refinement_prompt import (
+    read_generation_prompt,
+    read_refinement_prompt,
+    validate_generation_prompt,
+    validate_refinement_prompt,
+)
+from src.app.core.report_template_sections import load_template_sections
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
 from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
@@ -150,6 +156,7 @@ class ProjectWorkspace(QWidget):
         self._report_custom_model_label: QLabel | None = None
         self._report_custom_context_spin: QSpinBox | None = None
         self._report_custom_context_label: QLabel | None = None
+        self._report_generation_user_prompt_edit: QLineEdit | None = None
         self._report_refinement_prompt_edit: QLineEdit | None = None
         self._report_generate_button: QPushButton | None = None
         self._report_progress_bar: QProgressBar | None = None
@@ -373,6 +380,22 @@ class ProjectWorkspace(QWidget):
             self._wrap_line_edit_with_button(self._report_transcript_edit, transcript_browse)
         )
 
+        generation_user_label = QLabel("Generation user prompt:")
+        config_layout.addWidget(generation_user_label)
+        self._report_generation_user_prompt_edit = QLineEdit()
+        self._report_generation_user_prompt_edit.textChanged.connect(self._update_report_controls)
+        generation_user_browse = QPushButton("Browse…")
+        generation_user_browse.clicked.connect(self._browse_generation_user_prompt)
+        config_layout.addWidget(
+            self._wrap_line_edit_with_button(
+                self._report_generation_user_prompt_edit,
+                generation_user_browse,
+            )
+        )
+        generation_preview_button = QPushButton("Preview generation prompt")
+        generation_preview_button.clicked.connect(self._preview_generation_prompt)
+        config_layout.addWidget(generation_preview_button)
+
         generation_system_label = QLabel("Generation system prompt:")
         config_layout.addWidget(generation_system_label)
         self._report_generation_system_prompt_edit = QLineEdit()
@@ -386,8 +409,8 @@ class ProjectWorkspace(QWidget):
             )
         )
 
-        refinement_label = QLabel("Refinement prompt:")
-        config_layout.addWidget(refinement_label)
+        refinement_user_label = QLabel("Refinement user prompt:")
+        config_layout.addWidget(refinement_user_label)
         self._report_refinement_prompt_edit = QLineEdit()
         self._report_refinement_prompt_edit.textChanged.connect(self._update_report_controls)
         refinement_browse = QPushButton("Browse…")
@@ -395,10 +418,9 @@ class ProjectWorkspace(QWidget):
         config_layout.addWidget(
             self._wrap_line_edit_with_button(self._report_refinement_prompt_edit, refinement_browse)
         )
-        if self._report_refinement_prompt_edit and not self._report_refinement_prompt_edit.text().strip():
-            default_refinement = self._default_refinement_prompt_path()
-            if default_refinement:
-                self._report_refinement_prompt_edit.setText(default_refinement)
+        refinement_preview_button = QPushButton("Preview refinement prompt")
+        refinement_preview_button.clicked.connect(self._preview_refinement_prompt)
+        config_layout.addWidget(refinement_preview_button)
 
         refinement_system_label = QLabel("Refinement system prompt:")
         config_layout.addWidget(refinement_system_label)
@@ -413,14 +435,23 @@ class ProjectWorkspace(QWidget):
             )
         )
 
+        if self._report_generation_user_prompt_edit and not self._report_generation_user_prompt_edit.text().strip():
+            default_generation_user = self._default_generation_user_prompt_path()
+            if default_generation_user:
+                self._report_generation_user_prompt_edit.setText(default_generation_user)
         if self._report_generation_system_prompt_edit and not self._report_generation_system_prompt_edit.text().strip():
             default_generation_system = self._default_generation_system_prompt_path()
             if default_generation_system:
                 self._report_generation_system_prompt_edit.setText(default_generation_system)
+        if self._report_refinement_prompt_edit and not self._report_refinement_prompt_edit.text().strip():
+            default_refinement = self._default_refinement_user_prompt_path()
+            if default_refinement:
+                self._report_refinement_prompt_edit.setText(default_refinement)
         if self._report_refinement_system_prompt_edit and not self._report_refinement_system_prompt_edit.text().strip():
             default_refinement_system = self._default_refinement_system_prompt_path()
             if default_refinement_system:
                 self._report_refinement_system_prompt_edit.setText(default_refinement_system)
+
 
         top_layout.addWidget(config_group, 1)
         layout.addLayout(top_layout)
@@ -1389,6 +1420,22 @@ class ProjectWorkspace(QWidget):
             self._report_generation_system_prompt_edit.setText(file_path)
         self._update_report_controls()
 
+    def _browse_generation_user_prompt(self) -> None:
+        initial = None
+        try:
+            initial = get_custom_dir()
+        except Exception:
+            initial = Path.home()
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Generation User Prompt",
+            str(initial),
+            "Markdown/Text Files (*.md *.txt);;All Files (*)",
+        )
+        if file_path and self._report_generation_user_prompt_edit:
+            self._report_generation_user_prompt_edit.setText(file_path)
+        self._update_report_controls()
+
     def _browse_refinement_system_prompt(self) -> None:
         initial = None
         try:
@@ -1405,7 +1452,7 @@ class ProjectWorkspace(QWidget):
             self._report_refinement_system_prompt_edit.setText(file_path)
         self._update_report_controls()
 
-    def _default_refinement_prompt_path(self) -> str:
+    def _default_refinement_user_prompt_path(self) -> str:
         try:
             bundled_path = get_bundled_dir() / "refinement_prompt.md"
             if bundled_path.exists():
@@ -1414,6 +1461,22 @@ class ProjectWorkspace(QWidget):
             LOGGER.debug("Unable to resolve bundled refinement prompt path", exc_info=True)
         repo_dir = get_repo_prompts_dir()
         repo_path = repo_dir / "refinement_prompt.md"
+        if repo_path.exists():
+            return str(repo_path)
+        return ""
+
+    def _default_generation_user_prompt_path(self) -> str:
+        try:
+            bundled_path = get_bundled_dir() / "report_generation_user_prompt.md"
+            if bundled_path.exists():
+                return str(bundled_path)
+        except Exception:
+            LOGGER.debug(
+                "Unable to resolve bundled generation user prompt path",
+                exc_info=True,
+            )
+        repo_dir = get_repo_prompts_dir()
+        repo_path = repo_dir / "report_generation_user_prompt.md"
         if repo_path.exists():
             return str(repo_path)
         return ""
@@ -1450,6 +1513,197 @@ class ProjectWorkspace(QWidget):
             return str(repo_path)
         return ""
 
+    def _format_prompt_preview(self, template: str, context: dict[str, str]) -> str:
+        class _SafeDict(dict):
+            def __missing__(self, key: str) -> str:  # noqa: D401 - inline default placeholder
+                return "{" + key + "}"
+
+        safe_context = _SafeDict({k: (v or "") for k, v in context.items()})
+        return template.format_map(safe_context)
+
+    def _build_additional_documents_text(self, project_dir: Path) -> str:
+        lines: List[str] = []
+        for key in sorted(self._report_selected_inputs):
+            if ":" not in key:
+                continue
+            category, relative = key.split(":", 1)
+            absolute = (project_dir / relative).resolve()
+            if not absolute.exists() or not absolute.is_file():
+                continue
+            try:
+                content = absolute.read_text(encoding="utf-8").strip()
+            except Exception:
+                continue
+            lines.append(f"<!--- report-input: {category} | {relative} --->")
+            lines.append(f"# {category_display_name(category)}: {relative}")
+            if content:
+                lines.append(content)
+            lines.append("")
+        if not lines:
+            return ""
+        return "\n".join(lines).strip()
+
+    def _preview_generation_prompt(self) -> None:
+        if not self._project_manager or not self._project_manager.project_dir:
+            QMessageBox.warning(self, "Prompt Preview", "Open a project to preview prompts.")
+            return
+        if not self._report_template_edit:
+            return
+        template_path_str = self._report_template_edit.text().strip()
+        if not template_path_str:
+            QMessageBox.warning(self, "Prompt Preview", "Select a template first.")
+            return
+        template_path = Path(template_path_str).expanduser()
+        if not template_path.exists():
+            QMessageBox.warning(self, "Prompt Preview", f"Template not found:\n{template_path}")
+            return
+
+        if not self._report_generation_user_prompt_edit:
+            return
+        gen_prompt_path_str = self._report_generation_user_prompt_edit.text().strip()
+        if not gen_prompt_path_str:
+            QMessageBox.warning(self, "Prompt Preview", "Select a generation user prompt first.")
+            return
+        gen_prompt_path = Path(gen_prompt_path_str).expanduser()
+        if not gen_prompt_path.exists():
+            QMessageBox.warning(self, "Prompt Preview", f"Generation user prompt not found:\n{gen_prompt_path}")
+            return
+        try:
+            generation_user_prompt = read_generation_prompt(gen_prompt_path)
+            validate_generation_prompt(generation_user_prompt)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Prompt Preview", str(exc))
+            return
+        except Exception:
+            QMessageBox.warning(self, "Prompt Preview", "Unable to read generation user prompt.")
+            return
+
+        try:
+            sections = load_template_sections(template_path)
+        except Exception:
+            QMessageBox.warning(self, "Prompt Preview", "Unable to parse template sections.")
+            return
+        if not sections:
+            QMessageBox.warning(self, "Prompt Preview", "Template does not contain any sections.")
+            return
+        section = sections[0]
+        template_section = section.body.strip() or section.title or "Template section"
+
+        project_dir = Path(self._project_manager.project_dir)
+        additional_documents = self._build_additional_documents_text(project_dir)
+
+        transcript_text = ""
+        if self._report_transcript_edit and self._report_transcript_edit.text().strip():
+            transcript_path = Path(self._report_transcript_edit.text().strip()).expanduser()
+            if transcript_path.exists():
+                try:
+                    transcript_text = transcript_path.read_text(encoding="utf-8")
+                except Exception:
+                    transcript_text = ""
+
+        system_prompt_text = ""
+        if self._report_generation_system_prompt_edit and self._report_generation_system_prompt_edit.text().strip():
+            system_path = Path(self._report_generation_system_prompt_edit.text().strip()).expanduser()
+            if system_path.exists():
+                try:
+                    system_prompt_text = system_path.read_text(encoding="utf-8")
+                except Exception:
+                    system_prompt_text = ""
+        if not system_prompt_text:
+            system_prompt_text = "(Generation system prompt is empty.)"
+
+        user_prompt_text = self._format_prompt_preview(
+            generation_user_prompt,
+            {
+                "template_section": template_section,
+                "transcript": transcript_text,
+                "additional_documents": additional_documents,
+            },
+        )
+
+        dialog = PromptPreviewDialog(self)
+        dialog.set_prompts(system_prompt_text, user_prompt_text)
+        dialog.exec()
+
+    def _preview_refinement_prompt(self) -> None:
+        if not self._project_manager or not self._project_manager.project_dir:
+            QMessageBox.warning(self, "Prompt Preview", "Open a project to preview prompts.")
+            return
+        if not self._report_template_edit:
+            return
+        template_path_str = self._report_template_edit.text().strip()
+        if not template_path_str:
+            QMessageBox.warning(self, "Prompt Preview", "Select a template first.")
+            return
+        template_path = Path(template_path_str).expanduser()
+        template_text = ""
+        try:
+            template_text = template_path.read_text(encoding="utf-8")
+        except Exception:
+            QMessageBox.warning(self, "Prompt Preview", "Unable to read template file.")
+            return
+
+        if not self._report_refinement_prompt_edit:
+            return
+        refinement_path_str = self._report_refinement_prompt_edit.text().strip()
+        if not refinement_path_str:
+            QMessageBox.warning(self, "Prompt Preview", "Select a refinement user prompt first.")
+            return
+        refinement_path = Path(refinement_path_str).expanduser()
+        if not refinement_path.exists():
+            QMessageBox.warning(self, "Prompt Preview", f"Refinement user prompt not found:\n{refinement_path}")
+            return
+        try:
+            refinement_user_prompt = read_refinement_prompt(refinement_path)
+            validate_refinement_prompt(refinement_user_prompt)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Prompt Preview", str(exc))
+            return
+        except Exception:
+            QMessageBox.warning(self, "Prompt Preview", "Unable to read refinement user prompt.")
+            return
+
+        generation_preview_section = ""
+        try:
+            sections = load_template_sections(template_path)
+            if sections:
+                generation_preview_section = sections[0].body.strip()
+        except Exception:
+            generation_preview_section = ""
+        draft_preview = generation_preview_section or "Draft content preview"
+
+        transcript_text = ""
+        if self._report_transcript_edit and self._report_transcript_edit.text().strip():
+            transcript_path = Path(self._report_transcript_edit.text().strip()).expanduser()
+            if transcript_path.exists():
+                try:
+                    transcript_text = transcript_path.read_text(encoding="utf-8")
+                except Exception:
+                    transcript_text = ""
+
+        system_prompt_text = ""
+        if self._report_refinement_system_prompt_edit and self._report_refinement_system_prompt_edit.text().strip():
+            system_path = Path(self._report_refinement_system_prompt_edit.text().strip()).expanduser()
+            if system_path.exists():
+                try:
+                    system_prompt_text = system_path.read_text(encoding="utf-8")
+                except Exception:
+                    system_prompt_text = ""
+        if not system_prompt_text:
+            system_prompt_text = "(Refinement system prompt is empty.)"
+
+        user_prompt_text = self._format_prompt_preview(
+            refinement_user_prompt,
+            {
+                "draft_report": draft_preview,
+                "template": template_text,
+                "transcript": transcript_text,
+            },
+        )
+
+        dialog = PromptPreviewDialog(self)
+        dialog.set_prompts(system_prompt_text, user_prompt_text)
+        dialog.exec()
     def _browse_report_transcript(self) -> None:
         initial = None
         if self._project_manager and self._project_manager.project_dir:
@@ -1602,6 +1856,14 @@ class ProjectWorkspace(QWidget):
             else ""
         )
         refinement_ok = bool(refinement_text and Path(refinement_text).expanduser().is_file())
+        generation_user_text = (
+            self._report_generation_user_prompt_edit.text().strip()
+            if self._report_generation_user_prompt_edit
+            else ""
+        )
+        generation_user_ok = bool(
+            generation_user_text and Path(generation_user_text).expanduser().is_file()
+        )
         generation_system_text = (
             self._report_generation_system_prompt_edit.text().strip()
             if self._report_generation_system_prompt_edit
@@ -1628,6 +1890,7 @@ class ProjectWorkspace(QWidget):
             and model_ok
             and template_ok
             and refinement_ok
+            and generation_user_ok
             and generation_system_ok
             and refinement_system_ok
             and not self._report_running
@@ -1679,13 +1942,17 @@ class ProjectWorkspace(QWidget):
         elif self._report_custom_context_spin and not custom_model:
             context_window = None
 
-        template_path = None
+        template_path: Path | None = None
         if self._report_template_edit:
             text = self._report_template_edit.text().strip()
             if text:
                 template_path = Path(text).expanduser()
         if not template_path:
-            QMessageBox.warning(self, "Report Generator", "Select a report template before generating a report.")
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                "Select a report template before generating a report.",
+            )
             return
         if not template_path.is_file():
             QMessageBox.warning(
@@ -1695,7 +1962,40 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        generation_system_prompt_path = None
+        generation_user_prompt_path: Path | None = None
+        if self._report_generation_user_prompt_edit:
+            text = self._report_generation_user_prompt_edit.text().strip()
+            if text:
+                generation_user_prompt_path = Path(text).expanduser()
+        if not generation_user_prompt_path:
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                "Select a generation user prompt before generating a report.",
+            )
+            return
+        if not generation_user_prompt_path.is_file():
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                f"The selected generation user prompt does not exist:\n{generation_user_prompt_path}",
+            )
+            return
+        try:
+            generation_user_content = read_generation_prompt(generation_user_prompt_path)
+            validate_generation_prompt(generation_user_content)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Report Generator", str(exc))
+            return
+        except Exception:
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                "Unable to read the generation user prompt.",
+            )
+            return
+
+        generation_system_prompt_path: Path | None = None
         if self._report_generation_system_prompt_edit:
             text = self._report_generation_system_prompt_edit.text().strip()
             if text:
@@ -1715,27 +2015,40 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        refinement_prompt_path = None
+        refinement_user_prompt_path: Path | None = None
         if self._report_refinement_prompt_edit:
             text = self._report_refinement_prompt_edit.text().strip()
             if text:
-                refinement_prompt_path = Path(text).expanduser()
-        if not refinement_prompt_path:
+                refinement_user_prompt_path = Path(text).expanduser()
+        if not refinement_user_prompt_path:
             QMessageBox.warning(
                 self,
                 "Report Generator",
-                "Select a refinement prompt before generating a report.",
+                "Select a refinement user prompt before generating a report.",
             )
             return
-        if not refinement_prompt_path.is_file():
+        if not refinement_user_prompt_path.is_file():
             QMessageBox.warning(
                 self,
                 "Report Generator",
-                f"The selected refinement prompt does not exist:\n{refinement_prompt_path}",
+                f"The selected refinement user prompt does not exist:\n{refinement_user_prompt_path}",
+            )
+            return
+        try:
+            refinement_user_content = read_refinement_prompt(refinement_user_prompt_path)
+            validate_refinement_prompt(refinement_user_content)
+        except ValueError as exc:
+            QMessageBox.warning(self, "Report Generator", str(exc))
+            return
+        except Exception:
+            QMessageBox.warning(
+                self,
+                "Report Generator",
+                "Unable to read the refinement user prompt.",
             )
             return
 
-        refinement_system_prompt_path = None
+        refinement_system_prompt_path: Path | None = None
         if self._report_refinement_system_prompt_edit:
             text = self._report_refinement_system_prompt_edit.text().strip()
             if text:
@@ -1755,11 +2068,11 @@ class ProjectWorkspace(QWidget):
             )
             return
 
-        transcript_path = None
+        transcript_path: Path | None = None
         if self._report_transcript_edit:
             text = self._report_transcript_edit.text().strip()
             if text:
-                transcript_path = Path(text)
+                transcript_path = Path(text).expanduser()
                 if not transcript_path.is_file():
                     QMessageBox.warning(
                         self,
@@ -1784,7 +2097,9 @@ class ProjectWorkspace(QWidget):
             return
 
         project_dir = Path(self._project_manager.project_dir)
-        metadata = self._project_manager.metadata or ProjectMetadata(case_name=self._project_manager.project_name or "")
+        metadata = self._project_manager.metadata or ProjectMetadata(
+            case_name=self._project_manager.project_name or ""
+        )
 
         self._project_manager.update_report_preferences(
             selected_inputs=sorted(self._report_selected_inputs),
@@ -1792,9 +2107,10 @@ class ProjectWorkspace(QWidget):
             model=model_id,
             custom_model=custom_model,
             context_window=context_window,
-            template_path=str(template_path) if template_path else None,
+            template_path=str(template_path),
             transcript_path=str(transcript_path) if transcript_path else None,
-            refinement_prompt=str(refinement_prompt_path),
+            generation_user_prompt=str(generation_user_prompt_path),
+            refinement_user_prompt=str(refinement_user_prompt_path),
             generation_system_prompt=str(generation_system_prompt_path),
             refinement_system_prompt=str(refinement_system_prompt_path),
         )
@@ -1808,7 +2124,8 @@ class ProjectWorkspace(QWidget):
             context_window=context_window,
             template_path=template_path,
             transcript_path=transcript_path,
-            refinement_prompt_path=refinement_prompt_path,
+            generation_user_prompt_path=generation_user_prompt_path,
+            refinement_user_prompt_path=refinement_user_prompt_path,
             generation_system_prompt_path=generation_system_prompt_path,
             refinement_system_prompt_path=refinement_system_prompt_path,
             metadata=metadata,
@@ -1821,7 +2138,8 @@ class ProjectWorkspace(QWidget):
 
         self._report_last_result = None
         self._report_running = True
-        self._report_progress_bar.setValue(0)
+        if self._report_progress_bar:
+            self._report_progress_bar.setValue(0)
         if self._report_log:
             self._report_log.clear()
         self._update_report_controls()
@@ -1854,19 +2172,23 @@ class ProjectWorkspace(QWidget):
 
         self._report_last_result = result
         self._append_report_log("Report generation completed successfully.")
-        self._report_progress_bar.setValue(100)
+        if self._report_progress_bar:
+            self._report_progress_bar.setValue(100)
 
         if self._project_manager:
-            timestamp_str = str(result.get("timestamp"))
+            timestamp_raw = str(result.get("timestamp"))
             try:
-                timestamp = datetime.fromisoformat(timestamp_str)
+                timestamp = datetime.fromisoformat(timestamp_raw)
             except Exception:
                 timestamp = datetime.now(timezone.utc)
             draft_path = Path(str(result.get("draft_path")))
             refined_path = Path(str(result.get("refined_path")))
-            reasoning_path = Path(str(result.get("reasoning_path"))) if result.get("reasoning_path") else None
-            manifest_path = Path(str(result.get("manifest_path"))) if result.get("manifest_path") else None
-            inputs_path = Path(str(result.get("inputs_path"))) if result.get("inputs_path") else None
+            reasoning_value = result.get("reasoning_path")
+            reasoning_path = Path(str(reasoning_value)) if reasoning_value else None
+            manifest_value = result.get("manifest_path")
+            manifest_path = Path(str(manifest_value)) if manifest_value else None
+            inputs_value = result.get("inputs_path")
+            inputs_path = Path(str(inputs_value)) if inputs_value else None
             provider = str(result.get("provider", "anthropic"))
             model = str(result.get("model", ""))
             custom_model = result.get("custom_model")
@@ -1878,32 +2200,48 @@ class ProjectWorkspace(QWidget):
             inputs = list(result.get("inputs", []))
 
             instructions_snapshot = str(result.get("instructions", ""))
-            refinement_prompt = str(
-                result.get("refinement_prompt")
+            generation_user_prompt = (
+                str(result.get("generation_user_prompt") or "").strip()
+                or (
+                    self._report_generation_user_prompt_edit.text().strip()
+                    if self._report_generation_user_prompt_edit
+                    else ""
+                )
+            )
+            refinement_user_prompt = (
+                str(result.get("refinement_user_prompt") or "").strip()
                 or (
                     self._report_refinement_prompt_edit.text().strip()
                     if self._report_refinement_prompt_edit
                     else ""
                 )
-                or ""
             )
-            generation_system_prompt = str(
-                result.get("generation_system_prompt")
+            generation_system_prompt = (
+                str(result.get("generation_system_prompt") or "").strip()
                 or (
                     self._report_generation_system_prompt_edit.text().strip()
                     if self._report_generation_system_prompt_edit
                     else ""
                 )
-                or ""
             )
-            refinement_system_prompt = str(
-                result.get("refinement_system_prompt")
+            refinement_system_prompt = (
+                str(result.get("refinement_system_prompt") or "").strip()
                 or (
                     self._report_refinement_system_prompt_edit.text().strip()
                     if self._report_refinement_system_prompt_edit
                     else ""
                 )
-                or ""
+            )
+
+            template_value = (
+                self._report_template_edit.text().strip()
+                if self._report_template_edit and self._report_template_edit.text().strip()
+                else None
+            )
+            transcript_value = (
+                self._report_transcript_edit.text().strip()
+                if self._report_transcript_edit and self._report_transcript_edit.text().strip()
+                else None
             )
 
             self._project_manager.record_report_run(
@@ -1918,10 +2256,11 @@ class ProjectWorkspace(QWidget):
                 custom_model=str(custom_model) if custom_model else None,
                 context_window=context_window_int,
                 inputs=inputs,
-                template_path=self._report_template_edit.text().strip() if self._report_template_edit else None,
-                transcript_path=self._report_transcript_edit.text().strip() if self._report_transcript_edit else None,
+                template_path=template_value,
+                transcript_path=transcript_value,
                 instructions=instructions_snapshot,
-                refinement_prompt=refinement_prompt or None,
+                generation_user_prompt=generation_user_prompt or None,
+                refinement_user_prompt=refinement_user_prompt or None,
                 generation_system_prompt=generation_system_prompt or None,
                 refinement_system_prompt=refinement_system_prompt or None,
             )
@@ -1960,12 +2299,16 @@ class ProjectWorkspace(QWidget):
             except Exception:
                 timestamp_display = entry.timestamp
             model_label = entry.custom_model or entry.model or ""
-            outputs_text = Path(entry.refined_path).name if entry.refined_path else Path(entry.draft_path).name
+            outputs_text = (
+                Path(entry.refined_path).name
+                if entry.refined_path
+                else Path(entry.draft_path).name
+            )
             item = QTreeWidgetItem([timestamp_display, model_label, outputs_text])
             item.setData(0, Qt.UserRole, index)
             self._report_history_list.addTopLevelItem(item)
 
-        if history:
+        if history and self._report_history_list.topLevelItemCount() > 0:
             self._report_history_list.setCurrentItem(self._report_history_list.topLevelItem(0))
 
         self._report_history_list.blockSignals(False)
@@ -2064,7 +2407,10 @@ class ProjectWorkspace(QWidget):
                 if self._report_custom_model_edit:
                     self._report_custom_model_edit.setText(state.last_custom_model)
             else:
-                target = (state.last_provider or "anthropic", state.last_model or "claude-sonnet-4-5-20250929")
+                target = (
+                    state.last_provider or "anthropic",
+                    state.last_model or "claude-sonnet-4-5-20250929",
+                )
                 index = self._report_model_combo.findData(target)
                 if index >= 0:
                     self._report_model_combo.setCurrentIndex(index)
@@ -2081,11 +2427,20 @@ class ProjectWorkspace(QWidget):
             self._report_template_edit.setText(state.last_template or "")
         if self._report_transcript_edit:
             self._report_transcript_edit.setText(state.last_transcript or "")
+        if self._report_generation_user_prompt_edit:
+            if state.last_generation_user_prompt:
+                self._report_generation_user_prompt_edit.setText(state.last_generation_user_prompt)
+            elif not self._report_generation_user_prompt_edit.text().strip():
+                self._report_generation_user_prompt_edit.setText(
+                    self._default_generation_user_prompt_path()
+                )
         if self._report_refinement_prompt_edit:
-            if state.last_refinement_prompt:
-                self._report_refinement_prompt_edit.setText(state.last_refinement_prompt)
+            if state.last_refinement_user_prompt:
+                self._report_refinement_prompt_edit.setText(state.last_refinement_user_prompt)
             elif not self._report_refinement_prompt_edit.text().strip():
-                self._report_refinement_prompt_edit.setText(self._default_refinement_prompt_path())
+                self._report_refinement_prompt_edit.setText(
+                    self._default_refinement_user_prompt_path()
+                )
         if self._report_generation_system_prompt_edit:
             if state.last_generation_system_prompt:
                 self._report_generation_system_prompt_edit.setText(state.last_generation_system_prompt)

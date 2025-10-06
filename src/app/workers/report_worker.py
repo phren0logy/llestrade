@@ -18,8 +18,12 @@ from src.app.core.report_inputs import (
     REPORT_CATEGORY_HIGHLIGHT_DOCUMENT,
     category_display_name,
 )
-from src.app.core.prompt_manager import PromptManager
-from src.app.core.refinement_prompt import read_refinement_prompt, validate_refinement_prompt
+from src.app.core.refinement_prompt import (
+    read_generation_prompt,
+    read_refinement_prompt,
+    validate_generation_prompt,
+    validate_refinement_prompt,
+)
 from src.app.core.report_template_sections import (
     TemplateSection,
     load_template_sections,
@@ -49,7 +53,8 @@ class ReportWorker(DashboardWorker):
         context_window: Optional[int],
         template_path: Optional[Path],
         transcript_path: Optional[Path],
-        refinement_prompt_path: Path,
+        generation_user_prompt_path: Path,
+        refinement_user_prompt_path: Path,
         generation_system_prompt_path: Path,
         refinement_system_prompt_path: Path,
         metadata: ProjectMetadata,
@@ -64,10 +69,11 @@ class ReportWorker(DashboardWorker):
         self._context_window = context_window
         self._template_path = Path(template_path) if template_path else None
         self._transcript_path = Path(transcript_path) if transcript_path else None
-        self._refinement_prompt_path = Path(refinement_prompt_path).expanduser()
+        self._generation_user_prompt_path = Path(generation_user_prompt_path).expanduser()
+        self._refinement_user_prompt_path = Path(refinement_user_prompt_path).expanduser()
         self._generation_system_prompt_path = Path(generation_system_prompt_path).expanduser()
         self._refinement_system_prompt_path = Path(refinement_system_prompt_path).expanduser()
-        self._instructions: str = ""
+        self._refinement_prompt_content: str = ""
         self._metadata = metadata
         self._max_report_tokens = max_report_tokens
         self._refine_usage: Optional[int] = None
@@ -81,8 +87,14 @@ class ReportWorker(DashboardWorker):
                 raise RuntimeError("A report template must be provided before generating a report")
             if not self._template_path.exists():
                 raise FileNotFoundError(f"Report template not found: {self._template_path}")
-            if not self._refinement_prompt_path.exists():
-                raise FileNotFoundError(f"Refinement prompt not found: {self._refinement_prompt_path}")
+            if not self._generation_user_prompt_path.exists():
+                raise FileNotFoundError(
+                    f"Generation user prompt not found: {self._generation_user_prompt_path}"
+                )
+            if not self._refinement_user_prompt_path.exists():
+                raise FileNotFoundError(
+                    f"Refinement user prompt not found: {self._refinement_user_prompt_path}"
+                )
             if not self._generation_system_prompt_path.exists():
                 raise FileNotFoundError(
                     f"Generation system prompt not found: {self._generation_system_prompt_path}"
@@ -117,10 +129,12 @@ class ReportWorker(DashboardWorker):
             inputs_path.write_text(combined_content, encoding="utf-8")
             self.log_message.emit(f"Combined inputs written to {inputs_path.name}.")
 
-            prompt_manager = PromptManager()
-            refinement_template = read_refinement_prompt(self._refinement_prompt_path)
-            validate_refinement_prompt(refinement_template)
-            self._instructions = refinement_template
+            generation_user_prompt = read_generation_prompt(self._generation_user_prompt_path)
+            validate_generation_prompt(generation_user_prompt)
+            refinement_user_prompt = read_refinement_prompt(self._refinement_user_prompt_path)
+            validate_refinement_prompt(refinement_user_prompt)
+            self._refinement_prompt_content = refinement_user_prompt
+
             generation_system_prompt = self._generation_system_prompt_path.read_text(
                 encoding="utf-8"
             ).strip()
@@ -143,21 +157,16 @@ class ReportWorker(DashboardWorker):
             transcript_text = ""
             if self._transcript_path:
                 transcript_text = self._transcript_path.read_text(encoding="utf-8").strip()
+            additional_documents = combined_content.strip()
 
             self.log_message.emit(
                 f"Generating draft content across {len(sections)} template section(s)…"
             )
-            try:
-                section_instructions = prompt_manager.get_template(
-                    "report_generation_instructions"
-                )
-            except KeyError as err:
-                raise RuntimeError("Missing report_generation_instructions prompt") from err
 
             section_outputs = self._generate_section_outputs(
                 sections=sections,
-                instructions=section_instructions,
-                document_content=combined_content.strip(),
+                user_prompt_template=generation_user_prompt,
+                additional_documents=additional_documents,
                 transcript_text=transcript_text,
                 system_prompt=generation_system_prompt,
             )
@@ -172,7 +181,7 @@ class ReportWorker(DashboardWorker):
             self.log_message.emit("Refining draft report…")
             self.progress.emit(65, "Refining draft…")
             refined_content, reasoning_content = self._run_refinement(
-                refinement_template=refinement_template,
+                refinement_template=self._refinement_prompt_content,
                 draft_content=draft_content,
                 system_prompt=refinement_system_prompt,
             )
@@ -210,10 +219,11 @@ class ReportWorker(DashboardWorker):
                 "custom_model": self._custom_model,
                 "context_window": self._context_window,
                 "inputs": [item[1] for item in self._inputs],
-                "refinement_prompt": str(self._refinement_prompt_path),
+                "generation_user_prompt": str(self._generation_user_prompt_path),
+                "refinement_user_prompt": str(self._refinement_user_prompt_path),
                 "generation_system_prompt": str(self._generation_system_prompt_path),
                 "refinement_system_prompt": str(self._refinement_system_prompt_path),
-                "instructions": self._instructions,
+                "instructions": self._refinement_prompt_content,
             }
             self.progress.emit(100, "Report generated")
             self.finished.emit(result)
@@ -269,8 +279,8 @@ class ReportWorker(DashboardWorker):
         self,
         *,
         sections: Sequence[TemplateSection],
-        instructions: str,
-        document_content: str,
+        user_prompt_template: str,
+        additional_documents: str,
         transcript_text: str,
         system_prompt: str,
     ) -> List[dict]:
@@ -279,12 +289,14 @@ class ReportWorker(DashboardWorker):
 
         total = len(sections)
         for index, section in enumerate(sections, start=1):
-            prompt = self._render_section_prompt(
-                section=section,
-                instructions=instructions,
-                document_content=document_content,
-                transcript_text=transcript_text,
-            )
+            context = {
+                "template_section": section.body.strip(),
+                "transcript": transcript_text,
+                "additional_documents": additional_documents,
+                "document_content": additional_documents,
+                "section_title": section.title,
+            }
+            prompt = self._format_prompt(user_prompt_template, context)
 
             pct = 5 + int(40 * index / max(total, 1))
             self.progress.emit(pct, f"Generating section {index} of {total}: {section.title}")
@@ -312,23 +324,6 @@ class ReportWorker(DashboardWorker):
             self.log_message.emit(f"Section generated: {section.title}")
 
         return outputs
-
-    def _render_section_prompt(
-        self,
-        *,
-        section: TemplateSection,
-        instructions: str,
-        document_content: str,
-        transcript_text: str,
-    ) -> str:
-        parts: List[str] = []
-        parts.append("<template>\n" + section.body.strip() + "\n</template>")
-        if document_content:
-            parts.append("<documents>\n" + document_content + "\n</documents>")
-        if transcript_text:
-            parts.append("<transcript>\n" + transcript_text + "\n</transcript>")
-        parts.append(instructions.strip())
-        return "\n\n".join(part for part in parts if part.strip()) + "\n"
 
     def _combine_section_outputs(self, outputs: Sequence[dict]) -> str:
         combined_sections = []
@@ -464,10 +459,11 @@ class ReportWorker(DashboardWorker):
             "inputs_path": str(inputs_path),
             "template_path": str(self._template_path) if self._template_path else None,
             "transcript_path": str(self._transcript_path) if self._transcript_path else None,
-            "refinement_prompt": str(self._refinement_prompt_path),
-             "generation_system_prompt": str(self._generation_system_prompt_path),
-             "refinement_system_prompt": str(self._refinement_system_prompt_path),
-            "instructions": self._instructions,
+            "generation_user_prompt": str(self._generation_user_prompt_path),
+            "refinement_user_prompt": str(self._refinement_user_prompt_path),
+            "generation_system_prompt": str(self._generation_system_prompt_path),
+            "refinement_system_prompt": str(self._refinement_system_prompt_path),
+            "instructions": self._refinement_prompt_content,
             "inputs": list(inputs_metadata),
             "sections": [
                 {
