@@ -2593,11 +2593,30 @@ class ProjectWorkspace(QWidget):
             run_enabled = (metrics and getattr(metrics, "combined_input_count", 0) > 0) and group.group_id not in self._running_groups
             run_button.setEnabled(bool(run_enabled))
             run_button.clicked.connect(lambda _, g=group: self._start_combined_run(g))
+            action_layout.addWidget(run_button)
         else:
-            run_button = QPushButton("Run")
-            run_button.setEnabled(converted_count > 0 and group.group_id not in self._running_groups)
-            run_button.clicked.connect(lambda _, g=group: self._start_group_run(g))
-        action_layout.addWidget(run_button)
+            pending_count = metrics.pending_bulk_analysis if metrics else None
+            converted_count = metrics.converted_count if metrics else 0
+
+            run_pending = QPushButton("Run Pending")
+            run_pending.setEnabled(
+                group.group_id not in self._running_groups
+                and (pending_count is None or pending_count > 0)
+            )
+            run_pending.clicked.connect(
+                lambda _, g=group: self._start_group_run(g, force_rerun=False)
+            )
+            action_layout.addWidget(run_pending)
+
+            run_all = QPushButton("Run All")
+            run_all.setEnabled(
+                group.group_id not in self._running_groups
+                and ((pending_count is None) or converted_count > 0)
+            )
+            run_all.clicked.connect(
+                lambda _, g=group: self._start_group_run(g, force_rerun=True)
+            )
+            action_layout.addWidget(run_all)
 
         preview_button = QPushButton("Preview Prompt")
         preview_button.clicked.connect(lambda _, g=group: self._show_group_prompt_preview(g))
@@ -2742,7 +2761,7 @@ class ProjectWorkspace(QWidget):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(latest)))
 
-    def _start_group_run(self, group: SummaryGroup) -> None:
+    def _start_group_run(self, group: SummaryGroup, *, force_rerun: bool = False) -> None:
         if not self._feature_flags.summary_groups_enabled:
             return
         if group.group_id in self._running_groups:
@@ -2763,52 +2782,36 @@ class ProjectWorkspace(QWidget):
         if self._workspace_metrics:
             group_metrics = self._workspace_metrics.groups.get(group.group_id)
 
+        if not group_metrics:
+            QMessageBox.warning(
+                self,
+                "Bulk Analysis",
+                "Project metrics are unavailable. Re-scan sources before running bulk analysis.",
+            )
+            return
+
         files: List[str] = []
-        force_rerun = False
-        if group_metrics:
+        if force_rerun:
+            converted = list(group_metrics.converted_files)
+            if not converted:
+                QMessageBox.warning(
+                    self,
+                    "No Converted Documents",
+                    "This group does not have any converted documents yet. Run conversion first.",
+                )
+                return
+            files = converted
+        else:
             pending = list(group_metrics.pending_files)
             if pending:
                 files = pending
             else:
-                rerun = QMessageBox.question(
+                QMessageBox.information(
                     self,
-                    "Bulk Analysis",
-                    (
-                        "All documents in this group already have bulk analysis results.\n\n"
-                        "Do you want to re-process all documents and overwrite existing outputs?"
-                    ),
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No,
+                    "Up to Date",
+                    "All documents already have bulk analysis results. Use 'Run All' to re-process everything.",
                 )
-                if rerun == QMessageBox.Yes:
-                    if group_metrics.converted_files:
-                        confirm = QMessageBox.question(
-                            self,
-                            "Force Re-run",
-                            (
-                                "This will re-run bulk analysis for all documents in the group and overwrite existing outputs.\n\n"
-                                "Do you want to proceed?"
-                            ),
-                            QMessageBox.Yes | QMessageBox.No,
-                            QMessageBox.No,
-                        )
-                        if confirm == QMessageBox.Yes:
-                            files = list(group_metrics.converted_files)
-                            force_rerun = True
-                        else:
-                            return
-                    else:
-                        return
-                else:
-                    return
-
-        if not files:
-            QMessageBox.warning(
-                self,
-                "No Converted Documents",
-                "This group does not have any converted documents yet. Run conversion first.",
-            )
-            return
+                return
 
         if not self._project_manager or not self._project_manager.project_dir:
             QMessageBox.warning(self, "Missing Project", "The project directory is not available.")
@@ -2826,7 +2829,9 @@ class ProjectWorkspace(QWidget):
             default_provider=provider_default,
             force_rerun=force_rerun,
         )
-        worker.progress.connect(lambda done, total, path, gid=group.group_id: self._on_bulk_progress(gid, done, total, path))
+        worker.progress.connect(
+            lambda done, total, path, gid=group.group_id: self._on_bulk_progress(gid, done, total, path)
+        )
         worker.file_failed.connect(lambda rel, err, gid=group.group_id: self._on_bulk_failed(gid, rel, err))
         worker.finished.connect(
             lambda success, failed, w=worker, gid=group.group_id: self._on_bulk_finished(gid, w, success, failed)
@@ -2838,8 +2843,10 @@ class ProjectWorkspace(QWidget):
         self._bulk_progress[group.group_id] = (0, len(files))
         self._bulk_failures[group.group_id] = []
         self._cancelling_groups.discard(group.group_id)
-        if self._summary_info_label:
-            self._summary_info_label.setText("Running bulk analysis…")
+        self._on_bulk_log(
+            group.group_id,
+            f"Starting bulk analysis for '{group.name}' ({len(files)} {'all documents' if force_rerun else 'pending documents'}).",
+        )
         self._refresh_summary_groups()
         self._workers.start(key, worker)
 
@@ -2905,6 +2912,8 @@ class ProjectWorkspace(QWidget):
 
     def _on_bulk_log(self, group_id: str, message: str) -> None:  # noqa: ARG002 - future use
         LOGGER.info("[BulkAnalysis][%s] %s", group_id, message)
+        if self._summary_info_label:
+            self._summary_info_label.setText(message)
 
     def _on_bulk_finished(self, group_id: str, worker, successes: int, failures: int) -> None:
         key = self._bulk_key(group_id)

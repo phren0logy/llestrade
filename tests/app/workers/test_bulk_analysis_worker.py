@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Sequence
+
+import pytest
 
 from src.app.core.bulk_analysis_runner import PromptBundle
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.summary_groups import SummaryGroup
+from src.app.workers import bulk_analysis_worker as worker_module
 from src.app.workers.bulk_analysis_worker import (
+    BulkAnalysisWorker,
     ProviderConfig,
     _compute_prompt_hash,
     _load_manifest,
@@ -67,3 +72,76 @@ def test_compute_prompt_hash_changes_on_prompt_and_settings() -> None:
     metadata.case_name = "Case B"
     fourth = _compute_prompt_hash(bundle, config_alt, group, metadata)
     assert third != fourth
+
+
+def test_bulk_worker_force_rerun_reprocesses(tmp_path: Path, qtbot, monkeypatch: pytest.MonkeyPatch) -> None:
+    _ = qtbot
+    project_dir = tmp_path
+    converted = project_dir / "converted_documents" / "folder"
+    converted.mkdir(parents=True, exist_ok=True)
+    converted_doc = converted / "doc.md"
+    converted_doc.write_text("content", encoding="utf-8")
+
+    group = SummaryGroup.create("Group")
+    metadata = ProjectMetadata(case_name="Case")
+    call_count = {"value": 0}
+
+    def fake_prepare(project_dir: Path, group: SummaryGroup, selected: Sequence[str]):
+        from src.app.core.bulk_analysis_runner import BulkAnalysisDocument
+
+        source_path = project_dir / "converted_documents" / "folder" / "doc.md"
+        output_path = project_dir / "bulk_analysis" / group.folder_name / "folder" / "doc_analysis.md"
+        return [BulkAnalysisDocument(source_path, "folder/doc.md", output_path)]
+
+    monkeypatch.setattr(worker_module, "prepare_documents", fake_prepare)
+    monkeypatch.setattr(
+        worker_module,
+        "load_prompts",
+        lambda *_args, **_kwargs: PromptBundle("System", "User {document_content}"),
+    )
+    monkeypatch.setattr(
+        BulkAnalysisWorker,
+        "_resolve_provider",
+        lambda self: ProviderConfig("anthropic", "model"),
+    )
+    monkeypatch.setattr(
+        BulkAnalysisWorker,
+        "_create_provider",
+        lambda self, *_: object(),
+    )
+
+    def fake_process(self, *_):
+        call_count["value"] += 1
+        return "summary"
+
+    monkeypatch.setattr(BulkAnalysisWorker, "_process_document", fake_process)
+
+    worker = BulkAnalysisWorker(
+        project_dir=project_dir,
+        group=group,
+        files=["folder/doc.md"],
+        metadata=metadata,
+        force_rerun=False,
+    )
+    worker._run()
+    assert call_count["value"] == 1
+
+    worker_skip = BulkAnalysisWorker(
+        project_dir=project_dir,
+        group=group,
+        files=["folder/doc.md"],
+        metadata=metadata,
+        force_rerun=False,
+    )
+    worker_skip._run()
+    assert call_count["value"] == 1, "expected skip when inputs unchanged"
+
+    worker_force = BulkAnalysisWorker(
+        project_dir=project_dir,
+        group=group,
+        files=["folder/doc.md"],
+        metadata=metadata,
+        force_rerun=True,
+    )
+    worker_force._run()
+    assert call_count["value"] == 2, "force re-run should process again"
