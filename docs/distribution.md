@@ -17,7 +17,6 @@
 - Network SDKs (`anthropic`, `openai`, `google-generativeai`, `azure-ai-documentintelligence`) are heavyweight; keep them but consider conditional loading in the UI if footprint becomes an issue.
 
 ## Build Next Steps
-1. Add a PyInstaller spec (`scripts/build_dashboard.spec`) capturing data files and hidden imports.
-2. Create `scripts/build_dashboard.py` or shell wrappers to orchestrate `uv export`, PyInstaller, and artifact staging per platform.
-3. Extend CI to execute the bundling pipeline and attach artifacts for macOS, Windows, and Linux.
-
+1. Use the PyInstaller spec at `scripts/build_dashboard.spec`, which now stages Qt plugins/resources automatically and writes to `dist/<platform>/`.
+2. Run the platform wrapper (`scripts/build_macos.sh`, `scripts/build_linux.sh`, or `scripts/build_windows.ps1`) on the corresponding OS; each invokes `uv run pyinstaller --clean --noconfirm ...`.
+3. Extend CI to execute the bundling pipeline per platform and attach artifacts (macOS `.app`/bundle, Windows `.exe`, Linux AppDir/AppImage or tarball).
