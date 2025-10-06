@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -68,9 +69,9 @@ class HighlightWorker(DashboardWorker):
                     total_highlights += len(collection.highlights)
                     collections_for_colors.append((job, collection))
                     if colors_root is None:
-                        colors_root = job.highlight_output.parents[2] / "colors"
+                        colors_root = _resolve_colors_root(job.highlight_output)
                 elif colors_root is None:
-                    colors_root = job.highlight_output.parents[2] / "colors"
+                    colors_root = _resolve_colors_root(job.highlight_output)
             except Exception as exc:  # noqa: BLE001 - surface via signal
                 failures += 1
                 self.logger.exception("%s failed %s", self.job_tag, job.source_pdf)
@@ -138,6 +139,39 @@ class HighlightWorker(DashboardWorker):
             source_relative=job.pdf_relative,
         )
         return collection
+
+
+def _resolve_colors_root(highlight_output: Path) -> Path:
+    """Return the colors directory under highlights/, migrating legacy layout."""
+
+    highlights_root = next(
+        (parent for parent in highlight_output.parents if parent.name == "highlights"),
+        highlight_output.parent,
+    )
+    colors_root = highlights_root / "colors"
+    legacy_root = highlights_root / "documents" / "colors"
+
+    if legacy_root.exists() and legacy_root.is_dir() and legacy_root != colors_root:
+        colors_root.mkdir(parents=True, exist_ok=True)
+
+        for entry in legacy_root.iterdir():
+            target = colors_root / entry.name
+            try:
+                if target.exists():
+                    if target.is_dir():
+                        shutil.rmtree(target)
+                    else:
+                        target.unlink()
+                entry.replace(target)
+            except OSError:
+                continue
+
+        try:
+            legacy_root.rmdir()
+        except OSError:
+            shutil.rmtree(legacy_root, ignore_errors=True)
+
+    return colors_root
 
 
 __all__ = ["HighlightWorker", "HighlightExtractionSummary"]

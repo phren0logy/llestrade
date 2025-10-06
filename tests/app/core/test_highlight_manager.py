@@ -131,3 +131,27 @@ def test_highlight_worker_writes_color_aggregates(tmp_path: Path) -> None:
     assert "folder/doc.pdf" in content
     assert worker.summary is not None
     assert worker.summary.color_files_written == len(files)
+
+
+def test_highlight_worker_migrates_legacy_colors_directory(tmp_path: Path) -> None:
+    manager, project_root, sources_root = _setup_manager(tmp_path)
+
+    pdf_path = sources_root / "folder" / "doc.pdf"
+    _create_pdf(pdf_path, "Legacy Colors", highlight=True)
+    converted_path = project_root / "converted_documents" / "folder" / "doc.md"
+    converted_path.parent.mkdir(parents=True, exist_ok=True)
+    converted_path.write_text("content", encoding="utf-8")
+
+    legacy_colors = project_root / "highlights" / "documents" / "colors"
+    legacy_colors.mkdir(parents=True, exist_ok=True)
+    (legacy_colors / "old-color.md").write_text("stale", encoding="utf-8")
+
+    jobs = build_highlight_jobs(manager)
+    assert jobs
+
+    worker = HighlightWorker(jobs)
+    worker._run()
+
+    assert not legacy_colors.exists()
+    colors_dir = project_root / "highlights" / "colors"
+    assert colors_dir.exists()

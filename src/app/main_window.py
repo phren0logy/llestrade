@@ -15,7 +15,6 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QStackedWidget,
-    QToolBar,
     QVBoxLayout,
     QWidget,
     QDialogButtonBox,
@@ -76,7 +75,6 @@ class SimplifiedMainWindow(QMainWindow):
 
         # Build UI chrome
         self._create_menu_bar()
-        self._create_toolbar()
         self._create_central_stack()
         self.statusBar().showMessage("Ready")
 
@@ -118,14 +116,6 @@ class SimplifiedMainWindow(QMainWindow):
 
         help_menu = menubar.addMenu("Help")
         help_menu.addAction("About", self._show_about)
-
-    def _create_toolbar(self) -> None:
-        toolbar = QToolBar("Main", self)
-        toolbar.setMovable(False)
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
-        toolbar.addAction("New", self._new_project)
-        toolbar.addAction("Open", self._open_project)
-        self.addToolBar(Qt.TopToolBarArea, toolbar)
 
     def _create_central_stack(self) -> None:
         central_widget = QWidget(self)
