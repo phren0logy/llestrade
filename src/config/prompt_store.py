@@ -19,7 +19,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
-from .paths import app_prompts_root, app_templates_root
+from .paths import (
+    app_prompts_root,
+    app_templates_root,
+    app_resource_root,
+)
 
 
 def get_prompts_root() -> Path:
@@ -60,35 +64,21 @@ def get_repo_prompts_dir() -> Path:
     Normal dev layout: src/app/resources/prompts
     Provide a few fallbacks to be resilient to where this file is located.
     """
-    here = Path(__file__).resolve()
-    candidates = [
-        # ../ (src)/app/resources/prompts
-        here.parents[1] / "app" / "resources" / "prompts",
-        # repo_root/src/app/resources/prompts
-        here.parents[2] / "src" / "app" / "resources" / "prompts",
-        # repo_root/app/resources/prompts (legacy fallback)
-        here.parents[2] / "app" / "resources" / "prompts",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    # Prefer the src-based path even if it doesn't exist to make intent clear
-    return candidates[1]
+    resource_root = app_resource_root()
+    path = resource_root / "prompts"
+    if path.exists():
+        return path
+    return path
 
 
 def get_repo_templates_dir() -> Path:
     """Return the path to templates bundled with the application source tree."""
 
-    here = Path(__file__).resolve()
-    candidates = [
-        here.parents[1] / "app" / "resources" / "templates",
-        here.parents[2] / "src" / "app" / "resources" / "templates",
-        here.parents[2] / "app" / "resources" / "templates",
-    ]
-    for p in candidates:
-        if p.exists():
-            return p
-    return candidates[1]
+    resource_root = app_resource_root()
+    path = resource_root / "templates"
+    if path.exists():
+        return path
+    return path
 
 
 def _hash_file(path: Path) -> str:

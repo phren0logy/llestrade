@@ -7,7 +7,6 @@ to a visible Documents folder: ~/Documents/llestrade (and platform equivalents).
 
 from __future__ import annotations
 
-import os
 import sys
 import shutil
 from pathlib import Path
@@ -98,6 +97,34 @@ def app_crashes_dir() -> Path:
     return p
 
 
+def app_base_dir() -> Path:
+    """Return the root directory containing application resources.
+
+    When the app is frozen (PyInstaller), sys._MEIPASS points to the unpacked
+    bundle. During development we fall back to the repository root.
+    """
+
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        return Path(frozen_root)
+    return Path(__file__).resolve().parents[2]
+
+
+def app_resource_root() -> Path:
+    """Return the folder that holds bundled static resources."""
+
+    base = app_base_dir()
+    candidates = [
+        base / "src" / "app" / "resources",
+        base / "app" / "resources",
+        base / "resources",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 __all__ = [
     "documents_dir",
     "app_user_root",
@@ -106,4 +133,6 @@ __all__ = [
     "app_templates_root",
     "app_logs_dir",
     "app_crashes_dir",
+    "app_base_dir",
+    "app_resource_root",
 ]

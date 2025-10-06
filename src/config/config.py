@@ -23,10 +23,8 @@ def load_env_file():
         if template_path.exists():
             print("INFO: .env file not found. Using config.template.env as reference.")
             print("Please create an .env file with your actual API keys.")
-            # Load from template for demonstration purposes
-            load_dotenv(template_path)
         return
-    
+
     # Load variables from .env file using python-dotenv
     load_dotenv(env_path)
     print("Environment variables loaded from .env file")

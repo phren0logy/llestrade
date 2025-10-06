@@ -619,6 +619,15 @@ class ProjectWorkspace(QWidget):
     def project_manager(self) -> Optional[ProjectManager]:
         return self._project_manager
 
+    def shutdown(self) -> None:
+        """Cancel background work before disposing of the workspace."""
+
+        self._workers.clear()
+        self._running_groups.clear()
+        self._bulk_progress.clear()
+        self._bulk_failures.clear()
+        self._highlight_errors.clear()
+
     def refresh(self) -> None:
         self._populate_source_tree()
         self._update_source_root_label()

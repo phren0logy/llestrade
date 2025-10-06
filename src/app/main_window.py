@@ -345,6 +345,7 @@ class SimplifiedMainWindow(QMainWindow):
         self.statusBar().showMessage(f"Project loaded: {case_name}")
 
     def _activate_workspace(self, project_manager: ProjectManager) -> None:
+        self._teardown_workspace(close_project=True)
         self.project_manager = project_manager
         workspace = self.workspace_controller.create_workspace(project_manager)
         workspace.set_project(project_manager)
@@ -366,7 +367,15 @@ class SimplifiedMainWindow(QMainWindow):
 
     def _display_workspace(self, workspace: QWidget) -> None:
         if self._workspace_widget is not None:
-            index = self._stack.indexOf(self._workspace_widget)
+            old_workspace = self._workspace_widget
+            self._disconnect_workspace_signals(old_workspace)
+            shutdown = getattr(old_workspace, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown()
+                except Exception:
+                    self.logger.debug("Workspace shutdown raised", exc_info=True)
+            index = self._stack.indexOf(old_workspace)
             if index != -1:
                 widget = self._stack.widget(index)
                 self._stack.removeWidget(widget)
@@ -380,6 +389,13 @@ class SimplifiedMainWindow(QMainWindow):
 
     def _teardown_workspace(self, *, close_project: bool = False) -> None:
         if self._workspace_widget is not None:
+            self._disconnect_workspace_signals(self._workspace_widget)
+            shutdown = getattr(self._workspace_widget, "shutdown", None)
+            if callable(shutdown):
+                try:
+                    shutdown()
+                except Exception:
+                    self.logger.debug("Workspace shutdown raised", exc_info=True)
             index = self._stack.indexOf(self._workspace_widget)
             if index != -1:
                 widget = self._stack.widget(index)
@@ -391,6 +407,15 @@ class SimplifiedMainWindow(QMainWindow):
                 self.project_manager.close_project()
             finally:
                 self.project_manager = None
+
+    def _disconnect_workspace_signals(self, workspace: QWidget) -> None:
+        signal = getattr(workspace, "home_requested", None)
+        if signal is None:
+            return
+        try:
+            signal.disconnect(self._handle_workspace_home)
+        except (TypeError, RuntimeError):  # Already disconnected or widget gone
+            pass
 
     def _on_workspace_created(self, workspace: QWidget) -> None:  # pragma: no cover - hook for future extensions
         self.logger.debug("Workspace widget created: %s", workspace)

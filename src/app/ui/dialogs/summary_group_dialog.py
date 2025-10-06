@@ -30,14 +30,15 @@ from PySide6.QtWidgets import (
 
 from src.config.app_config import get_available_providers_and_models
 from src.config.prompt_store import get_bundled_dir, get_custom_dir
+from src.config.paths import app_resource_root
 from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.summary_groups import SummaryGroup
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 from .prompt_preview_dialog import PromptPreviewDialog
 
-DEFAULT_SYSTEM_PROMPT = "src/app/resources/prompts/document_analysis_system_prompt.md"
-DEFAULT_USER_PROMPT = "src/app/resources/prompts/document_summary_prompt.md"
+DEFAULT_SYSTEM_PROMPT = "prompts/document_analysis_system_prompt.md"
+DEFAULT_USER_PROMPT = "prompts/document_summary_prompt.md"
 
 
 class SummaryGroupDialog(QDialog):
@@ -242,12 +243,12 @@ class SummaryGroupDialog(QDialog):
             path = None
 
         if path is None:
-            alt = Path(fallback)
-            if alt.exists():
-                path = alt
-
-        if path is None:
-            path = Path(fallback)
+            resource_root = app_resource_root()
+            resource_fallback = resource_root / fallback
+            if resource_fallback.exists():
+                path = resource_fallback
+            else:
+                path = resource_fallback
 
         line_edit.setText(self._normalise_path(path))
 

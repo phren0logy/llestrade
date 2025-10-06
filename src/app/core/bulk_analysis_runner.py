@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 from src.common.llm.chunking import ChunkingStrategy
 from src.common.llm.tokens import TokenCounter
 from src.config.prompt_store import get_custom_dir, get_bundled_dir
+from src.config.paths import app_base_dir, app_resource_root
 from .prompt_manager import PromptManager
 from .project_manager import ProjectMetadata
 from .summary_groups import SummaryGroup
@@ -223,11 +224,13 @@ def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:
     else:
         if project_dir:
             search_paths.append((project_dir / candidate).resolve())
-        repo_root = Path(__file__).resolve().parents[3]
-        search_paths.append((repo_root / candidate).resolve())
-        # Also support resources shipped under src/app/resources when a relative path like
-        # "resources/prompts/..." is provided.
-        search_paths.append((repo_root / "src" / "app" / candidate).resolve())
+        bundle_root = app_base_dir()
+        resource_root = app_resource_root()
+        app_root = resource_root.parent
+        search_paths.append((bundle_root / candidate).resolve())
+        # Support paths relative to src/app/… and the resources directory.
+        search_paths.append((app_root / candidate).resolve())
+        search_paths.append((resource_root / candidate).resolve())
 
         # Look inside the user prompt store for both matching relative paths and basename fallbacks
         store_paths: List[Path] = []

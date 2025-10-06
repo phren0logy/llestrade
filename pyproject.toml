@@ -32,4 +32,5 @@ dev = [
     "openinference-instrumentation-openai>=0.1.12",
     "openinference-instrumentation-anthropic>=0.1.0",
     "rich>=13.0.0",
+    "pyinstaller>=6.11.0",
 ]
