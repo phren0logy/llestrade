@@ -913,8 +913,7 @@ class ProjectWorkspace(QWidget):
         root_label = root_path.name or root_path.as_posix()
         root_item = QTreeWidgetItem([root_label])
         root_item.setData(0, Qt.UserRole, ("root", ""))
-        flags = root_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate
-        root_item.setFlags(flags)
+        self._apply_directory_flags(root_item)
         root_item.setCheckState(0, Qt.Checked if "" in selected_set else Qt.Unchecked)
         self._source_tree_nodes[""] = root_item
         self._source_tree.addTopLevelItem(root_item)
@@ -1008,14 +1007,15 @@ class ProjectWorkspace(QWidget):
                 if node is None:
                     node = QTreeWidgetItem([entry.name])
                     node.setData(0, Qt.UserRole, ("dir", relative))
-                    flags = node.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate
-                    node.setFlags(flags)
+                    self._apply_directory_flags(node)
                     if self._is_path_tracked(relative, selected):
                         node.setCheckState(0, Qt.Checked)
                     else:
                         node.setCheckState(0, Qt.Unchecked)
                     self._source_tree_nodes[relative] = node
                     parent_item.addChild(node)
+                else:
+                    self._apply_directory_flags(node)
                 self._populate_directory_contents(node, entry, processed, root_path, selected)
             else:
                 file_item = QTreeWidgetItem([entry.name])
@@ -1038,6 +1038,12 @@ class ProjectWorkspace(QWidget):
         if not path:
             return ""
         return Path(path.strip("/")).as_posix()
+
+    def _apply_directory_flags(self, item: QTreeWidgetItem) -> None:
+        flags = item.flags()
+        flags |= _ITEM_IS_ENABLED | _ITEM_IS_USER_CHECKABLE
+        flags &= ~_ITEM_IS_TRISTATE
+        item.setFlags(flags)
 
     def _should_skip_source_entry(self, entry: Path) -> bool:
         return any(

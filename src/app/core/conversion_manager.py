@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Sequence
 
+import frontmatter
+
 from .project_manager import ProjectManager
 
 LOGGER = logging.getLogger(__name__)
@@ -102,7 +104,10 @@ def build_conversion_jobs(project_manager: ProjectManager) -> ConversionPlan:
                     continue
                 seen_hashes[digest] = relative
             destination = _destination_for(project_dir, relative, conversion_type)
-            if not _needs_conversion(source_file, destination):
+            needs_conversion = _needs_conversion(source_file, destination)
+            if not needs_conversion:
+                continue
+            if digest and _has_matching_checksum(destination, digest):
                 continue
             jobs.append(
                 ConversionJob(
@@ -176,6 +181,25 @@ def _hash_source(path: Path) -> str | None:
     except OSError:
         LOGGER.warning("Unable to hash %s; skipping duplicate detection", path)
         return None
+
+
+def _has_matching_checksum(destination: Path, expected_digest: str) -> bool:
+    if not destination.exists():
+        return False
+    try:
+        document = frontmatter.load(destination)
+    except Exception:
+        return False
+    metadata = document.metadata if isinstance(document.metadata, dict) else None
+    if not metadata:
+        return False
+    sources = metadata.get("sources")
+    if not isinstance(sources, list):
+        return False
+    for entry in sources:
+        if isinstance(entry, dict) and entry.get("checksum") == expected_digest:
+            return True
+    return False
 
 
 def copy_existing_markdown(source: Path, destination: Path) -> None:
