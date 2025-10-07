@@ -173,7 +173,7 @@ class ProjectWorkspace(QWidget):
         self._report_last_result: Optional[Dict[str, str]] = None
         self._report_running = False
 
-        self._documents_controller = DocumentsController()
+        self._documents_controller: DocumentsController | None = None
         self._build_ui()
         if project_manager:
             self.set_project(project_manager)
@@ -223,6 +223,7 @@ class ProjectWorkspace(QWidget):
 
     def _build_documents_tab(self) -> QWidget:
         tab = DocumentsTab(parent=self)
+        self._documents_controller = DocumentsController(self, tab)
         self._source_root_label = tab.source_root_label
         self._counts_label = tab.counts_label
         self._last_scan_label = tab.last_scan_label
@@ -661,11 +662,16 @@ class ProjectWorkspace(QWidget):
             self._trigger_conversion(auto_run=True)
 
     def _refresh_file_tracker(self) -> None:
+        if self._documents_controller:
+            metrics = self._documents_controller.refresh_file_tracker()
+            if metrics is not None:
+                self._workspace_metrics = metrics
+            return
         if not self._project_manager:
             return
         try:
             self._workspace_metrics = self._project_manager.get_workspace_metrics(refresh=True)
-        except Exception as exc:
+        except Exception:
             self._counts_label.setText("Scan failed")
             if getattr(self, "_missing_highlights_label", None):
                 self._missing_highlights_label.setText("")
@@ -795,6 +801,9 @@ class ProjectWorkspace(QWidget):
             self._source_root_label.setText(f"Source root: {root_path}")
 
     def _update_last_scan_label(self) -> None:
+        if self._documents_controller:
+            self._documents_controller.update_last_scan_label()
+            return
         if not self._project_manager:
             self._last_scan_label.setText("")
             return
