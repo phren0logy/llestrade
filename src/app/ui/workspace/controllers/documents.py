@@ -1,4 +1,4 @@
-"""Business-logic controller for the workspace Documents tab (scaffolding)."""
+"""Business-logic controller scaffold for the workspace Documents tab."""
 
 from __future__ import annotations
 
@@ -8,18 +8,18 @@ from src.app.core.project_manager import ProjectManager
 
 
 class DocumentsController:
-    """Placeholder controller exposing the methods the tab expects."""
+    """Placeholder controller exposing hooks for future refactors."""
 
     def __init__(self) -> None:
         self._project_manager: Optional[ProjectManager] = None
 
     def set_project(self, project_manager: Optional[ProjectManager]) -> None:
-        """Store the active project manager."""
+        """Record the current project manager reference."""
 
         self._project_manager = project_manager
 
     def shutdown(self) -> None:
-        """Hook for releasing resources (none yet)."""
+        """Release references when the workspace is torn down."""
 
         self._project_manager = None
 
