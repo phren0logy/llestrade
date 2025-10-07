@@ -103,7 +103,7 @@ def test_workspace_run_executes_worker_and_updates_ui(tmp_path: Path, qt_app: QA
     assert table.rowCount() == 1
 
     action_widget = table.cellWidget(0, 4)
-    run_button = _find_button(action_widget, "Run")
+    run_button = _find_button(action_widget, "Run Pending")
     run_button.click()
     QCoreApplication.processEvents()
 
@@ -138,12 +138,14 @@ class _StubBulkAnalysisWorker(QObject, QRunnable):
         files: list[str],
         metadata: ProjectMetadata | None,
         default_provider: tuple[str, str | None],
+        force_rerun: bool = False,
     ) -> None:
         QObject.__init__(self)
         QRunnable.__init__(self)
         self.setAutoDelete(True)
         self.group = group
         self.cancel_called = False
+        self.force_rerun = force_rerun
 
     def run(self) -> None:  # pragma: no cover - trivial stub
         self.log_message.emit("started")
@@ -168,13 +170,13 @@ def test_workspace_cancel_updates_status_and_cleans_state(tmp_path: Path, qt_app
     table = workspace._summary_table
     assert table is not None
     action_widget = table.cellWidget(0, 4)
-    run_button = _find_button(action_widget, "Run")
+    run_button = _find_button(action_widget, "Run Pending")
     run_button.click()
     QCoreApplication.processEvents()
 
     action_widget = table.cellWidget(0, 4)
     cancel_button = _find_button(action_widget, "Cancel")
-    run_button = _find_button(action_widget, "Run")
+    run_button = _find_button(action_widget, "Run Pending")
 
     assert pool.last_worker is not None
     worker = pool.last_worker
@@ -198,7 +200,7 @@ def test_workspace_cancel_updates_status_and_cleans_state(tmp_path: Path, qt_app
     assert workspace._bulk_progress.get(group.group_id) is None
 
     refreshed_widget = table.cellWidget(0, 4)
-    refreshed_run = _find_button(refreshed_widget, "Run")
+    refreshed_run = _find_button(refreshed_widget, "Run Pending")
     refreshed_cancel = _find_button(refreshed_widget, "Cancel")
     assert refreshed_run.isEnabled()
     assert not refreshed_cancel.isEnabled()
