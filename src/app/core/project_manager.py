@@ -10,7 +10,7 @@ import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Optional, Any, List, TYPE_CHECKING
+from typing import Dict, Optional, Any, List, Sequence, TYPE_CHECKING
 from dataclasses import dataclass, asdict, field
 
 from PySide6.QtCore import QObject, Signal, QTimer
@@ -106,6 +106,7 @@ class SourceTreeState:
 
     root: str = ""  # relative path from project dir (allows .. for external roots)
     selected_folders: List[str] = field(default_factory=list)  # relative to root
+    acknowledged_folders: List[str] = field(default_factory=list)  # folders the user has already reviewed
     include_root_files: bool = False
     last_scan: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
@@ -118,6 +119,7 @@ class SourceTreeState:
     def from_dict(cls, data: Dict[str, Any]) -> "SourceTreeState":
         payload = {**data}
         payload.setdefault("selected_folders", [])
+        payload.setdefault("acknowledged_folders", [])
         payload.setdefault("warnings", [])
         return cls(**payload)
 
@@ -740,6 +742,129 @@ class ProjectManager(QObject):
         self.workspace_metrics = None
         self.mark_modified()
         return True
+
+    def prune_bulk_analysis_groups(self, *, missing_directories: Sequence[str] = ()) -> None:
+        """Remove references to converted files/directories that no longer exist."""
+
+        if not self.project_dir:
+            return
+        normalized_missing = {
+            Path(entry.strip("/")).as_posix()
+            for entry in missing_directories
+            if entry and entry.strip("/")
+        }
+        if not normalized_missing:
+            return
+
+        converted_root = (self.project_dir / "converted_documents").resolve()
+        bulk_root = (self.project_dir / "bulk_analysis").resolve()
+
+        def _is_under_missing(relative: str) -> bool:
+            rel = relative.strip("/")
+            if not rel:
+                return False
+            return any(rel == missing or rel.startswith(f"{missing}/") for missing in normalized_missing)
+
+        def _file_exists(relative: str) -> bool:
+            rel = relative.strip("/")
+            if not rel:
+                return False
+            return (converted_root / rel).exists()
+
+        groups = self.list_bulk_analysis_groups()
+        updated = False
+
+        for group in groups:
+            changed = False
+
+            original_directories = list(group.directories)
+            group.directories = [
+                directory
+                for directory in group.directories
+                if not _is_under_missing(directory)
+            ]
+            if group.directories != original_directories:
+                changed = True
+
+            original_files = list(group.files)
+            group.files = [
+                path
+                for path in group.files
+                if not _is_under_missing(path) and _file_exists(path)
+            ]
+            if group.files != original_files:
+                changed = True
+
+            if group.operation == "combined":
+                combined_dirs = list(group.combine_converted_directories)
+                group.combine_converted_directories = [
+                    directory
+                    for directory in group.combine_converted_directories
+                    if not _is_under_missing(directory)
+                ]
+                if group.combine_converted_directories != combined_dirs:
+                    changed = True
+
+                combined_files = list(group.combine_converted_files)
+                group.combine_converted_files = [
+                    path
+                    for path in group.combine_converted_files
+                    if not _is_under_missing(path) and _file_exists(path)
+                ]
+                if group.combine_converted_files != combined_files:
+                    changed = True
+
+                combined_map_files = list(group.combine_map_files)
+                pruned_map_files: List[str] = []
+                for entry in group.combine_map_files:
+                    slug_path = entry.strip("/")
+                    if not slug_path:
+                        continue
+                    parts = slug_path.split("/", 1)
+                    if len(parts) != 2:
+                        continue
+                    slug, rel_path = parts
+                    if _is_under_missing(rel_path):
+                        changed = True
+                        continue
+                    output_path = bulk_root / slug / "outputs" / rel_path
+                    if not output_path.exists():
+                        changed = True
+                        continue
+                    pruned_map_files.append(entry)
+                if pruned_map_files != combined_map_files:
+                    changed = True
+                group.combine_map_files = pruned_map_files
+
+                combined_map_dirs = list(group.combine_map_directories)
+                pruned_map_dirs: List[str] = []
+                for entry in group.combine_map_directories:
+                    slug_path = entry.strip("/")
+                    if not slug_path:
+                        continue
+                    parts = slug_path.split("/", 1)
+                    if len(parts) != 2:
+                        continue
+                    slug, rel_path = parts
+                    if _is_under_missing(rel_path):
+                        changed = True
+                        continue
+                    outputs_dir = bulk_root / slug / "outputs" / rel_path
+                    if not outputs_dir.exists():
+                        changed = True
+                        continue
+                    pruned_map_dirs.append(entry)
+                if pruned_map_dirs != combined_map_dirs:
+                    changed = True
+                group.combine_map_directories = pruned_map_dirs
+
+            if changed:
+                group.touch()
+                self.save_bulk_analysis_group(group)
+                updated = True
+
+        if updated:
+            self.workspace_metrics = None
     
     def _get_created_date(self) -> str:
         """Get project creation date."""
@@ -826,6 +951,7 @@ class ProjectManager(QObject):
         *,
         root: Optional[str] = None,
         selected_folders: Optional[List[str]] = None,
+        acknowledged_folders: Optional[List[str]] = None,
         include_root_files: Optional[bool] = None,
         warnings: Optional[List[str]] = None,
         last_scan: Optional[str] = None,
@@ -834,6 +960,8 @@ class ProjectManager(QObject):
             self.source_state.root = root
         if selected_folders is not None:
             self.source_state.selected_folders = selected_folders
+        if acknowledged_folders is not None:
+            self.source_state.acknowledged_folders = acknowledged_folders
         if include_root_files is not None:
             self.source_state.include_root_files = include_root_files
         if warnings is not None:

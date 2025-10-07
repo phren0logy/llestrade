@@ -6,6 +6,7 @@ import pytest
 
 from src.app.core import bulk_analysis_runner as runner
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
+from src.app.core.prompt_placeholders import MissingPlaceholdersError
 
 
 class _StubPromptManager:
@@ -22,5 +23,7 @@ def test_load_prompts_requires_document_placeholder(tmp_path, monkeypatch: pytes
 
     monkeypatch.setattr(runner, "PromptManager", lambda: _StubPromptManager())
 
-    with pytest.raises(ValueError, match="document_content"):
+    with pytest.raises(MissingPlaceholdersError) as excinfo:
         runner.load_prompts(tmp_path, group, metadata=None)
+
+    assert "{document_content}" in str(excinfo.value)

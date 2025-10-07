@@ -1,9 +1,3 @@
-## Document Content
-
-<document-content>
-{document_content}
-</document-content>
-
 # Document Analysis Task
 
 ## Document Information
@@ -16,9 +10,9 @@
 
 {case_info}
 
-## Bulk Analysis Instructions
+## Combined Summary Instructions
 
-Please analyze the document content, wrapped in "document-content" tags, and provide a comprehensive bulk analysis that includes:
+Please analyze the document content, wrapped in "document-content" tags, and provide a comprehensive summary that includes:
 
 - Key facts and information about the subject
 - Significant events and dates mentioned
@@ -51,3 +45,9 @@ When a range of pages is referenced, link the first page but include the range i
 Keep your analysis focused on factual information directly stated in the document.
 
 Before finalizing results, do a review for accuracy, with attention to exact quotes and markdown links to original PDFs.
+
+## Document Content
+
+<document-content>
+{document_content}
+</document-content>

@@ -14,6 +14,7 @@ from src.config.paths import app_base_dir, app_resource_root
 from .prompt_manager import PromptManager
 from .project_manager import ProjectMetadata
 from .bulk_analysis_groups import BulkAnalysisGroup
+from .prompt_placeholders import ensure_required_placeholders, format_prompt
 
 LOGGER = logging.getLogger(__name__)
 
@@ -100,7 +101,7 @@ def load_prompts(
                 "and clinical details.\n\n{document_content}"
             )
 
-    _ensure_document_placeholder(user_template, source=group.user_prompt_path or "document_bulk_analysis_prompt")
+    ensure_required_placeholders("document_bulk_analysis_prompt", user_template)
 
     return PromptBundle(system_template=system_template, user_template=user_template)
 
@@ -109,7 +110,7 @@ def render_system_prompt(bundle: PromptBundle, metadata: Optional[ProjectMetadat
     """Format the system prompt with available metadata."""
 
     context = _metadata_context(metadata)
-    return _safe_format(bundle.system_template, context)
+    return format_prompt(bundle.system_template, context)
 
 
 def render_user_prompt(
@@ -137,7 +138,7 @@ def render_user_prompt(
                 "chunk_total": chunk_total,
             }
         )
-    prompt = _safe_format(bundle.user_template, context)
+    prompt = format_prompt(bundle.user_template, context)
     if chunk_index is not None and chunk_total is not None:
         prefix = (
             f"You are analysing chunk {chunk_index} of {chunk_total} from {document_name}.\n\n"
@@ -186,7 +187,7 @@ def combine_chunk_summaries(
             "chunk_summaries": combined,
         }
     )
-    prompt = _safe_format(
+    prompt = format_prompt(
         (
             "Create a unified bulk analysis by combining these partial results of document: {document_name}\n\n"
             "## Partial Results:\n{chunk_summaries}\n\n"
@@ -195,24 +196,6 @@ def combine_chunk_summaries(
         context,
     )
     return prompt, context
-
-
-def _safe_format(template: str, context: Dict[str, object]) -> str:
-    class _SafeDict(dict):
-        def __missing__(self, key: str) -> str:  # noqa: D401 - simple placeholder helper
-            return "{" + key + "}"
-
-    safe_context = _SafeDict({k: v for k, v in context.items() if v is not None})
-    return template.format_map(safe_context)
-
-
-def _ensure_document_placeholder(template: str, *, source: str) -> None:
-    if "{document_content}" not in template:
-        raise ValueError(
-            "User prompt template must include the {document_content} placeholder. "
-            f"Template source: {source or 'embedded default'}"
-        )
-
 
 def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:
     if not path_str:

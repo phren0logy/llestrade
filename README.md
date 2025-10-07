@@ -18,44 +18,49 @@ Note: The application was previously named “Forensic Psych Report Drafter.”
 
 ### Prerequisites
 
-- Python 3.11 or higher
+- Python 3.12 or higher
 - [uv](https://github.com/astral-sh/uv) package manager (recommended) or pip
 
 ### Setup Steps
 
 1. **Clone the repository**
+
    ```bash
    git clone https://github.com/your-username/forensic-report-drafter.git
    cd forensic-report-drafter
    ```
 
 2. **Install dependencies using uv** (recommended)
+
    ```bash
    uv sync
    ```
-   
+
    Or using pip:
+
    ```bash
    pip install -r pyproject.toml
    ```
 
 3. **Configure API keys**
+
    ```bash
    # Copy the template
    cp config.template.env .env
-   
+
    # Edit .env and add your API keys:
    # ANTHROPIC_API_KEY=sk-ant-...
    # GEMINI_API_KEY=AIza...
    # AZURE_OPENAI_API_KEY=...
    # AZURE_OPENAI_ENDPOINT=https://...
-   # AZURE_OPENAI_DEPLOYMENT_NAME=gpt-4
+   # AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-mini
    ```
 
 4. **Run the application**
+
    ```bash
    uv run main.py
-   
+
    # Or with debug mode enabled:
    uv run main.py --debug
    ```
@@ -75,11 +80,13 @@ This will move `prompts/`, `config/`, `logs/`, and `crashes/` under `~/Documents
 ### Interactive Setup
 
 For first-time users, run the interactive setup:
+
 ```bash
 uv run scripts/setup_env.py
 ```
 
 This will:
+
 - Create your `.env` file
 - Guide you through API key configuration
 - Test your LLM connections
@@ -88,10 +95,12 @@ This will:
 ### Basic Workflow
 
 1. **PDF Processing** (optional)
+
    - Use the PDF Processing tab to convert PDF reports to markdown
    - Select input PDFs and choose an output directory
 
 2. **Document Analysis**
+
    - In the Analysis tab, select folders containing markdown documents
    - Enter subject information (name, DOB, case details)
    - Click "Run Pending" to create per-document bulk analysis outputs
@@ -99,6 +108,7 @@ This will:
    - Generate an integrated analysis of all documents
 
 3. **Refinement**
+
    - Use the Refinement tab to edit and improve generated content
    - Apply custom prompts for specific refinements
 
@@ -190,6 +200,7 @@ When you create a project, the application maintains a self-contained workspace 
 ```
 
 Notes:
+
 - Highlights are extracted only for PDFs. If a PDF has no highlights, a placeholder `.highlights.md` file is created with a processed timestamp.
 - Dashboard highlight counts use a PDF-only denominator (e.g., `Highlights: X of Y` where `Y` is the number of PDF-converted documents), so DOCX and other non-PDF sources are excluded from the “pending highlights” count.
 
@@ -227,11 +238,29 @@ pages_pdf: 14
 
 This metadata is consumed by downstream tooling (dashboards, manifests, audits) and provides a consistent way to trace where every markdown document came from. When extending the app, prefer augmenting the front matter via the helper rather than writing YAML by hand.
 
+## Prompt Placeholders
+
+Prompt templates use `{placeholder}` tokens that the workers populate at runtime. Placeholder requirements are defined in `src/app/core/prompt_placeholders.py` and validated whenever a prompt is loaded, so missing required tokens fail fast instead of producing malformed requests. The same registry powers the UI tooltips on prompt selectors.
+
+| Prompt                        | Template file                                | Required placeholders                                          | Optional placeholders                                                                                 |
+| ----------------------------- | -------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Document analysis (system)    | `prompts/document_analysis_system_prompt.md` | None                                                           | `{subject_name}`, `{subject_dob}`, `{case_info}`                                                      |
+| Document bulk analysis (user) | `prompts/document_bulk_analysis_prompt.md`   | `{document_content}`                                           | `{subject_name}`, `{subject_dob}`, `{case_info}`, `{document_name}`, `{chunk_index}`, `{chunk_total}` |
+| Integrated analysis           | `prompts/integrated_analysis_prompt.md`      | `{document_content}`                                           | `{subject_name}`, `{subject_dob}`, `{case_info}`                                                      |
+| Report generation (user)      | `prompts/report_generation_user_prompt.md`   | `{template_section}`, `{transcript}`, `{additional_documents}` | `{section_title}`, `{document_content}`                                                               |
+| Report refinement (user)      | `prompts/refinement_prompt.md`               | `{draft_report}`, `{template}`                                 | `{transcript}`                                                                                        |
+| Report instructions           | `prompts/report_generation_instructions.md`  | `{template_section}`, `{transcript}`                           | None                                                                                                  |
+| Report generation (system)    | `prompts/report_generation_system_prompt.md` | None                                                           | None                                                                                                  |
+| Report refinement (system)    | `prompts/report_refinement_system_prompt.md` | None                                                           | None                                                                                                  |
+
+When building custom prompts, include every required placeholder shown above. Optional placeholders are always supplied (with an empty string if the value is unavailable), so they can be added or removed without breaking validation. If you introduce a new prompt template, add its specification to the registry so documentation and tooltips stay aligned.
+
 ## Configuration
 
 ### Application Settings
 
 The application stores settings in `var/app_settings.json` (created on first run):
+
 ```json
 {
   "selected_llm_provider_id": "anthropic",
@@ -255,6 +284,7 @@ The application stores settings in `var/app_settings.json` (created on first run
 ### Debug Mode
 
 Enable debug mode for enhanced logging and monitoring:
+
 ```bash
 # Via command line
 uv run main.py --debug
@@ -264,6 +294,7 @@ DEBUG=true uv run main.py
 ```
 
 Debug mode features:
+
 - Debug Dashboard with real-time monitoring
 - Detailed logging to `~/Documents/llestrade/logs/` (previously `~/.forensic_report_drafter/logs/`)
 - System resource tracking
@@ -274,12 +305,14 @@ Debug mode features:
 ### Extended Thinking
 
 For complex analysis requiring step-by-step reasoning:
+
 - Anthropic Claude: Automatically uses thinking mode for integrated analysis
 - Google Gemini: Uses extended thinking API when available
 
 ### Large Document Processing
 
 The application handles large documents through:
+
 - Smart chunking with configurable overlap
 - Token counting with caching
 - Progress tracking for long operations
@@ -288,6 +321,7 @@ The application handles large documents through:
 ### Error Recovery
 
 Built-in resilience features:
+
 - Automatic retry with exponential backoff
 - Crash recovery on startup
 - Detailed error logging
@@ -298,18 +332,21 @@ Built-in resilience features:
 ### Common Issues
 
 1. **"Module not found" errors**
+
    ```bash
    # Ensure dependencies are installed
    uv sync
    ```
 
 2. **API Connection Issues**
+
    ```bash
    # Test your API connections
    uv run scripts/setup_env.py
    ```
 
 3. **Large Document Timeouts**
+
    - Increase timeout in settings
    - Check token limits for your model
    - Enable debug mode to see detailed progress
@@ -327,10 +364,12 @@ Built-in resilience features:
 ### Log Files
 
 Logs are stored in:
+
 - macOS/Linux: `~/Documents/llestrade/logs/` (previously `~/.forensic_report_drafter/logs/`)
 - Windows: `%USERPROFILE%\\Documents\\llestrade\\logs\\` (previously `%USERPROFILE%\\.forensic_report_drafter\\logs\\`)
 
 Crash reports are saved to:
+
 - `~/Documents/llestrade/crashes/` (previously `~/.forensic_report_drafter/crashes/`)
 
 ## Development
@@ -351,6 +390,7 @@ uv run pytest --cov=. tests/
 ### Code Style
 
 The project uses:
+
 - Type hints throughout
 - Qt signal/slot patterns
 - Async operations in worker threads
@@ -367,6 +407,7 @@ The project uses:
 ## Requirements
 
 Key dependencies:
+
 - PySide6 (Qt for Python)
 - anthropic (Claude API)
 - google-generativeai (Gemini API)
@@ -391,11 +432,11 @@ For detailed documentation, see the `docs/` directory and `CLAUDE.md` for AI ass
 ## Project Status
 
 ### Current Implementation
+
 The application has two UIs running in parallel:
 
 1. **Legacy UI** (default) - Fully functional tab-based interface
    - Run with: `uv run main.py`
-   
 2. **New UI** (in development) - Modern stage-based workflow
    - Run with: `uv run main.py --new-ui`
    - 6 of 7 stages complete:

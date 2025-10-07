@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .prompt_placeholders import ensure_required_placeholders
+
 
 def _read_prompt(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -18,12 +20,7 @@ def read_refinement_prompt(path: Path) -> str:
 def validate_refinement_prompt(content: str) -> None:
     """Ensure required refinement placeholders exist."""
 
-    missing = [p for p in ("{draft_report}", "{template}") if p not in content]
-    if missing:
-        raise ValueError(
-            "Refinement prompt file must include the following placeholder(s): "
-            + ", ".join(missing)
-        )
+    ensure_required_placeholders("refinement_prompt", content)
 
 
 def read_generation_prompt(path: Path) -> str:
@@ -35,13 +32,7 @@ def read_generation_prompt(path: Path) -> str:
 def validate_generation_prompt(content: str) -> None:
     """Ensure required generation placeholders exist."""
 
-    required_placeholders = ["{template_section}", "{transcript}", "{additional_documents}"]
-    missing = [p for p in required_placeholders if p not in content]
-    if missing:
-        raise ValueError(
-            "Generation prompt file must include the following placeholder(s): "
-            + ", ".join(missing)
-        )
+    ensure_required_placeholders("report_generation_user_prompt", content)
 
 
 __all__ = [

@@ -24,6 +24,7 @@ from src.app.core.refinement_prompt import (
     validate_generation_prompt,
     validate_refinement_prompt,
 )
+from src.app.core.prompt_placeholders import format_prompt
 from src.app.core.report_template_sections import (
     TemplateSection,
     load_template_sections,
@@ -388,7 +389,7 @@ class ReportWorker(DashboardWorker):
                 "document_content": additional_documents,
                 "section_title": section.title,
             }
-            prompt = self._format_prompt(user_prompt_template, context)
+            prompt = format_prompt(user_prompt_template, context)
 
             pct = 5 + int(40 * index / max(total, 1))
             self.progress.emit(pct, f"Generating section {index} of {total}: {section.title}")
@@ -491,7 +492,7 @@ class ReportWorker(DashboardWorker):
         if self._transcript_path and self._transcript_path.exists():
             transcript_raw = self._transcript_path.read_text(encoding="utf-8")
 
-        refine_prompt = self._format_prompt(
+        refine_prompt = format_prompt(
             refinement_template,
             {
                 "draft_report": draft_content,
@@ -516,14 +517,6 @@ class ReportWorker(DashboardWorker):
         reasoning = response.get("reasoning") or response.get("thinking")
         self._refine_usage = response.get("usage", {}).get("output_tokens")
         return content + "\n", reasoning
-
-    def _format_prompt(self, template: str, context: dict[str, object]) -> str:
-        class _SafeDict(dict):
-            def __missing__(self, key: str) -> str:  # noqa: D401 - inline default placeholder
-                return "{" + key + "}"
-
-        safe_context = _SafeDict({k: v for k, v in context.items() if v is not None})
-        return template.format_map(safe_context)
 
     def _build_manifest(
         self,

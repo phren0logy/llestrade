@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Optional, List, Sequence, Set, Tuple
 
-from PySide6.QtCore import Qt, QUrl, Signal
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from shiboken6 import isValid
-from PySide6.QtGui import QDesktopServices, QTextCursor
+from PySide6.QtGui import QDesktopServices, QTextCursor, QColor, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -80,6 +81,7 @@ from src.config.prompt_store import (
     get_repo_prompts_dir,
 )
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
+from src.app.core.prompt_placeholders import format_prompt, placeholder_summary
 
 LOGGER = logging.getLogger(__name__)
 
@@ -154,6 +156,11 @@ class ProjectWorkspace(QWidget):
         self._reports_tab: QWidget | None = None
         self._report_inputs_tree: QTreeWidget | None = None
         self._report_selected_inputs: Set[str] = set()
+        self._source_tree_nodes: Dict[str, QTreeWidgetItem] = {}
+        self._block_source_tree_signal = False
+        self._new_directory_alerts: Set[str] = set()
+        self._new_dir_prompt_active = False
+        self._pending_file_tracker_refresh = False
         self._report_model_combo: QComboBox | None = None
         self._report_custom_model_edit: QLineEdit | None = None
         self._report_custom_model_label: QLabel | None = None
@@ -257,6 +264,8 @@ class ProjectWorkspace(QWidget):
         self._source_tree = QTreeWidget()
         self._source_tree.setHeaderHidden(True)
         self._source_tree.setSelectionMode(QAbstractItemView.NoSelection)
+        self._source_tree.setUniformRowHeights(True)
+        self._source_tree.itemChanged.connect(self._on_source_item_changed)
         tab_layout.addWidget(self._source_tree)
 
         self._root_warning_label = QLabel("")
@@ -402,6 +411,9 @@ class ProjectWorkspace(QWidget):
         generation_user_label = QLabel("Generation user prompt:")
         config_layout.addWidget(generation_user_label)
         self._report_generation_user_prompt_edit = QLineEdit()
+        self._report_generation_user_prompt_edit.setToolTip(
+            placeholder_summary("report_generation_user_prompt")
+        )
         self._report_generation_user_prompt_edit.textChanged.connect(self._update_report_controls)
         generation_user_browse = QPushButton("Browse…")
         generation_user_browse.clicked.connect(self._browse_generation_user_prompt)
@@ -418,6 +430,9 @@ class ProjectWorkspace(QWidget):
         generation_system_label = QLabel("Generation system prompt:")
         config_layout.addWidget(generation_system_label)
         self._report_generation_system_prompt_edit = QLineEdit()
+        self._report_generation_system_prompt_edit.setToolTip(
+            placeholder_summary("report_generation_system_prompt")
+        )
         self._report_generation_system_prompt_edit.textChanged.connect(self._update_report_controls)
         gen_system_browse = QPushButton("Browse…")
         gen_system_browse.clicked.connect(self._browse_generation_system_prompt)
@@ -431,6 +446,9 @@ class ProjectWorkspace(QWidget):
         refinement_user_label = QLabel("Refinement user prompt:")
         config_layout.addWidget(refinement_user_label)
         self._report_refinement_prompt_edit = QLineEdit()
+        self._report_refinement_prompt_edit.setToolTip(
+            placeholder_summary("refinement_prompt")
+        )
         self._report_refinement_prompt_edit.textChanged.connect(self._update_report_controls)
         refinement_browse = QPushButton("Browse…")
         refinement_browse.clicked.connect(self._browse_refinement_prompt)
@@ -444,6 +462,9 @@ class ProjectWorkspace(QWidget):
         refinement_system_label = QLabel("Refinement system prompt:")
         config_layout.addWidget(refinement_system_label)
         self._report_refinement_system_prompt_edit = QLineEdit()
+        self._report_refinement_system_prompt_edit.setToolTip(
+            placeholder_summary("report_refinement_system_prompt")
+        )
         self._report_refinement_system_prompt_edit.textChanged.connect(self._update_report_controls)
         ref_system_browse = QPushButton("Browse…")
         ref_system_browse.clicked.connect(self._browse_refinement_system_prompt)
@@ -849,11 +870,14 @@ class ProjectWorkspace(QWidget):
     def _populate_source_tree(self) -> None:
         if not hasattr(self, "_source_tree"):
             return
+        self._block_source_tree_signal = True
         self._source_tree.clear()
+        self._source_tree_nodes.clear()
 
         if not self._project_manager:
             self._source_tree.setDisabled(True)
             self._set_root_warning([])
+            self._block_source_tree_signal = False
             return
 
         root_path = self._resolve_source_root()
@@ -865,63 +889,77 @@ class ProjectWorkspace(QWidget):
                 else "Select a source folder to begin tracking documents."
             ]
             self._set_root_warning(warning)
-            if self._project_manager:
-                self._project_manager.update_source_state(warnings=warning)
-                if not self._missing_root_prompted:
-                    self._missing_root_prompted = True
-                    self._prompt_reselect_source_root()
+            self._project_manager.update_source_state(warnings=warning)
+            if not self._missing_root_prompted:
+                self._missing_root_prompted = True
+                self._prompt_reselect_source_root()
+            self._block_source_tree_signal = False
             return
 
         self._source_tree.setDisabled(False)
         self._missing_root_prompted = False
 
-        selected = sorted(self._project_manager.source_state.selected_folders or [])
+        selected_set = {
+            self._normalise_relative_path(path) for path in (self._project_manager.source_state.selected_folders or [])
+        }
+        acknowledged_set = {
+            self._normalise_relative_path(path) for path in (self._project_manager.source_state.acknowledged_folders or [])
+        }
+
         self._current_warnings = self._compute_root_warnings(root_path)
         self._set_root_warning(self._current_warnings)
-        if self._project_manager:
-            self._project_manager.update_source_state(warnings=self._current_warnings)
+        self._project_manager.update_source_state(warnings=self._current_warnings)
 
         root_label = root_path.name or root_path.as_posix()
         root_item = QTreeWidgetItem([root_label])
-        root_item.setData(0, Qt.UserRole, root_path.as_posix())
+        root_item.setData(0, Qt.UserRole, ("root", ""))
+        flags = root_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate
+        root_item.setFlags(flags)
+        root_item.setCheckState(0, Qt.Checked if "" in selected_set else Qt.Unchecked)
+        self._source_tree_nodes[""] = root_item
         self._source_tree.addTopLevelItem(root_item)
 
-        if not selected:
-            placeholder = QTreeWidgetItem(["No folders were selected during project setup."])
-            placeholder.setFlags(Qt.NoItemFlags)
-            root_item.addChild(placeholder)
-        else:
-            processed_dirs: set[Path] = set()
-            for relative in selected:
-                directory = (root_path / relative).resolve()
-                if not directory.exists():
-                    continue
-                container = self._ensure_tree_path(root_item, root_path, relative)
-                if directory.is_dir() and directory not in processed_dirs:
-                    self._populate_directory_contents(container, directory, processed_dirs)
+        processed_dirs: set[Path] = set()
+        self._populate_directory_contents(
+            root_item,
+            root_path,
+            processed_dirs,
+            root_path,
+            selected_set,
+        )
         self._source_tree.expandItem(root_item)
+        self._block_source_tree_signal = False
+
+        all_directories = {self._normalise_relative_path(entry) for entry in self._iter_directories(root_path)}
+        if not acknowledged_set and all_directories:
+            acknowledged_set = set(all_directories)
+            self._project_manager.source_state.acknowledged_folders = sorted(acknowledged_set)
+            self._project_manager._write_sources_state()
+        new_directories = self._compute_new_directories(all_directories, selected_set, acknowledged_set)
+        for relative in new_directories:
+            self._mark_directory_as_new(relative)
+        if new_directories:
+            self._prompt_for_new_directories(new_directories)
+
+        missing_directories = sorted(
+            {
+                path for path in selected_set
+                if path and path not in all_directories
+            }
+        )
+        if missing_directories:
+            self._handle_missing_directories(missing_directories)
 
         if self._feature_flags.bulk_analysis_groups_enabled:
             self._populate_group_source_tree()
-
-    def _ensure_tree_path(self, root_item: QTreeWidgetItem, root_path: Path, relative_path: str) -> QTreeWidgetItem:
-        current_item = root_item
-        cumulative = Path()
-        for part in Path(relative_path).parts:
-            cumulative = cumulative / part
-            child = self._find_child(current_item, part)
-            if child is None:
-                child = QTreeWidgetItem([part])
-                child.setData(0, Qt.UserRole, (root_path / cumulative).resolve().as_posix())
-                current_item.addChild(child)
-            current_item = child
-        return current_item
 
     def _populate_directory_contents(
         self,
         parent_item: QTreeWidgetItem,
         directory: Path,
         processed: set[Path],
+        root_path: Path,
+        selected: Set[str],
     ) -> None:
         directory = directory.resolve()
         if directory in processed:
@@ -938,13 +976,32 @@ class ProjectWorkspace(QWidget):
             return
 
         for entry in entries:
-            child = self._find_child(parent_item, entry.name)
-            if child is None:
-                child = QTreeWidgetItem([entry.name])
-                child.setData(0, Qt.UserRole, entry.resolve().as_posix())
-                parent_item.addChild(child)
+            if self._should_skip_source_entry(entry):
+                continue
+            try:
+                relative = entry.relative_to(root_path).as_posix()
+            except ValueError:
+                continue
+
             if entry.is_dir():
-                self._populate_directory_contents(child, entry, processed)
+                node = self._source_tree_nodes.get(relative)
+                if node is None:
+                    node = QTreeWidgetItem([entry.name])
+                    node.setData(0, Qt.UserRole, ("dir", relative))
+                    flags = node.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsAutoTristate
+                    node.setFlags(flags)
+                    if self._is_path_tracked(relative, selected):
+                        node.setCheckState(0, Qt.Checked)
+                    else:
+                        node.setCheckState(0, Qt.Unchecked)
+                    self._source_tree_nodes[relative] = node
+                    parent_item.addChild(node)
+                self._populate_directory_contents(node, entry, processed, root_path, selected)
+            else:
+                file_item = QTreeWidgetItem([entry.name])
+                file_item.setData(0, Qt.UserRole, ("file", relative))
+                file_item.setFlags(file_item.flags() & ~Qt.ItemIsUserCheckable)
+                parent_item.addChild(file_item)
 
     def _iter_directories(self, root_path: Path) -> List[str]:
         results: List[str] = []
@@ -956,6 +1013,318 @@ class ProjectWorkspace(QWidget):
                     continue
                 results.append(rel)
         return results
+
+    def _normalise_relative_path(self, path: str) -> str:
+        if not path:
+            return ""
+        return Path(path.strip("/")).as_posix()
+
+    def _should_skip_source_entry(self, entry: Path) -> bool:
+        return any(
+            part in {".azure-di", ".azure_di"} or part.startswith(".azure-di") or part.startswith(".azure_di")
+            for part in entry.parts
+        )
+
+    def _is_path_tracked(self, relative: str, tracked: Set[str]) -> bool:
+        candidate = self._normalise_relative_path(relative)
+        if not candidate:
+            return "" in tracked
+        while True:
+            if candidate in tracked:
+                return True
+            if "/" not in candidate:
+                candidate = ""
+            else:
+                candidate = candidate.rsplit("/", 1)[0]
+            if candidate == "":
+                return "" in tracked
+
+    def _compute_new_directories(
+        self,
+        actual: Set[str],
+        selected: Set[str],
+        acknowledged: Set[str],
+    ) -> List[str]:
+        new_entries: List[str] = []
+        for entry in actual:
+            normalized = self._normalise_relative_path(entry)
+            if not normalized:
+                continue
+            if self._is_path_tracked(normalized, selected):
+                continue
+            if self._is_path_tracked(normalized, acknowledged):
+                continue
+            new_entries.append(normalized)
+        return sorted(new_entries)
+
+    def _mark_directory_as_new(self, relative: str) -> None:
+        normalized = self._normalise_relative_path(relative)
+        if not normalized:
+            return
+        item = self._source_tree_nodes.get(normalized)
+        if not item:
+            return
+        item.setBackground(0, QBrush(QColor("#fff3bf")))
+        self._new_directory_alerts.add(normalized)
+        self._expand_to_item(item)
+
+    def _clear_new_directory_marker(self, relative: str) -> None:
+        normalized = self._normalise_relative_path(relative)
+        if not normalized:
+            return
+        item = self._source_tree_nodes.get(normalized)
+        if item:
+            item.setBackground(0, QBrush())
+        self._new_directory_alerts.discard(normalized)
+
+    def _acknowledge_directories(self, directories: Sequence[str]) -> None:
+        if not self._project_manager or not directories:
+            return
+        ack_set = {
+            self._normalise_relative_path(entry)
+            for entry in (self._project_manager.source_state.acknowledged_folders or [])
+        }
+        updated = False
+        for entry in directories:
+            normalized = self._normalise_relative_path(entry)
+            if not normalized:
+                continue
+            if normalized not in ack_set:
+                ack_set.add(normalized)
+                updated = True
+            self._clear_new_directory_marker(normalized)
+        if updated:
+            self._project_manager.update_source_state(
+                acknowledged_folders=sorted(ack_set),
+            )
+
+    def _prompt_for_new_directories(self, new_dirs: Sequence[str]) -> None:
+        if not new_dirs or self._new_dir_prompt_active:
+            return
+        self._new_dir_prompt_active = True
+        try:
+            preview = "\n".join(f"- {entry}" for entry in new_dirs[:10])
+            remaining = len(new_dirs) - min(len(new_dirs), 10)
+            message = "New folders were detected under the source root.\n\n" + preview
+            if remaining > 0:
+                message += f"\n… and {remaining} more."
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Information)
+            box.setWindowTitle("New Folders Detected")
+            box.setText(message)
+            review_button = box.addButton("Review Folders", QMessageBox.AcceptRole)
+            ignore_button = box.addButton("Ignore for Now", QMessageBox.RejectRole)
+            box.setDefaultButton(review_button)
+            box.exec()
+            if box.clickedButton() == review_button:
+                self._tabs.setCurrentWidget(self._documents_tab)
+                for entry in new_dirs:
+                    self._highlight_directory_item(entry)
+            else:
+                self._acknowledge_directories(new_dirs)
+        finally:
+            self._new_dir_prompt_active = False
+
+    def _expand_to_item(self, item: QTreeWidgetItem) -> None:
+        current = item.parent()
+        while current:
+            self._source_tree.expandItem(current)
+            current = current.parent()
+
+    def _highlight_directory_item(self, relative: str) -> None:
+        normalized = self._normalise_relative_path(relative)
+        item = self._source_tree_nodes.get(normalized)
+        if item:
+            self._source_tree.setCurrentItem(item)
+            self._expand_to_item(item)
+
+    def _handle_missing_directories(self, missing_dirs: Sequence[str]) -> None:
+        if not missing_dirs or not self._project_manager:
+            return
+        normalized = [
+            self._normalise_relative_path(entry) for entry in missing_dirs if entry
+        ]
+        if not normalized:
+            return
+        preview = "\n".join(f"- {entry}" for entry in normalized[:10])
+        remaining = len(normalized) - min(len(normalized), 10)
+        message = (
+            "The following folders can no longer be found under the source root:\n\n"
+            + preview
+        )
+        if remaining > 0:
+            message += f"\n… and {remaining} more."
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle("Folders Missing")
+        remove_button = box.addButton("Remove and Clean Up", QMessageBox.AcceptRole)
+        box.addButton("Keep for Now", QMessageBox.RejectRole)
+        box.setText(message)
+        box.exec()
+        if box.clickedButton() == remove_button:
+            self._cleanup_removed_directories(normalized)
+        else:
+            warning = [
+                f"Folders missing: {', '.join(normalized[:3])}"
+                + ("…" if len(normalized) > 3 else "")
+            ]
+            merged = list(dict.fromkeys(self._current_warnings + warning))
+            self._set_root_warning(merged)
+            self._project_manager.update_source_state(warnings=merged)
+
+    def _cleanup_removed_directories(self, missing_dirs: Sequence[str]) -> None:
+        if not self._project_manager or not self._project_manager.project_dir:
+            return
+
+        project_dir = Path(self._project_manager.project_dir)
+        converted_root = project_dir / "converted_documents"
+        highlights_root = project_dir / "highlights"
+        bulk_root = project_dir / "bulk_analysis"
+
+        selected = {
+            self._normalise_relative_path(entry)
+            for entry in (self._project_manager.source_state.selected_folders or [])
+        }
+        acknowledged = {
+            self._normalise_relative_path(entry)
+            for entry in (self._project_manager.source_state.acknowledged_folders or [])
+        }
+
+        for entry in missing_dirs:
+            normalized = self._normalise_relative_path(entry)
+            if not normalized:
+                continue
+            selected.discard(normalized)
+            acknowledged.discard(normalized)
+            self._clear_new_directory_marker(normalized)
+
+            target = converted_root / normalized
+            if target.exists():
+                shutil.rmtree(target, ignore_errors=True)
+
+            highlight_target = highlights_root / normalized
+            if highlight_target.exists():
+                shutil.rmtree(highlight_target, ignore_errors=True)
+
+            color_target = highlights_root / "colors" / normalized
+            if color_target.exists():
+                shutil.rmtree(color_target, ignore_errors=True)
+
+            if bulk_root.exists():
+                for slug_dir in bulk_root.iterdir():
+                    if not slug_dir.is_dir():
+                        continue
+                    outputs_dir = slug_dir / "outputs"
+                    candidate = outputs_dir / normalized
+                    if candidate.exists():
+                        shutil.rmtree(candidate, ignore_errors=True)
+
+        self._project_manager.update_source_state(
+            selected_folders=sorted(selected),
+            acknowledged_folders=sorted(acknowledged),
+        )
+        self._project_manager.prune_bulk_analysis_groups(missing_directories=missing_dirs)
+        self._schedule_file_tracker_refresh()
+        if self._feature_flags.bulk_analysis_groups_enabled:
+            self._refresh_bulk_analysis_groups()
+        QTimer.singleShot(0, self._populate_source_tree)
+
+    def _schedule_file_tracker_refresh(self) -> None:
+        if self._pending_file_tracker_refresh:
+            return
+        self._pending_file_tracker_refresh = True
+        QTimer.singleShot(200, self._run_scheduled_file_tracker_refresh)
+
+    def _run_scheduled_file_tracker_refresh(self) -> None:
+        self._pending_file_tracker_refresh = False
+        self._refresh_file_tracker()
+
+    def _on_source_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
+        if column != 0 or self._block_source_tree_signal:
+            return
+        data = item.data(0, Qt.UserRole)
+        if not data:
+            return
+        node_type, relative = data
+        if node_type not in {"dir", "root"}:
+            return
+
+        state = item.checkState(0)
+        self._block_source_tree_signal = True
+        try:
+            if state in (Qt.Checked, Qt.Unchecked):
+                self._cascade_source_check_state(item, state)
+                self._update_parent_source_state(item.parent())
+        finally:
+            self._block_source_tree_signal = False
+
+        self._update_selected_folders_from_tree()
+        if node_type == "dir" and relative:
+            self._acknowledge_directories([relative])
+
+    def _cascade_source_check_state(self, item: QTreeWidgetItem, state: Qt.CheckState) -> None:
+        for index in range(item.childCount()):
+            child = item.child(index)
+            if child.flags() & Qt.ItemIsUserCheckable:
+                child.setCheckState(0, state)
+            self._cascade_source_check_state(child, state)
+
+    def _update_parent_source_state(self, item: Optional[QTreeWidgetItem]) -> None:
+        while item is not None:
+            checked = unchecked = 0
+            for index in range(item.childCount()):
+                child_state = item.child(index).checkState(0)
+                if child_state == Qt.Checked:
+                    checked += 1
+                elif child_state == Qt.Unchecked:
+                    unchecked += 1
+                else:
+                    checked += 1
+                    unchecked += 1
+            if checked and unchecked:
+                item.setCheckState(0, Qt.PartiallyChecked)
+            elif checked:
+                item.setCheckState(0, Qt.Checked)
+            else:
+                item.setCheckState(0, Qt.Unchecked)
+            item = item.parent()
+
+    def _update_selected_folders_from_tree(self) -> None:
+        if not self._project_manager:
+            return
+        selected = self._collect_selected_directories()
+        ack_set = {
+            self._normalise_relative_path(entry)
+            for entry in (self._project_manager.source_state.acknowledged_folders or [])
+        }
+        ack_set.update(selected)
+        self._project_manager.update_source_state(
+            selected_folders=selected,
+            acknowledged_folders=sorted(ack_set),
+        )
+        self._schedule_file_tracker_refresh()
+        if self._feature_flags.bulk_analysis_groups_enabled:
+            self._refresh_bulk_analysis_groups()
+
+    def _collect_selected_directories(self) -> List[str]:
+        results: Set[str] = set()
+        root = self._source_tree.invisibleRootItem()
+        for index in range(root.childCount()):
+            self._collect_selected_directories_from_item(root.child(index), results)
+        return sorted(results)
+
+    def _collect_selected_directories_from_item(self, item: QTreeWidgetItem, results: Set[str]) -> None:
+        data = item.data(0, Qt.UserRole)
+        if not data:
+            return
+        node_type, relative = data
+        state = item.checkState(0)
+        if node_type == "dir" and state == Qt.Checked:
+            results.add(self._normalise_relative_path(relative))
+            return
+        for index in range(item.childCount()):
+            self._collect_selected_directories_from_item(item.child(index), results)
 
     def _populate_group_source_tree(self) -> None:
         if not self._feature_flags.bulk_analysis_groups_enabled or self._group_source_tree is None:
@@ -1004,22 +1373,6 @@ class ProjectWorkspace(QWidget):
             if child.text(0) == name:
                 return child
         return None
-
-    def _collect_selected_folders(self) -> List[str]:
-        selected: List[str] = []
-        root = self._source_tree.invisibleRootItem()
-        stack = [root]
-        while stack:
-            current = stack.pop()
-            for index in range(current.childCount()):
-                child = current.child(index)
-                stack.append(child)
-                if child.checkState(0) == Qt.Checked:
-                    rel = child.data(0, Qt.UserRole)
-                    if rel:
-                        selected.append(str(rel))
-        selected.sort()
-        return selected
 
     def _collect_conversion_jobs(self) -> Tuple[List[ConversionJob], Sequence[DuplicateSource]]:
         if not self._project_manager:
@@ -1550,12 +1903,8 @@ class ProjectWorkspace(QWidget):
         return ""
 
     def _format_prompt_preview(self, template: str, context: dict[str, str]) -> str:
-        class _SafeDict(dict):
-            def __missing__(self, key: str) -> str:  # noqa: D401 - inline default placeholder
-                return "{" + key + "}"
-
-        safe_context = _SafeDict({k: (v or "") for k, v in context.items()})
-        return template.format_map(safe_context)
+        cleaned = {k: (v or "") for k, v in context.items()}
+        return format_prompt(template, cleaned)
 
     def _build_additional_documents_text(self, project_dir: Path) -> str:
         lines: List[str] = []

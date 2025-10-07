@@ -35,6 +35,7 @@ from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
+from src.app.core.prompt_placeholders import placeholder_summary
 from .prompt_preview_dialog import PromptPreviewDialog
 
 DEFAULT_SYSTEM_PROMPT = "prompts/document_analysis_system_prompt.md"
@@ -116,6 +117,9 @@ class BulkAnalysisGroupDialog(QDialog):
         form.addRow(self.manual_files_label, self.manual_files_edit)
 
         self.system_prompt_edit = QLineEdit()
+        self.system_prompt_edit.setToolTip(
+            placeholder_summary("document_analysis_system_prompt")
+        )
         self.system_prompt_button = QPushButton("Browse…")
         self.system_prompt_button.clicked.connect(lambda: self._choose_prompt_file(self.system_prompt_edit))
         form.addRow("System Prompt", self._wrap_with_button(self.system_prompt_edit, self.system_prompt_button))
@@ -126,6 +130,9 @@ class BulkAnalysisGroupDialog(QDialog):
         )
 
         self.user_prompt_edit = QLineEdit()
+        self.user_prompt_edit.setToolTip(
+            placeholder_summary("document_bulk_analysis_prompt")
+        )
         self.user_prompt_button = QPushButton("Browse…")
         self.user_prompt_button.clicked.connect(lambda: self._choose_prompt_file(self.user_prompt_edit))
         form.addRow("User Prompt", self._wrap_with_button(self.user_prompt_edit, self.user_prompt_button))
