@@ -65,6 +65,13 @@ from src.app.core.report_template_sections import load_template_sections
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.bulk_analysis_group_dialog import BulkAnalysisGroupDialog
 from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
+from src.app.ui.workspace import DocumentsTab
+from src.app.ui.workspace.controllers import DocumentsController
+from src.app.ui.workspace.qt_flags import (
+    ITEM_IS_ENABLED,
+    ITEM_IS_TRISTATE,
+    ITEM_IS_USER_CHECKABLE,
+)
 from src.app.workers import (
     BulkAnalysisWorker,
     BulkReduceWorker,
@@ -84,25 +91,6 @@ from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewEr
 from src.app.core.prompt_placeholders import format_prompt, placeholder_summary
 
 LOGGER = logging.getLogger(__name__)
-
-def _qt_flag(*names: str):
-    """Return the first matching Qt ItemFlag for backwards compatibility."""
-
-    item_flag_container = getattr(Qt, "ItemFlag", None)
-    for name in names:
-        if item_flag_container is not None and hasattr(item_flag_container, name):
-            return getattr(item_flag_container, name)
-        if hasattr(Qt, name):
-            return getattr(Qt, name)
-    # Fallback to zero-value flag
-    if item_flag_container is not None:
-        return item_flag_container(0)
-    return 0
-
-
-_ITEM_IS_USER_CHECKABLE = _qt_flag("ItemIsUserCheckable")
-_ITEM_IS_TRISTATE = _qt_flag("ItemIsTristate", "ItemIsAutoTristate")
-_ITEM_IS_ENABLED = _qt_flag("ItemIsEnabled")
 
 
 class ProjectWorkspace(QWidget):
@@ -185,6 +173,7 @@ class ProjectWorkspace(QWidget):
         self._report_last_result: Optional[Dict[str, str]] = None
         self._report_running = False
 
+        self._documents_controller = DocumentsController()
         self._build_ui()
         if project_manager:
             self.set_project(project_manager)
@@ -233,58 +222,19 @@ class ProjectWorkspace(QWidget):
         layout.addWidget(self._tabs)
 
     def _build_documents_tab(self) -> QWidget:
-        widget = QWidget()
-        tab_layout = QVBoxLayout(widget)
-        tab_layout.setSpacing(8)
+        tab = DocumentsTab(parent=self)
+        self._source_root_label = tab.source_root_label
+        self._counts_label = tab.counts_label
+        self._last_scan_label = tab.last_scan_label
+        self._rescan_button = tab.rescan_button
+        self._source_tree = tab.source_tree
+        self._root_warning_label = tab.root_warning_label
+        self._missing_highlights_label = tab.missing_highlights_label
+        self._missing_bulk_label = tab.missing_bulk_label
 
-        # Source root selector
-        root_layout = QHBoxLayout()
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        self._source_root_label = QLabel("Source root: not set")
-        self._source_root_label.setStyleSheet("font-weight: bold;")
-        root_layout.addWidget(self._source_root_label)
-        root_layout.addStretch()
-        tab_layout.addLayout(root_layout)
-
-        # Counts + scan controls
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        self._counts_label = QLabel("Re-scan pending…")
-        header_layout.addWidget(self._counts_label)
-        header_layout.addStretch()
-        self._last_scan_label = QLabel("")
-        self._last_scan_label.setStyleSheet("color: #666;")
-        header_layout.addWidget(self._last_scan_label)
-        self._rescan_button = QPushButton("Re-scan")
         self._rescan_button.clicked.connect(lambda: self._trigger_conversion(auto_run=False))
-        header_layout.addWidget(self._rescan_button)
-        tab_layout.addLayout(header_layout)
-
-        # Tree view for folder selection
-        self._source_tree = QTreeWidget()
-        self._source_tree.setHeaderHidden(True)
-        self._source_tree.setSelectionMode(QAbstractItemView.NoSelection)
-        self._source_tree.setUniformRowHeights(True)
         self._source_tree.itemChanged.connect(self._on_source_item_changed)
-        tab_layout.addWidget(self._source_tree)
-
-        self._root_warning_label = QLabel("")
-        self._root_warning_label.setWordWrap(True)
-        self._root_warning_label.setStyleSheet("color: #b26a00;")
-        tab_layout.addWidget(self._root_warning_label)
-        self._root_warning_label.hide()
-
-        self._missing_highlights_label = QLabel("Highlights missing: —")
-        self._missing_highlights_label.setWordWrap(True)
-        tab_layout.addWidget(self._missing_highlights_label)
-
-        self._missing_bulk_label = QLabel("Bulk analysis missing: —")
-
-        self._missing_bulk_label.setWordWrap(True)
-        tab_layout.addWidget(self._missing_bulk_label)
-
-        tab_layout.addStretch()
-        return widget
+        return tab
 
     def _wrap_line_edit_with_button(self, line_edit: QLineEdit, button: QPushButton) -> QWidget:
         container = QWidget()
@@ -626,6 +576,7 @@ class ProjectWorkspace(QWidget):
     def set_project(self, project_manager: ProjectManager) -> None:
         """Attach the workspace to a project manager."""
         self._project_manager = project_manager
+        self._documents_controller.set_project(project_manager)
         self._running_groups.clear()
         self._workers.clear()
         self._workspace_metrics = None
@@ -657,6 +608,7 @@ class ProjectWorkspace(QWidget):
         self._bulk_progress.clear()
         self._bulk_failures.clear()
         self._highlight_errors.clear()
+        self._documents_controller.shutdown()
 
     def refresh(self) -> None:
         self._populate_source_tree()
@@ -1041,8 +993,8 @@ class ProjectWorkspace(QWidget):
 
     def _apply_directory_flags(self, item: QTreeWidgetItem) -> None:
         flags = item.flags()
-        flags |= _ITEM_IS_ENABLED | _ITEM_IS_USER_CHECKABLE
-        flags &= ~_ITEM_IS_TRISTATE
+        flags |= ITEM_IS_ENABLED | ITEM_IS_USER_CHECKABLE
+        flags &= ~ITEM_IS_TRISTATE
         item.setFlags(flags)
 
     def _should_skip_source_entry(self, entry: Path) -> bool:
@@ -2223,13 +2175,13 @@ class ProjectWorkspace(QWidget):
             if not entries:
                 continue
             parent = QTreeWidgetItem([label, ""])
-            parent.setFlags(parent.flags() | _ITEM_IS_USER_CHECKABLE | _ITEM_IS_TRISTATE)
+            parent.setFlags(parent.flags() | ITEM_IS_USER_CHECKABLE | ITEM_IS_TRISTATE)
             parent.setCheckState(0, Qt.Unchecked)
             tree.addTopLevelItem(parent)
 
             for descriptor in entries:
                 child = QTreeWidgetItem([descriptor.label, descriptor.relative_path])
-                child.setFlags(child.flags() | _ITEM_IS_USER_CHECKABLE)
+                child.setFlags(child.flags() | ITEM_IS_USER_CHECKABLE)
                 key = descriptor.key()
                 child.setData(0, Qt.UserRole, key)
                 state = Qt.Checked if key in self._report_selected_inputs else Qt.Unchecked
