@@ -28,7 +28,7 @@ def test_defaults_without_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     flags = FeatureFlags.from_settings(None)
 
     assert flags.dashboard_workspace_enabled is True
-    assert flags.summary_groups_enabled is True
+    assert flags.bulk_analysis_groups_enabled is True
     assert flags.auto_run_conversion_on_create is True
 
 
@@ -37,7 +37,7 @@ def test_settings_override(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _StubSettings(
         {
             "feature_flags": {
-                "summary_groups_enabled": True,
+                "bulk_analysis_groups_enabled": True,
                 "auto_run_conversion_on_create": False,
             }
         }
@@ -45,19 +45,19 @@ def test_settings_override(monkeypatch: pytest.MonkeyPatch) -> None:
 
     flags = FeatureFlags.from_settings(settings)
 
-    assert flags.summary_groups_enabled is True
+    assert flags.bulk_analysis_groups_enabled is True
     assert flags.auto_run_conversion_on_create is False
 
 
 def test_environment_has_priority(monkeypatch: pytest.MonkeyPatch) -> None:
     _clear_env(monkeypatch)
-    monkeypatch.setenv("FRD_ENABLE_SUMMARY_GROUPS", "yes")
+    monkeypatch.setenv("FRD_ENABLE_BULK_ANALYSIS_GROUPS", "yes")
     monkeypatch.setenv("FRD_AUTO_RUN_CONVERSION", "0")
 
     settings = _StubSettings(
         {
             "feature_flags": {
-                "summary_groups_enabled": False,
+                "bulk_analysis_groups_enabled": False,
                 "auto_run_conversion_on_create": True,
             }
         }
@@ -65,5 +65,5 @@ def test_environment_has_priority(monkeypatch: pytest.MonkeyPatch) -> None:
 
     flags = FeatureFlags.from_settings(settings)
 
-    assert flags.summary_groups_enabled is True
+    assert flags.bulk_analysis_groups_enabled is True
     assert flags.auto_run_conversion_on_create is False

@@ -16,7 +16,7 @@ from dataclasses import dataclass, asdict, field
 from PySide6.QtCore import QObject, Signal, QTimer
 
 if TYPE_CHECKING:
-    from .summary_groups import SummaryGroup
+    from .bulk_analysis_groups import BulkAnalysisGroup
 
 from .secure_settings import SecureSettings
 from .file_tracker import DashboardMetrics, WorkspaceMetrics, build_workspace_metrics
@@ -386,7 +386,7 @@ class ProjectManager(QObject):
         self._auto_save_timer.setInterval(60000)  # 1 minute
         self._modified = False
         self._file_tracker = None
-        self.summary_groups: Dict[str, "SummaryGroup"] = {}
+        self.bulk_analysis_groups: Dict[str, "BulkAnalysisGroup"] = {}
         
         # Load project if path provided
         if project_path:
@@ -455,7 +455,7 @@ class ProjectManager(QObject):
         
         self.project_loaded.emit(str(self.project_path))
         self.logger.info(f"Created new project: {self.project_path}")
-        self.refresh_summary_groups()
+        self.refresh_bulk_analysis_groups()
         
         return self.project_path
     
@@ -512,7 +512,7 @@ class ProjectManager(QObject):
             
             self.project_loaded.emit(str(self.project_path))
             self.logger.info(f"Loaded project: {self.project_path}")
-            self.refresh_summary_groups()
+            self.refresh_bulk_analysis_groups()
             
             return True
             
@@ -683,12 +683,12 @@ class ProjectManager(QObject):
         dashboard = self.get_dashboard_metrics(refresh=refresh)
         tracker = self.get_file_tracker()
         snapshot = tracker.snapshot or tracker.load()
-        summary_groups = self.list_summary_groups()
+        bulk_analysis_groups = self.list_bulk_analysis_groups()
 
         metrics = build_workspace_metrics(
             snapshot=snapshot,
             dashboard=dashboard,
-            summary_groups=summary_groups,
+            bulk_analysis_groups=bulk_analysis_groups,
             project_dir=self.project_dir,
         )
         self._store_workspace_metrics(metrics)
@@ -698,45 +698,45 @@ class ProjectManager(QObject):
         self.workspace_metrics = metrics
 
     # ------------------------------------------------------------------
-    # Summary group helpers
+    # Bulk analysis group helpers
     # ------------------------------------------------------------------
-    def refresh_summary_groups(self) -> List["SummaryGroup"]:
-        from .summary_groups import load_summary_groups
+    def refresh_bulk_analysis_groups(self) -> List["BulkAnalysisGroup"]:
+        from .bulk_analysis_groups import load_bulk_analysis_groups
 
         if not self.project_dir:
-            self.summary_groups = {}
+            self.bulk_analysis_groups = {}
             return []
-        groups = load_summary_groups(self.project_dir)
-        self.summary_groups = {group.group_id: group for group in groups}
+        groups = load_bulk_analysis_groups(self.project_dir)
+        self.bulk_analysis_groups = {group.group_id: group for group in groups}
         self.workspace_metrics = None
         return groups
 
-    def list_summary_groups(self) -> List["SummaryGroup"]:
-        if not self.summary_groups:
-            return self.refresh_summary_groups()
-        return list(self.summary_groups.values())
+    def list_bulk_analysis_groups(self) -> List["BulkAnalysisGroup"]:
+        if not self.bulk_analysis_groups:
+            return self.refresh_bulk_analysis_groups()
+        return list(self.bulk_analysis_groups.values())
 
-    def save_summary_group(self, group: "SummaryGroup") -> "SummaryGroup":
-        from .summary_groups import save_summary_group
+    def save_bulk_analysis_group(self, group: "BulkAnalysisGroup") -> "BulkAnalysisGroup":
+        from .bulk_analysis_groups import save_bulk_analysis_group
 
         if not self.project_dir:
-            raise RuntimeError("Project must be created or loaded before saving summary groups")
+            raise RuntimeError("Project must be created or loaded before saving bulk analysis groups")
         group.files = sorted({path.strip() for path in group.files if path.strip()})
         group.directories = sorted({path.strip("/").strip() for path in group.directories if path.strip("/").strip()})
-        saved = save_summary_group(self.project_dir, group)
-        self.summary_groups[saved.group_id] = saved
+        saved = save_bulk_analysis_group(self.project_dir, group)
+        self.bulk_analysis_groups[saved.group_id] = saved
         self.workspace_metrics = None
         self.mark_modified()
         return saved
 
-    def delete_summary_group(self, group_id: str) -> bool:
-        from .summary_groups import delete_summary_group
+    def delete_bulk_analysis_group(self, group_id: str) -> bool:
+        from .bulk_analysis_groups import delete_bulk_analysis_group
 
-        group = self.summary_groups.get(group_id)
+        group = self.bulk_analysis_groups.get(group_id)
         if not group or not self.project_dir:
             return False
-        delete_summary_group(self.project_dir, group)
-        self.summary_groups.pop(group_id, None)
+        delete_bulk_analysis_group(self.project_dir, group)
+        self.bulk_analysis_groups.pop(group_id, None)
         self.workspace_metrics = None
         self.mark_modified()
         return True

@@ -43,7 +43,7 @@ from src.app.core.conversion_manager import (
 from src.app.core.feature_flags import FeatureFlags
 from src.app.core.file_tracker import WorkspaceMetrics, WorkspaceGroupMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.report_inputs import (
     REPORT_CATEGORY_BULK_COMBINED,
@@ -62,7 +62,7 @@ from src.app.core.refinement_prompt import (
 )
 from src.app.core.report_template_sections import load_template_sections
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
-from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
+from src.app.ui.dialogs.bulk_analysis_group_dialog import BulkAnalysisGroupDialog
 from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
 from src.app.workers import (
     BulkAnalysisWorker,
@@ -134,10 +134,10 @@ class ProjectWorkspace(QWidget):
         self._bulk_progress: Dict[str, tuple[int, int]] = {}
         self._bulk_failures: Dict[str, List[str]] = {}
         self._cancelling_groups: set[str] = set()
-        self._summary_tab: QWidget | None = None
-        self._summary_table: QTableWidget | None = None
-        self._summary_empty_label: QLabel | None = None
-        self._summary_info_label: QLabel | None = None
+        self._bulk_analysis_tab: QWidget | None = None
+        self._bulk_analysis_table: QTableWidget | None = None
+        self._bulk_analysis_empty_label: QLabel | None = None
+        self._bulk_analysis_info_label: QLabel | None = None
         self._missing_bulk_label: QLabel | None = None
         self._group_source_tree: QTreeWidget | None = None
         self._extract_highlights_button: QPushButton | None = None
@@ -163,7 +163,7 @@ class ProjectWorkspace(QWidget):
         self._report_refinement_prompt_edit: QLineEdit | None = None
         self._report_generate_button: QPushButton | None = None
         self._report_progress_bar: QProgressBar | None = None
-        self._summary_log: QTextEdit | None = None
+        self._bulk_analysis_log: QTextEdit | None = None
         self._report_log: QTextEdit | None = None
         self._report_template_edit: QLineEdit | None = None
         self._report_transcript_edit: QLineEdit | None = None
@@ -207,9 +207,9 @@ class ProjectWorkspace(QWidget):
         self._tabs.addTab(self._documents_tab, "Documents")
         self._highlights_tab = self._build_highlights_tab()
         self._tabs.addTab(self._highlights_tab, "Highlights")
-        if self._feature_flags.summary_groups_enabled:
-            self._summary_tab = self._build_summary_groups_tab()
-            self._tabs.addTab(self._summary_tab, "Bulk Analysis")
+        if self._feature_flags.bulk_analysis_groups_enabled:
+            self._bulk_analysis_tab = self._build_bulk_analysis_tab()
+            self._tabs.addTab(self._bulk_analysis_tab, "Bulk Analysis")
         self._reports_tab = self._build_reports_tab()
         self._tabs.addTab(self._reports_tab, "Reports")
         metadata_row = QHBoxLayout()
@@ -529,9 +529,9 @@ class ProjectWorkspace(QWidget):
         self._update_report_history_buttons()
         return widget
 
-    def _build_summary_groups_tab(self) -> QWidget:
-        self._summary_tab = QWidget()
-        layout = QVBoxLayout(self._summary_tab)
+    def _build_bulk_analysis_tab(self) -> QWidget:
+        self._bulk_analysis_tab = QWidget()
+        layout = QVBoxLayout(self._bulk_analysis_tab)
         layout.setSpacing(8)
 
         header_layout = QHBoxLayout()
@@ -546,14 +546,14 @@ class ProjectWorkspace(QWidget):
         header_layout.addWidget(refresh_button)
         layout.addLayout(header_layout)
 
-        self._summary_info_label = QLabel("No bulk analysis groups yet.")
-        layout.addWidget(self._summary_info_label)
+        self._bulk_analysis_info_label = QLabel("No bulk analysis groups yet.")
+        layout.addWidget(self._bulk_analysis_info_label)
 
-        self._summary_log = QTextEdit()
-        self._summary_log.setReadOnly(True)
-        self._summary_log.setMaximumHeight(120)
-        self._summary_log.setStyleSheet("font-family: monospace; font-size: 11px;")
-        layout.addWidget(self._summary_log)
+        self._bulk_analysis_log = QTextEdit()
+        self._bulk_analysis_log.setReadOnly(True)
+        self._bulk_analysis_log.setMaximumHeight(120)
+        self._bulk_analysis_log.setStyleSheet("font-family: monospace; font-size: 11px;")
+        layout.addWidget(self._bulk_analysis_log)
 
         content_layout = QHBoxLayout()
         content_layout.setSpacing(12)
@@ -561,25 +561,25 @@ class ProjectWorkspace(QWidget):
         table_container = QVBoxLayout()
         table_container.setSpacing(6)
 
-        self._summary_table = QTableWidget(0, 5)
-        self._summary_table.setHorizontalHeaderLabels(["Group", "Coverage", "Updated", "Status", "Actions"])
-        self._summary_table.verticalHeader().setVisible(False)
-        self._summary_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self._summary_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._summary_table.setSelectionMode(QAbstractItemView.NoSelection)
-        header = self._summary_table.horizontalHeader()
+        self._bulk_analysis_table = QTableWidget(0, 5)
+        self._bulk_analysis_table.setHorizontalHeaderLabels(["Group", "Coverage", "Updated", "Status", "Actions"])
+        self._bulk_analysis_table.verticalHeader().setVisible(False)
+        self._bulk_analysis_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._bulk_analysis_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self._bulk_analysis_table.setSelectionMode(QAbstractItemView.NoSelection)
+        header = self._bulk_analysis_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-        table_container.addWidget(self._summary_table)
+        table_container.addWidget(self._bulk_analysis_table)
 
-        self._summary_empty_label = QLabel("No bulk analysis groups created yet.")
-        self._summary_empty_label.setAlignment(Qt.AlignCenter)
-        self._summary_empty_label.setStyleSheet("color: #666; padding: 20px;")
-        table_container.addWidget(self._summary_empty_label)
-        self._summary_empty_label.hide()
+        self._bulk_analysis_empty_label = QLabel("No bulk analysis groups created yet.")
+        self._bulk_analysis_empty_label.setAlignment(Qt.AlignCenter)
+        self._bulk_analysis_empty_label.setStyleSheet("color: #666; padding: 20px;")
+        table_container.addWidget(self._bulk_analysis_empty_label)
+        self._bulk_analysis_empty_label.hide()
 
         content_layout.addLayout(table_container, 2)
 
@@ -600,7 +600,7 @@ class ProjectWorkspace(QWidget):
 
         layout.addLayout(content_layout)
 
-        return self._summary_tab
+        return self._bulk_analysis_tab
 
     def set_project(self, project_manager: ProjectManager) -> None:
         """Attach the workspace to a project manager."""
@@ -621,8 +621,8 @@ class ProjectWorkspace(QWidget):
         self._update_source_root_label()
         self._update_last_scan_label()
         self._load_report_preferences()
-        if self._summary_log:
-            self._summary_log.clear()
+        if self._bulk_analysis_log:
+            self._bulk_analysis_log.clear()
         self.refresh()
 
     def project_manager(self) -> Optional[ProjectManager]:
@@ -644,9 +644,9 @@ class ProjectWorkspace(QWidget):
         self._refresh_reports_tab()
         self._refresh_highlights_tab()
         self._update_highlight_button_state()
-        if self._feature_flags.summary_groups_enabled:
+        if self._feature_flags.bulk_analysis_groups_enabled:
             self._prune_running_groups()
-            self._refresh_summary_groups()
+            self._refresh_bulk_analysis_groups()
         else:
             self._running_groups.clear()
         self._update_metadata_label()
@@ -901,7 +901,7 @@ class ProjectWorkspace(QWidget):
                     self._populate_directory_contents(container, directory, processed_dirs)
         self._source_tree.expandItem(root_item)
 
-        if self._feature_flags.summary_groups_enabled:
+        if self._feature_flags.bulk_analysis_groups_enabled:
             self._populate_group_source_tree()
 
     def _ensure_tree_path(self, root_item: QTreeWidgetItem, root_path: Path, relative_path: str) -> QTreeWidgetItem:
@@ -958,7 +958,7 @@ class ProjectWorkspace(QWidget):
         return results
 
     def _populate_group_source_tree(self) -> None:
-        if not self._feature_flags.summary_groups_enabled or self._group_source_tree is None:
+        if not self._feature_flags.bulk_analysis_groups_enabled or self._group_source_tree is None:
             return
         self._group_source_tree.clear()
 
@@ -2499,17 +2499,17 @@ class ProjectWorkspace(QWidget):
 
 
 
-    def _refresh_summary_groups(self) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _refresh_bulk_analysis_groups(self) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
-        if not self._summary_table or not self._summary_empty_label or not self._summary_info_label:
+        if not self._bulk_analysis_table or not self._bulk_analysis_empty_label or not self._bulk_analysis_info_label:
             return
         if not self._project_manager:
-            self._summary_table.setRowCount(0)
-            self._summary_empty_label.show()
+            self._bulk_analysis_table.setRowCount(0)
+            self._bulk_analysis_empty_label.show()
             return
 
-        groups = self._project_manager.list_summary_groups()
+        groups = self._project_manager.list_bulk_analysis_groups()
         total_docs = 0
         group_metrics_map: Dict[str, WorkspaceGroupMetrics] = {}
         if self._workspace_metrics:
@@ -2517,16 +2517,16 @@ class ProjectWorkspace(QWidget):
             group_metrics_map = self._workspace_metrics.groups
         self._prune_running_groups({group.group_id for group in groups})
 
-        self._summary_table.setRowCount(0)
+        self._bulk_analysis_table.setRowCount(0)
         if not groups:
-            self._summary_empty_label.show()
-            self._summary_info_label.setText("No bulk analysis groups yet.")
+            self._bulk_analysis_empty_label.show()
+            self._bulk_analysis_info_label.setText("No bulk analysis groups yet.")
             return
 
-        self._summary_empty_label.hide()
-        self._summary_info_label.setText(f"{len(groups)} bulk analysis group(s)")
+        self._bulk_analysis_empty_label.hide()
+        self._bulk_analysis_info_label.setText(f"{len(groups)} bulk analysis group(s)")
 
-        self._summary_table.setRowCount(len(groups))
+        self._bulk_analysis_table.setRowCount(len(groups))
         for row, group in enumerate(groups):
             group_metrics = group_metrics_map.get(group.group_id)
             self._populate_group_row(row, group, total_docs, group_metrics)
@@ -2534,19 +2534,19 @@ class ProjectWorkspace(QWidget):
     def _populate_group_row(
         self,
         row: int,
-        group: SummaryGroup,
+        group: BulkAnalysisGroup,
         total_docs: int,
         metrics: WorkspaceGroupMetrics | None,
     ) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
-        if not self._summary_table:
+        if not self._bulk_analysis_table:
             return
         description = group.description or ""
         name_item = QTableWidgetItem(group.name)
         name_item.setData(Qt.UserRole, group.group_id)
         name_item.setToolTip(description)
-        self._summary_table.setItem(row, 0, name_item)
+        self._bulk_analysis_table.setItem(row, 0, name_item)
 
         op_type = getattr(metrics, "operation", "per_document") if metrics else "per_document"
         converted_count = metrics.converted_count if metrics else 0
@@ -2557,12 +2557,12 @@ class ProjectWorkspace(QWidget):
             coverage_text = f"{converted_count} of {total_docs}" if total_docs else str(converted_count)
         files_item = QTableWidgetItem(coverage_text)
         files_item.setTextAlignment(Qt.AlignCenter)
-        self._summary_table.setItem(row, 1, files_item)
+        self._bulk_analysis_table.setItem(row, 1, files_item)
 
         updated_text = group.updated_at.strftime("%Y-%m-%d %H:%M")
         updated_item = QTableWidgetItem(updated_text)
         updated_item.setTextAlignment(Qt.AlignCenter)
-        self._summary_table.setItem(row, 2, updated_item)
+        self._bulk_analysis_table.setItem(row, 2, updated_item)
 
         if group.group_id in self._running_groups:
             if group.group_id in self._cancelling_groups:
@@ -2590,7 +2590,7 @@ class ProjectWorkspace(QWidget):
                     status_text = "Ready"
         status_item = QTableWidgetItem(status_text)
         status_item.setTextAlignment(Qt.AlignCenter)
-        self._summary_table.setItem(row, 3, status_item)
+        self._bulk_analysis_table.setItem(row, 3, status_item)
 
         action_widget = QWidget()
         action_layout = QHBoxLayout(action_widget)
@@ -2659,7 +2659,7 @@ class ProjectWorkspace(QWidget):
         delete_button.clicked.connect(lambda _, g=group: self._confirm_delete_group(g))
         action_layout.addWidget(delete_button)
 
-        self._summary_table.setCellWidget(row, 4, action_widget)
+        self._bulk_analysis_table.setCellWidget(row, 4, action_widget)
 
         tooltip_parts = []
         if description:
@@ -2679,11 +2679,11 @@ class ProjectWorkspace(QWidget):
             status_item.setToolTip("\n".join(tooltip_parts))
 
     def _show_create_group_dialog(self) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if not self._project_manager or not self._project_manager.project_dir:
             return
-        dialog = SummaryGroupDialog(
+        dialog = BulkAnalysisGroupDialog(
             self._project_manager.project_dir,
             self,
             metadata=self._project_manager.metadata,
@@ -2691,14 +2691,14 @@ class ProjectWorkspace(QWidget):
         if dialog.exec() == QDialog.Accepted:
             group = dialog.build_group()
             try:
-                self._project_manager.save_summary_group(group)
+                self._project_manager.save_bulk_analysis_group(group)
             except Exception as exc:
                 QMessageBox.critical(self, "Create Bulk Analysis Group Failed", str(exc))
             else:
                 self.refresh()
 
-    def _confirm_delete_group(self, group: SummaryGroup) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _confirm_delete_group(self, group: BulkAnalysisGroup) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if not self._project_manager:
             return
@@ -2714,14 +2714,14 @@ class ProjectWorkspace(QWidget):
             QMessageBox.No,
         )
         if reply == QMessageBox.Yes:
-            if not self._project_manager.delete_summary_group(group.group_id):
+            if not self._project_manager.delete_bulk_analysis_group(group.group_id):
                 QMessageBox.warning(self, "Delete Failed", "Could not delete the bulk analysis group.")
             else:
                 self._cancel_group_run(group)
                 self.refresh()
 
-    def _open_group_folder(self, group: SummaryGroup) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _open_group_folder(self, group: BulkAnalysisGroup) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if not self._project_manager or not self._project_manager.project_dir:
             return
@@ -2729,8 +2729,8 @@ class ProjectWorkspace(QWidget):
         folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
-    def _show_group_prompt_preview(self, group: SummaryGroup) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _show_group_prompt_preview(self, group: BulkAnalysisGroup) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if not self._project_manager or not self._project_manager.project_dir:
             QMessageBox.warning(self, "Prompt Preview", "Open a project to preview prompts.")
@@ -2753,8 +2753,8 @@ class ProjectWorkspace(QWidget):
         dialog.set_prompts(preview.system_prompt, preview.user_prompt)
         dialog.exec()
 
-    def _open_latest_combined(self, group: SummaryGroup) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _open_latest_combined(self, group: BulkAnalysisGroup) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if not self._project_manager or not self._project_manager.project_dir:
             return
@@ -2777,8 +2777,8 @@ class ProjectWorkspace(QWidget):
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(latest)))
 
-    def _start_group_run(self, group: SummaryGroup, *, force_rerun: bool = False) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _start_group_run(self, group: BulkAnalysisGroup, *, force_rerun: bool = False) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if group.group_id in self._running_groups:
             QMessageBox.information(
@@ -2863,11 +2863,11 @@ class ProjectWorkspace(QWidget):
             group.group_id,
             f"Starting bulk analysis for '{group.name}' ({len(files)} {'all documents' if force_rerun else 'pending documents'}).",
         )
-        self._refresh_summary_groups()
+        self._refresh_bulk_analysis_groups()
         self._workers.start(key, worker)
 
-    def _start_combined_run(self, group: SummaryGroup, *, force_rerun: bool = False) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _start_combined_run(self, group: BulkAnalysisGroup, *, force_rerun: bool = False) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if group.group_id in self._running_groups:
             QMessageBox.information(self, "Already Running", f"Combined operation for '{group.name}' is already in progress.")
@@ -2909,33 +2909,33 @@ class ProjectWorkspace(QWidget):
         worker.finished.connect(lambda success, failed, w=worker, g=gid: self._on_bulk_finished(g, w, success, failed))
         self._workers.start(key, worker)
 
-    def _cancel_group_run(self, group: SummaryGroup) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+    def _cancel_group_run(self, group: BulkAnalysisGroup) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         key = self._bulk_key(group.group_id)
         worker = self._workers.get(key)
         if worker:
             worker.cancel()
             self._cancelling_groups.add(group.group_id)
-            if self._summary_info_label:
-                self._summary_info_label.setText("Cancelling bulk analysis…")
+            if self._bulk_analysis_info_label:
+                self._bulk_analysis_info_label.setText("Cancelling bulk analysis…")
         else:
             self._bulk_progress.pop(group.group_id, None)
             self._bulk_failures.pop(group.group_id, None)
             self._cancelling_groups.discard(group.group_id)
-            if self._summary_info_label:
-                self._summary_info_label.setText("Bulk analysis cancelled.")
-        self._refresh_summary_groups()
+            if self._bulk_analysis_info_label:
+                self._bulk_analysis_info_label.setText("Bulk analysis cancelled.")
+        self._refresh_bulk_analysis_groups()
 
     def _on_bulk_progress(self, group_id: str, completed: int, total: int, relative_path: str) -> None:
         if group_id in self._cancelling_groups:
             return
         self._bulk_progress[group_id] = (completed, total)
-        if self._summary_info_label:
-            self._summary_info_label.setText(
+        if self._bulk_analysis_info_label:
+            self._bulk_analysis_info_label.setText(
                 f"Running bulk analysis ({completed}/{total})… {relative_path}"
             )
-        self._refresh_summary_groups()
+        self._refresh_bulk_analysis_groups()
 
     def _on_bulk_failed(self, group_id: str, relative_path: str, error: str) -> None:
         LOGGER.error("Bulk analysis failed for %s: %s", relative_path, error)
@@ -2944,11 +2944,11 @@ class ProjectWorkspace(QWidget):
     def _on_bulk_log(self, group_id: str, message: str) -> None:  # noqa: ARG002 - future use
         LOGGER.info("[BulkAnalysis][%s] %s", group_id, message)
         timestamp = datetime.now().strftime("%H:%M:%S")
-        if self._summary_log:
-            self._summary_log.append(f"[{timestamp}] {message}")
-            self._summary_log.moveCursor(QTextCursor.End)
-        if self._summary_info_label:
-            self._summary_info_label.setText(message)
+        if self._bulk_analysis_log:
+            self._bulk_analysis_log.append(f"[{timestamp}] {message}")
+            self._bulk_analysis_log.moveCursor(QTextCursor.End)
+        if self._bulk_analysis_info_label:
+            self._bulk_analysis_info_label.setText(message)
 
     def _on_bulk_finished(self, group_id: str, worker, successes: int, failures: int) -> None:
         key = self._bulk_key(group_id)
@@ -2981,17 +2981,17 @@ class ProjectWorkspace(QWidget):
             )
 
         self._refresh_file_tracker()
-        self._refresh_summary_groups()
+        self._refresh_bulk_analysis_groups()
 
     def _prune_running_groups(self, valid_ids: Optional[set[str]] = None) -> None:
-        if not self._feature_flags.summary_groups_enabled:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
             return
         if valid_ids is None:
             valid_ids = set()
             if self._project_manager:
                 try:
                     valid_ids = {
-                        group.group_id for group in self._project_manager.list_summary_groups()
+                        group.group_id for group in self._project_manager.list_bulk_analysis_groups()
                     }
                 except Exception:
                     valid_ids = set()

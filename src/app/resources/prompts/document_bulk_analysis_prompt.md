@@ -16,9 +16,9 @@
 
 {case_info}
 
-## Summary Instructions
+## Bulk Analysis Instructions
 
-Please analyze the document content, wrapped in "document-content" tags, and provide a comprehensive summary that includes:
+Please analyze the document content, wrapped in "document-content" tags, and provide a comprehensive bulk analysis that includes:
 
 - Key facts and information about the subject
 - Significant events and dates mentioned

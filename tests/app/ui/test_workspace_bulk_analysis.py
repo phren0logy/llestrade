@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QApplication, QPushButton
 
 from src.app.core.file_tracker import FileTracker
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.ui.stages import project_workspace
 from src.app.ui.stages.project_workspace import ProjectWorkspace
 from src.app.workers import bulk_analysis_worker
@@ -44,7 +44,7 @@ def qt_app() -> QApplication:
     return app
 
 
-def _create_project_with_group(tmp_path: Path) -> tuple[ProjectManager, SummaryGroup]:
+def _create_project_with_group(tmp_path: Path) -> tuple[ProjectManager, BulkAnalysisGroup]:
     projects_root = tmp_path / "projects"
     projects_root.mkdir()
 
@@ -58,8 +58,8 @@ def _create_project_with_group(tmp_path: Path) -> tuple[ProjectManager, SummaryG
     # Ensure the tracker sees our converted document so the workspace resolves it.
     FileTracker(manager.project_dir).scan()
 
-    group = SummaryGroup.create(name="Demo Group", files=["folder/record.md"])
-    saved = manager.save_summary_group(group)
+    group = BulkAnalysisGroup.create(name="Demo Group", files=["folder/record.md"])
+    saved = manager.save_bulk_analysis_group(group)
     return manager, saved
 
 
@@ -98,7 +98,7 @@ def test_workspace_run_executes_worker_and_updates_ui(tmp_path: Path, qt_app: QA
     workspace.set_project(manager)
     QCoreApplication.processEvents()
 
-    table = workspace._summary_table
+    table = workspace._bulk_analysis_table
     assert table is not None
     assert table.rowCount() == 1
 
@@ -134,7 +134,7 @@ class _StubBulkAnalysisWorker(QObject, QRunnable):
         self,
         *,
         project_dir: Path,
-        group: SummaryGroup,
+        group: BulkAnalysisGroup,
         files: list[str],
         metadata: ProjectMetadata | None,
         default_provider: tuple[str, str | None],
@@ -167,7 +167,7 @@ def test_workspace_cancel_updates_status_and_cleans_state(tmp_path: Path, qt_app
     workspace.set_project(manager)
     QCoreApplication.processEvents()
 
-    table = workspace._summary_table
+    table = workspace._bulk_analysis_table
     assert table is not None
     action_widget = table.cellWidget(0, 4)
     run_button = _find_button(action_widget, "Run Pending")

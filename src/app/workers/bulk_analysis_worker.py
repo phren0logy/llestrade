@@ -35,7 +35,7 @@ from src.app.core.bulk_analysis_runner import (
 )
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.secure_settings import SecureSettings
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from .base import DashboardWorker
 
 
@@ -51,7 +51,7 @@ _MANIFEST_VERSION = 1
 _MTIME_TOLERANCE = 1e-6
 
 
-def _manifest_path(project_dir: Path, group: SummaryGroup) -> Path:
+def _manifest_path(project_dir: Path, group: BulkAnalysisGroup) -> Path:
     return project_dir / "bulk_analysis" / group.folder_name / "manifest.json"
 
 
@@ -92,7 +92,7 @@ def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
 def _compute_prompt_hash(
     bundle: PromptBundle,
     provider_config: ProviderConfig,
-    group: SummaryGroup,
+    group: BulkAnalysisGroup,
     metadata: Optional[ProjectMetadata],
 ) -> str:
     metadata_summary: Dict[str, str] = {}
@@ -156,7 +156,7 @@ class BulkAnalysisWorker(DashboardWorker):
         self,
         *,
         project_dir: Path,
-        group: SummaryGroup,
+        group: BulkAnalysisGroup,
         files: Sequence[str],
         metadata: Optional[ProjectMetadata],
         default_provider: Tuple[str, Optional[str]] = ("anthropic", None),
@@ -518,7 +518,7 @@ class BulkAnalysisWorker(DashboardWorker):
                 )
             )
         else:
-            references.append(PromptReference(identifier="document_summary_prompt", role="user"))
+            references.append(PromptReference(identifier="document_bulk_analysis_prompt", role="user"))
 
         return [ref for ref in references if ref.to_dict()]
 

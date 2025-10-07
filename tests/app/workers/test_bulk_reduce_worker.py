@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from src.app.core.project_manager import ProjectMetadata
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.workers import bulk_reduce_worker as reduce_module
 from src.app.workers.bulk_reduce_worker import BulkReduceWorker, ProviderConfig
 
@@ -18,7 +18,7 @@ def test_bulk_reduce_worker_force_rerun(tmp_path: Path, qtbot, monkeypatch: pyte
     converted_doc = converted / "doc.md"
     converted_doc.write_text("content", encoding="utf-8")
 
-    group = SummaryGroup.create("Group")
+    group = BulkAnalysisGroup.create("Group")
     group.combine_converted_files = ["folder/doc.md"]
     metadata = ProjectMetadata(case_name="Case")
 

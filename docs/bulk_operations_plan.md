@@ -32,7 +32,7 @@ Notes:
 
 ## Data Model Changes
 
-File: `src/app/core/summary_groups.py`
+File: `src/app/core/bulk_analysis_groups.py`
 
 - Add fields:
   - `operation: Literal["per_document", "combined"] = "per_document"`
@@ -158,7 +158,7 @@ Files: `src/app/workers/conversion_worker.py`, `src/core/pdf_utils.py`
 
 Completed
 - Data model
-  - Added `operation` (per_document | combined) and all Combined selection/options fields to `SummaryGroup`.
+  - Added `operation` (per_document | combined) and all Combined selection/options fields to `BulkAnalysisGroup`.
   - Bumped `SUMMARY_GROUP_VERSION` to 2; invalid/unsupported configs are skipped with a clear log message.
 - UI
   - Group Dialog: operation selector; Converted-docs tree; Per‑document outputs tree; Combined options (order, output template); “Use reasoning” checkbox.

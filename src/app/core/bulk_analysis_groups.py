@@ -1,4 +1,4 @@
-"""Summary group persistence helpers."""
+"""Bulk analysis group persistence helpers."""
 
 from __future__ import annotations
 
@@ -16,12 +16,11 @@ LOGGER = logging.getLogger(__name__)
 
 CONFIG_FILENAME = "config.json"
 BULK_ANALYSIS_FOLDER = "bulk_analysis"
-SUMMARY_GROUP_VERSION = "2"
+BULK_ANALYSIS_GROUP_VERSION = "2"
 
 
-class InvalidSummaryGroupFormat(Exception):
-    """Raised when a summary group's config format is invalid/unsupported."""
-    pass
+class InvalidBulkAnalysisGroupFormat(Exception):
+    """Raised when a bulk analysis group's config format is invalid or unsupported."""
 
 
 def _utcnow() -> datetime:
@@ -52,7 +51,7 @@ def _groups_root(project_dir: Path) -> Path:
 
 
 @dataclass
-class SummaryGroup:
+class BulkAnalysisGroup:
     group_id: str
     name: str
     description: str = ""
@@ -68,7 +67,7 @@ class SummaryGroup:
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
     slug: Optional[str] = None
-    version: str = SUMMARY_GROUP_VERSION
+    version: str = BULK_ANALYSIS_GROUP_VERSION
 
     # Operation type and combined-operation fields
     # operation: "per_document" applies prompts to each doc individually (map)
@@ -100,7 +99,7 @@ class SummaryGroup:
         model: str = "",
         system_prompt_path: str = "",
         user_prompt_path: str = "",
-    ) -> "SummaryGroup":
+    ) -> "BulkAnalysisGroup":
         return cls(
             group_id=str(uuid.uuid4()),
             name=name,
@@ -149,11 +148,11 @@ class SummaryGroup:
         }
 
     @classmethod
-    def from_dict(cls, payload: Dict[str, object]) -> "SummaryGroup":
-        version = str(payload.get("version", SUMMARY_GROUP_VERSION))
-        if version != SUMMARY_GROUP_VERSION:
-            raise InvalidSummaryGroupFormat(
-                f"Unsupported summary group version {version} (expected {SUMMARY_GROUP_VERSION})"
+    def from_dict(cls, payload: Dict[str, object]) -> "BulkAnalysisGroup":
+        version = str(payload.get("version", BULK_ANALYSIS_GROUP_VERSION))
+        if version != BULK_ANALYSIS_GROUP_VERSION:
+            raise InvalidBulkAnalysisGroupFormat(
+                f"Unsupported bulk analysis group version {version} (expected {BULK_ANALYSIS_GROUP_VERSION})"
             )
 
         return cls(
@@ -206,9 +205,9 @@ def _parse_datetime(value: object) -> datetime:
 # Persistence helpers
 # ----------------------------------------------------------------------
 
-def load_summary_groups(project_dir: Path) -> List[SummaryGroup]:
+def load_bulk_analysis_groups(project_dir: Path) -> List[BulkAnalysisGroup]:
     root = _groups_root(project_dir)
-    groups: List[SummaryGroup] = []
+    groups: List[BulkAnalysisGroup] = []
     for child in root.iterdir():
         if not child.is_dir():
             continue
@@ -217,23 +216,23 @@ def load_summary_groups(project_dir: Path) -> List[SummaryGroup]:
             continue
         try:
             data = json.loads(config_path.read_text())
-            group = SummaryGroup.from_dict(data)
+            group = BulkAnalysisGroup.from_dict(data)
             if not group.slug:
                 group.slug = child.name
             groups.append(group)
-        except InvalidSummaryGroupFormat as exc:
+        except InvalidBulkAnalysisGroupFormat as exc:
             LOGGER.warning(
-                "Invalid or unsupported summary group format at %s: %s",
+                "Invalid or unsupported bulk analysis group format at %s: %s",
                 config_path,
                 exc,
             )
             # Skip invalid groups; UI can provide messaging elsewhere if needed.
         except Exception as exc:  # pragma: no cover - defensive logging
-            LOGGER.warning("Failed to load summary group from %s: %s", config_path, exc)
+            LOGGER.warning("Failed to load bulk analysis group from %s: %s", config_path, exc)
     return groups
 
 
-def save_summary_group(project_dir: Path, group: SummaryGroup) -> SummaryGroup:
+def save_bulk_analysis_group(project_dir: Path, group: BulkAnalysisGroup) -> BulkAnalysisGroup:
     root = _groups_root(project_dir)
     slug = _ensure_unique_slug(root, _slugify(group.name), group.slug)
     group.slug = slug
@@ -247,7 +246,7 @@ def save_summary_group(project_dir: Path, group: SummaryGroup) -> SummaryGroup:
     return group
 
 
-def delete_summary_group(project_dir: Path, group: SummaryGroup) -> None:
+def delete_bulk_analysis_group(project_dir: Path, group: BulkAnalysisGroup) -> None:
     if not group.slug:
         return
     group_dir = _groups_root(project_dir) / group.slug
@@ -256,9 +255,9 @@ def delete_summary_group(project_dir: Path, group: SummaryGroup) -> None:
 
 
 __all__ = [
-    "SummaryGroup",
-    "load_summary_groups",
-    "save_summary_group",
-    "delete_summary_group",
-    "InvalidSummaryGroupFormat",
+    "BulkAnalysisGroup",
+    "load_bulk_analysis_groups",
+    "save_bulk_analysis_group",
+    "delete_bulk_analysis_group",
+    "InvalidBulkAnalysisGroupFormat",
 ]

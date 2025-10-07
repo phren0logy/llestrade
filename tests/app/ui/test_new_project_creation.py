@@ -14,7 +14,7 @@ from src.app.core.conversion_manager import ConversionJob
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.ui.dialogs.new_project_dialog import NewProjectDialog
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
-from src.app.ui.dialogs.summary_group_dialog import SummaryGroupDialog
+from src.app.ui.dialogs.bulk_analysis_group_dialog import BulkAnalysisGroupDialog
 from src.app.workers.conversion_worker import ConversionWorker
 from src.app.core.file_tracker import FileTracker
 from src.app.ui.stages.project_workspace import ProjectWorkspace
@@ -226,7 +226,7 @@ def test_summary_group_dialog_lists_converted_documents(tmp_path: Path, qt_app: 
     converted_root.mkdir(parents=True)
     (converted_root / "doc.md").write_text("content")
 
-    dialog = SummaryGroupDialog(manager.project_dir)
+    dialog = BulkAnalysisGroupDialog(manager.project_dir)
     try:
         tree = dialog.file_tree
         top_labels = [tree.topLevelItem(i).text(0) for i in range(tree.topLevelItemCount())]

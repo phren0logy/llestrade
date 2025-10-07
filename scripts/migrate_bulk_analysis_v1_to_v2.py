@@ -167,7 +167,7 @@ def _infer_prompts(info: Dict[str, object]) -> Tuple[str, str]:
     user_path = (
         str(info.get("user_prompt_path"))
         or str(info.get("user_prompt"))
-        or "resources/prompts/document_summary_prompt.md"
+        or "resources/prompts/document_bulk_analysis_prompt.md"
     )
     return system_path, user_path
 

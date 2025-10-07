@@ -30,12 +30,12 @@ class FeatureFlags:
     """Feature toggles that can be overridden by settings or environment."""
 
     dashboard_workspace_enabled: bool = True
-    summary_groups_enabled: bool = True
+    bulk_analysis_groups_enabled: bool = True
     auto_run_conversion_on_create: bool = True
 
     ENV_MAPPING: ClassVar[Mapping[str, str]] = {
         "dashboard_workspace_enabled": "FRD_ENABLE_DASHBOARD_WORKSPACE",
-        "summary_groups_enabled": "FRD_ENABLE_SUMMARY_GROUPS",
+        "bulk_analysis_groups_enabled": "FRD_ENABLE_BULK_ANALYSIS_GROUPS",
         "auto_run_conversion_on_create": "FRD_AUTO_RUN_CONVERSION",
     }
 

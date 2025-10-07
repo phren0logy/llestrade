@@ -9,7 +9,7 @@ Note: The application was previously named “Forensic Psych Report Drafter.”
 - **Document Processing**: Convert PDFs to markdown and analyze forensic psychological reports
 - **Smart Chunking**: Markdown-aware document chunking for large files
 - **Batch Processing**: Process multiple documents with progress tracking
-- **Integrated Analysis**: Combine multiple reports into comprehensive summaries
+- **Integrated Analysis**: Combine multiple reports into comprehensive bulk analysis outputs
 - **Extended Thinking**: Support for Claude and Gemini's advanced reasoning capabilities
 - **Debug Dashboard**: Real-time monitoring and debugging tools (in debug mode)
 - **Error Recovery**: Robust error handling with retry logic and crash recovery
@@ -94,8 +94,8 @@ This will:
 2. **Document Analysis**
    - In the Analysis tab, select folders containing markdown documents
    - Enter subject information (name, DOB, case details)
-   - Click "Generate Summaries with LLM" to create individual summaries
-   - Use "Combine Summaries" to merge all summaries
+   - Click "Run Pending" to create per-document bulk analysis outputs
+   - Use "Run Combined" to merge bulk analysis outputs
    - Generate an integrated analysis of all documents
 
 3. **Refinement**

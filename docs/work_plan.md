@@ -52,8 +52,8 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Record selected conversion helper and per-project conversion preferences
   - [x] Expose lightweight dashboard state (last opened tab, pending job descriptors) instead of `WorkflowState`
   - [x] Surface FileTracker statistics and bulk-analysis metadata for the workspace views
-- [x] Create bulk analysis group system (`src/app/core/summary_groups.py`)
-  - [x] Implement SummaryGroup dataclass
+- [x] Create bulk analysis group system (`src/app/core/bulk_analysis_groups.py`)
+- [x] Implement BulkAnalysisGroup dataclass
   - [x] Add config.json serialization for groups
   - [x] Create folder structure management
   - [x] Base mocked responses on fixtures captured from real provider calls

@@ -14,7 +14,7 @@ _ = PySide6
 
 from src.app.core.file_tracker import DashboardMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.ui.stages.welcome_stage import WelcomeStage
 from src.app.workers import DashboardWorker, get_worker_pool
 
@@ -111,8 +111,8 @@ def test_workspace_metrics_include_group_coverage(tmp_path: Path, qt_app: QAppli
     (converted_dir / "doc1.md").write_text("converted")
     (converted_dir / "doc2.md").write_text("converted")
 
-    group = SummaryGroup.create(name="Case Files", directories=["folder"])
-    manager.save_summary_group(group)
+    group = BulkAnalysisGroup.create(name="Case Files", directories=["folder"])
+    manager.save_bulk_analysis_group(group)
 
     outputs_dir = manager.project_dir / "bulk_analysis" / group.slug / "outputs" / "folder"
     outputs_dir.mkdir(parents=True, exist_ok=True)

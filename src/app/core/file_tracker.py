@@ -18,7 +18,7 @@ from src.app.core.bulk_paths import (
 )
 
 if TYPE_CHECKING:
-    from .summary_groups import SummaryGroup
+    from .bulk_analysis_groups import BulkAnalysisGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -384,7 +384,7 @@ def build_workspace_metrics(
     *,
     snapshot: "FileTrackerSnapshot | None",
     dashboard: "DashboardMetrics",
-    summary_groups: Sequence["SummaryGroup"],
+    bulk_analysis_groups: Sequence["BulkAnalysisGroup"],
     project_dir: Path | None = None,
 ) -> WorkspaceMetrics:
     """Translate raw tracker data into workspace-friendly metrics."""
@@ -426,7 +426,7 @@ def build_workspace_metrics(
     bulk_missing = tuple(sorted(converted_files - normalized_bulk_files))
 
     group_metrics: Dict[str, WorkspaceGroupMetrics] = {}
-    for group in summary_groups:
+    for group in bulk_analysis_groups:
         slug = getattr(group, "slug", None) or group.folder_name
         converted_subset = _resolve_group_converted_paths(group, converted_files)
         group_outputs = bulk_outputs_by_group.get(slug, set())
@@ -492,7 +492,7 @@ def _iter_project_files(root: Path, rel_dirs: Sequence[str]) -> set[str]:
     return selected
 
 
-def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[int, str | None, datetime | None, bool]:
+def _compute_combined_status(project_dir: Path, group: "BulkAnalysisGroup") -> tuple[int, str | None, datetime | None, bool]:
     # Build selection from converted_documents
     conv_root = project_dir / "converted_documents"
     converted_selected: set[str] = set()
@@ -649,7 +649,7 @@ def _compute_combined_status(project_dir: Path, group: "SummaryGroup") -> tuple[
 
 
 def _resolve_group_converted_paths(
-    group: "SummaryGroup",
+    group: "BulkAnalysisGroup",
     converted_paths: set[str],
 ) -> set[str]:
     """Return the converted-document paths covered by the supplied group."""

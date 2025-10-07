@@ -12,7 +12,7 @@ from src.app.core.bulk_analysis_runner import (
     render_user_prompt,
 )
 from src.app.core.project_manager import ProjectMetadata
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 
 
 class PromptPreviewError(RuntimeError):
@@ -27,7 +27,7 @@ class PromptPreview:
 
 def generate_prompt_preview(
     project_dir: Path,
-    group: SummaryGroup,
+    group: BulkAnalysisGroup,
     *,
     metadata: Optional[ProjectMetadata] = None,
     max_content_lines: int = 10,
@@ -73,7 +73,7 @@ def generate_prompt_preview(
 
 def _resolve_first_per_document_input(
     project_dir: Path,
-    group: SummaryGroup,
+    group: BulkAnalysisGroup,
 ) -> tuple[Optional[Path], str]:
     converted_root = project_dir / "converted_documents"
     if not converted_root.exists():
@@ -112,7 +112,7 @@ def _resolve_first_per_document_input(
     return file_map[first_relative], first_relative
 
 
-def _resolve_first_combined_input(project_dir: Path, group: SummaryGroup) -> Optional[Path]:
+def _resolve_first_combined_input(project_dir: Path, group: BulkAnalysisGroup) -> Optional[Path]:
     conv_root = project_dir / "converted_documents"
     ba_root = project_dir / "bulk_analysis"
 

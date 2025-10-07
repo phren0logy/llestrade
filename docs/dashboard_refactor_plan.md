@@ -9,7 +9,7 @@ Move the active dashboard UI code out of `src/new/` into a clean top-level packa
 ### 1. Create `src/app/` package
 - [x] Introduce a new `src/app/__init__.py` that re-exports the primary dashboard interfaces (e.g., `SecureSettings`, `ProjectManager`, etc.).
 - [x] Move modules from `src/new/` into `src/app/` with the following structure:
-  - `src/app/core/` → domain/business logic (`project_manager.py`, `file_tracker.py`, `summary_groups.py`, `feature_flags.py`, `workspace_controller.py`, etc.)
+- `src/app/core/` → domain/business logic (`project_manager.py`, `file_tracker.py`, `bulk_analysis_groups.py`, `feature_flags.py`, `workspace_controller.py`, etc.)
   - `src/app/services/` → optional layer for conversion/bulk runners if further separation is desired (`conversion_manager.py`, `bulk_analysis_runner.py`, helper registries).
   - `src/app/ui/`
     - `ui/stages/` → formerly `src/new/stages/`

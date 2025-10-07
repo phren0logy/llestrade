@@ -13,7 +13,7 @@ from src.config.prompt_store import get_custom_dir, get_bundled_dir
 from src.config.paths import app_base_dir, app_resource_root
 from .prompt_manager import PromptManager
 from .project_manager import ProjectMetadata
-from .summary_groups import SummaryGroup
+from .bulk_analysis_groups import BulkAnalysisGroup
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +41,7 @@ class BulkAnalysisCancelled(Exception):
 
 def prepare_documents(
     project_dir: Path,
-    group: SummaryGroup,
+    group: BulkAnalysisGroup,
     selected_files: Sequence[str],
 ) -> List[BulkAnalysisDocument]:
     """Resolve bulk-analysis documents and their output paths."""
@@ -77,7 +77,7 @@ def prepare_documents(
 
 def load_prompts(
     project_dir: Path,
-    group: SummaryGroup,
+    group: BulkAnalysisGroup,
     metadata: Optional[ProjectMetadata],
 ) -> PromptBundle:
     """Return the prompt bundle for the supplied group."""
@@ -93,14 +93,14 @@ def load_prompts(
     user_template = _read_prompt_file(project_dir, group.user_prompt_path)
     if not user_template:
         try:
-            user_template = prompt_manager.get_template("document_summary_prompt")
+            user_template = prompt_manager.get_template("document_bulk_analysis_prompt")
         except KeyError:
             user_template = (
                 "Summarise the provided document content focusing on key facts, timelines, "
                 "and clinical details.\n\n{document_content}"
             )
 
-    _ensure_document_placeholder(user_template, source=group.user_prompt_path or "document_summary_prompt")
+    _ensure_document_placeholder(user_template, source=group.user_prompt_path or "document_bulk_analysis_prompt")
 
     return PromptBundle(system_template=system_template, user_template=user_template)
 

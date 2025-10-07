@@ -7,7 +7,7 @@ import pytest
 
 from src.app.core.bulk_analysis_runner import PromptBundle
 from src.app.core.project_manager import ProjectMetadata
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.workers import bulk_analysis_worker as worker_module
 from src.app.workers.bulk_analysis_worker import (
     BulkAnalysisWorker,
@@ -34,7 +34,7 @@ def test_should_process_document_handles_skips(tmp_path: Path) -> None:
 
 
 def test_manifest_roundtrip(tmp_path: Path) -> None:
-    group = SummaryGroup.create("Group")
+    group = BulkAnalysisGroup.create("Group")
     path = _manifest_path(tmp_path, group)
 
     manifest = {
@@ -53,7 +53,7 @@ def test_manifest_roundtrip(tmp_path: Path) -> None:
 
 
 def test_compute_prompt_hash_changes_on_prompt_and_settings() -> None:
-    group = SummaryGroup.create("Group")
+    group = BulkAnalysisGroup.create("Group")
     metadata = ProjectMetadata(case_name="Case A", subject_name="Subject", case_description="Desc")
     bundle = PromptBundle(system_template="System", user_template="User {document_content}")
     config = ProviderConfig(provider_id="anthropic", model="claude")
@@ -82,11 +82,11 @@ def test_bulk_worker_force_rerun_reprocesses(tmp_path: Path, qtbot, monkeypatch:
     converted_doc = converted / "doc.md"
     converted_doc.write_text("content", encoding="utf-8")
 
-    group = SummaryGroup.create("Group")
+    group = BulkAnalysisGroup.create("Group")
     metadata = ProjectMetadata(case_name="Case")
     call_count = {"value": 0}
 
-    def fake_prepare(project_dir: Path, group: SummaryGroup, selected: Sequence[str]):
+    def fake_prepare(project_dir: Path, group: BulkAnalysisGroup, selected: Sequence[str]):
         from src.app.core.bulk_analysis_runner import BulkAnalysisDocument
 
         source_path = project_dir / "converted_documents" / "folder" / "doc.md"

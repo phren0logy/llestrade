@@ -1,4 +1,4 @@
-"""Dialog for creating summary groups."""
+"""Dialog for creating bulk analysis groups."""
 
 from __future__ import annotations
 
@@ -32,17 +32,17 @@ from src.config.app_config import get_available_providers_and_models
 from src.config.prompt_store import get_bundled_dir, get_custom_dir
 from src.config.paths import app_resource_root
 from src.app.core.bulk_paths import iter_map_outputs
-from src.app.core.summary_groups import SummaryGroup
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 from .prompt_preview_dialog import PromptPreviewDialog
 
 DEFAULT_SYSTEM_PROMPT = "prompts/document_analysis_system_prompt.md"
-DEFAULT_USER_PROMPT = "prompts/document_summary_prompt.md"
+DEFAULT_USER_PROMPT = "prompts/document_bulk_analysis_prompt.md"
 
 
-class SummaryGroupDialog(QDialog):
-    """Collect information needed to create a summary group."""
+class BulkAnalysisGroupDialog(QDialog):
+    """Collect information needed to create a bulk analysis group."""
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class SummaryGroupDialog(QDialog):
         super().__init__(parent)
         self._project_dir = project_dir
         self._metadata = metadata
-        self._group: Optional[SummaryGroup] = None
+        self._group: Optional[BulkAnalysisGroup] = None
         self.setWindowTitle("New Bulk Analysis")
         self.setModal(True)
         self._build_ui()
@@ -64,9 +64,9 @@ class SummaryGroupDialog(QDialog):
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-    def build_group(self) -> SummaryGroup:
+    def build_group(self) -> BulkAnalysisGroup:
         if not self._group:
-            raise RuntimeError("Dialog was not accepted; no summary group available")
+            raise RuntimeError("Dialog was not accepted; no bulk analysis group available")
         return self._group
 
     # ------------------------------------------------------------------
@@ -131,7 +131,7 @@ class SummaryGroupDialog(QDialog):
         form.addRow("User Prompt", self._wrap_with_button(self.user_prompt_edit, self.user_prompt_button))
         self._initialise_prompt_path(
             self.user_prompt_edit,
-            "document_summary_prompt.md",
+            "document_bulk_analysis_prompt.md",
             DEFAULT_USER_PROMPT,
         )
 
@@ -289,10 +289,10 @@ class SummaryGroupDialog(QDialog):
         self._group = group
         self.accept()
 
-    def _build_group_instance(self) -> Optional[SummaryGroup]:
+    def _build_group_instance(self) -> Optional[BulkAnalysisGroup]:
         name = self.name_edit.text().strip()
         if not name:
-            QMessageBox.warning(self, "Missing Name", "Please provide a name for the summary group.")
+            QMessageBox.warning(self, "Missing Name", "Please provide a name for the bulk analysis group.")
             return None
 
         tree_files, directories = self._collect_selection()
@@ -356,7 +356,7 @@ class SummaryGroupDialog(QDialog):
                     elif kind == "map-file":
                         map_files.append(str(value))
 
-            group = SummaryGroup.create(
+            group = BulkAnalysisGroup.create(
                 name=name,
                 description=description,
                 files=[],
@@ -379,7 +379,7 @@ class SummaryGroupDialog(QDialog):
             group.model_context_window = custom_window
             return group
 
-        group = SummaryGroup.create(
+        group = BulkAnalysisGroup.create(
             name=name,
             description=description,
             files=files,
