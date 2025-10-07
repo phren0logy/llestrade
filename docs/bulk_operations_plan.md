@@ -165,10 +165,11 @@ Completed
   - Workspace: Coverage shows “Combined – Inputs: N”; actions include “Run Combined” and “Open Latest”; status shows “Stale” when applicable.
 - Workers
   - Implemented `BulkReduceWorker` to assemble Combined inputs (comment‑delimited sections), run a single prompt with chunking, and write timestamped outputs + manifest.
+  - Standardised Markdown metadata across conversion, highlight, bulk-analysis, and report outputs using the shared front matter helper (python-frontmatter).
 - Metrics & Staleness
   - Extended workspace metrics to compute Combined input count, latest combined artifact, and `stale` flag without altering FileTracker map coverage.
 - Conversion pipeline
-  - Prepend YAML front‑matter with `source_path`, `source_rel`, `source_format`, `source_mtime`, `pages_detected`, `pages_pdf`, and `converted`.
+  - Inject standardised front matter using the shared markdown helper: `project_path`, `generator`, structured `sources` (absolute path, relative path, checksum, role), conversion-specific extras (`source_format`, `source_mtime`, `pages_detected`, `pages_pdf`, `converter`).
   - Azure DI: parse `<!-- PageBreak -->` and insert absolute page markers `<!--- <project_rel>#page=N --->`.
   - Local: convert legacy “--- Page N ---” to absolute comment markers.
   - Large PDFs: added chunked Azure DI (1000 pages with 5‑page overlap) with robust merge and PageBreak interleaving.

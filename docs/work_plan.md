@@ -141,6 +141,9 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Write color aggregates to `highlights/colors` instead of `highlights/documents/colors`
   - [x] Migrate legacy color files on extraction and clean up obsolete folders
   - [x] Add regression tests covering the migration and color aggregate writes
+- [x] Standardize Markdown metadata
+  - [x] Introduce shared front matter helper (`src/common/markdown/frontmatter_utils.py`) backed by python-frontmatter
+  - [x] Apply helper to conversion, highlight, bulk analysis, and report workers with project/sources/prompt metadata
 - [ ] Phoenix integration for LLM calls
   - [ ] Keep existing observability.py setup
   - [ ] Add bulk analysis group context to traces

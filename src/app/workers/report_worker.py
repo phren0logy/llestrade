@@ -31,6 +31,13 @@ from src.app.core.report_template_sections import (
 from src.app.core.secure_settings import SecureSettings
 from src.common.llm.factory import create_provider
 from src.common.llm.tokens import TokenCounter
+from src.common.markdown import (
+    PromptReference,
+    SourceReference,
+    apply_frontmatter,
+    build_document_metadata,
+    compute_file_checksum,
+)
 from .base import DashboardWorker
 
 
@@ -126,7 +133,24 @@ class ReportWorker(DashboardWorker):
             )
             self.progress.emit(5, "Reading inputs…")
             combined_content, inputs_metadata = self._combine_inputs()
-            inputs_path.write_text(combined_content, encoding="utf-8")
+            inputs_metadata = list(inputs_metadata)
+            input_sources = self._input_sources(inputs_metadata)
+            inputs_payload = build_document_metadata(
+                project_path=self._project_dir,
+                generator="report_worker",
+                created_at=timestamp,
+                sources=input_sources,
+                extra={
+                    "document_type": "report-inputs",
+                    "input_count": len(input_sources),
+                    "categories": sorted(
+                        {ref.role for ref in input_sources if ref.role}
+                    ),
+                },
+            )
+            inputs_content = apply_frontmatter(combined_content, inputs_payload, merge_existing=True)
+            inputs_path.write_text(inputs_content, encoding="utf-8")
+            inputs_checksum = compute_file_checksum(inputs_path)
             self.log_message.emit(f"Combined inputs written to {inputs_path.name}.")
 
             generation_user_prompt = read_generation_prompt(self._generation_user_prompt_path)
@@ -175,7 +199,37 @@ class ReportWorker(DashboardWorker):
             if not draft_content.strip():
                 raise RuntimeError("Section generation produced empty draft content")
 
-            draft_path.write_text(self._format_draft_header(draft_content), encoding="utf-8")
+            draft_body = self._format_draft_header(draft_content)
+            draft_sources = list(input_sources)
+            combined_inputs_ref = self._file_source(
+                inputs_path, role="combined-inputs", checksum=inputs_checksum
+            )
+            if combined_inputs_ref:
+                draft_sources.append(combined_inputs_ref)
+            template_ref = self._optional_source(self._template_path, role="template")
+            if template_ref:
+                draft_sources.append(template_ref)
+            transcript_ref = self._optional_source(self._transcript_path, role="transcript")
+            if transcript_ref:
+                draft_sources.append(transcript_ref)
+            generation_prompts = [
+                self._prompt_reference(self._generation_user_prompt_path, role="generation-user"),
+                self._prompt_reference(self._generation_system_prompt_path, role="generation-system"),
+            ]
+            draft_payload = build_document_metadata(
+                project_path=self._project_dir,
+                generator="report_worker",
+                created_at=datetime.now(timezone.utc),
+                sources=draft_sources,
+                prompts=[ref for ref in generation_prompts if ref.to_dict()],
+                extra={
+                    "document_type": "report-draft",
+                    "section_count": len(section_outputs),
+                },
+            )
+            draft_content_prepared = apply_frontmatter(draft_body, draft_payload, merge_existing=True)
+            draft_path.write_text(draft_content_prepared, encoding="utf-8")
+            draft_checksum = compute_file_checksum(draft_path)
             self.log_message.emit(f"Draft saved to {draft_path.name}.")
 
             self.log_message.emit("Refining draft report…")
@@ -185,11 +239,49 @@ class ReportWorker(DashboardWorker):
                 draft_content=draft_content,
                 system_prompt=refinement_system_prompt,
             )
-            refined_path.write_text(refined_content, encoding="utf-8")
+            refinement_prompts = [
+                self._prompt_reference(self._refinement_user_prompt_path, role="refinement-user"),
+                self._prompt_reference(self._refinement_system_prompt_path, role="refinement-system"),
+            ]
+            all_prompts = [
+                ref for ref in (*generation_prompts, *refinement_prompts) if ref.to_dict()
+            ]
+            refined_sources = list(draft_sources)
+            draft_ref = self._file_source(draft_path, role="draft", checksum=draft_checksum)
+            if draft_ref:
+                refined_sources.append(draft_ref)
+            refined_payload = build_document_metadata(
+                project_path=self._project_dir,
+                generator="report_worker",
+                created_at=datetime.now(timezone.utc),
+                sources=refined_sources,
+                prompts=all_prompts,
+                extra={
+                    "document_type": "report-refined",
+                    "section_count": len(section_outputs),
+                    "refinement_tokens": self._refine_usage,
+                },
+            )
+            refined_content_prepared = apply_frontmatter(refined_content, refined_payload, merge_existing=True)
+            refined_path.write_text(refined_content_prepared, encoding="utf-8")
+            refined_checksum = compute_file_checksum(refined_path)
             self.log_message.emit(f"Refined report saved to {refined_path.name}.")
             reasoning_written: Optional[Path] = None
             if reasoning_content:
-                reasoning_path.write_text(reasoning_content, encoding="utf-8")
+                reasoning_sources = list(refined_sources)
+                refined_ref = self._file_source(refined_path, role="refined", checksum=refined_checksum)
+                if refined_ref:
+                    reasoning_sources.append(refined_ref)
+                reasoning_payload = build_document_metadata(
+                    project_path=self._project_dir,
+                    generator="report_worker",
+                    created_at=datetime.now(timezone.utc),
+                    sources=reasoning_sources,
+                    prompts=[ref for ref in refinement_prompts if ref.to_dict()],
+                    extra={"document_type": "report-reasoning"},
+                )
+                reasoning_prepared = apply_frontmatter(reasoning_content, reasoning_payload, merge_existing=True)
+                reasoning_path.write_text(reasoning_prepared, encoding="utf-8")
                 reasoning_written = reasoning_path
                 self.log_message.emit(f"Reasoning output saved to {reasoning_path.name}.")
 
@@ -477,6 +569,57 @@ class ReportWorker(DashboardWorker):
                 "refined_tokens": refined_tokens,
             },
         }
+
+    def _input_sources(self, items: Sequence[dict]) -> List[SourceReference]:
+        sources: List[SourceReference] = []
+        for item in items:
+            absolute_raw = item.get("absolute_path")
+            if not absolute_raw:
+                continue
+            abs_path = Path(absolute_raw).expanduser()
+            relative = item.get("relative_path") or self._relative_to_project(abs_path)
+            category = item.get("category") or "input"
+            sources.append(
+                SourceReference(
+                    path=abs_path,
+                    relative=relative,
+                    kind=(abs_path.suffix.lstrip(".") or "file"),
+                    role=category,
+                    checksum=compute_file_checksum(abs_path),
+                )
+            )
+        return sources
+
+    def _optional_source(self, path: Optional[Path], *, role: str) -> Optional[SourceReference]:
+        if path is None:
+            return None
+        return self._file_source(path, role=role)
+
+    def _file_source(
+        self,
+        path: Optional[Path],
+        *,
+        role: str,
+        checksum: Optional[str] = None,
+    ) -> Optional[SourceReference]:
+        if path is None:
+            return None
+        return SourceReference(
+            path=path,
+            relative=self._relative_to_project(path),
+            kind=(path.suffix.lstrip(".") or "file"),
+            role=role,
+            checksum=checksum or compute_file_checksum(path),
+        )
+
+    def _prompt_reference(self, path: Path, *, role: str) -> PromptReference:
+        return PromptReference(path=path, role=role)
+
+    def _relative_to_project(self, path: Path) -> str:
+        try:
+            return path.resolve().relative_to(self._project_dir.resolve()).as_posix()
+        except Exception:
+            return path.name
 
 
 __all__ = ["ReportWorker"]

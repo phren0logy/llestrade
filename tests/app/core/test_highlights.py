@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+import frontmatter
 import fitz
 
 from src.app.core.highlight_extractor import HighlightExtractor
@@ -65,13 +66,27 @@ def test_markdown_helpers(tmp_path: Path) -> None:
     output_path = tmp_path / "out.md"
     save_highlights_markdown(collection, output_path, source_relative="folder/sample.pdf")
     content = output_path.read_text(encoding="utf-8")
-    assert "Important finding" in content
-    assert "folder/sample.pdf" in content
+    post = frontmatter.loads(content)
+    metadata = post.metadata
+    assert metadata["generator"] == "highlight_extraction"
+    assert metadata["highlight_count"] == len(collection.highlights)
+    assert metadata["sources"][0]["relative"] == "folder/sample.pdf"
+    assert metadata["sources"][0]["kind"] == "pdf"
+    assert "Important finding" in post.content
+    assert "folder/sample.pdf" in post.content
 
     placeholder_path = tmp_path / "placeholder.md"
-    save_placeholder_markdown(placeholder_path, processed_at=datetime(2024, 1, 1))
+    save_placeholder_markdown(
+        placeholder_path,
+        processed_at=datetime(2024, 1, 1),
+        source_pdf=pdf_path,
+        source_relative="folder/sample.pdf",
+    )
     placeholder_content = placeholder_path.read_text(encoding="utf-8")
-    assert "No highlights found" in placeholder_content
+    placeholder_post = frontmatter.loads(placeholder_content)
+    assert placeholder_post.metadata["highlight_count"] == 0
+    assert placeholder_post.metadata["placeholder"] is True
+    assert "No highlights found" in placeholder_post.content
 
 
 def test_highlight_extractor_returns_empty_collection(tmp_path: Path) -> None:

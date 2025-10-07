@@ -8,6 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 
+from src.common.markdown import (
+    SourceReference,
+    apply_frontmatter,
+    build_document_metadata,
+    compute_file_checksum,
+    infer_project_path,
+)
+
 
 @dataclass(slots=True)
 class Highlight:
@@ -98,7 +106,15 @@ def save_highlights_markdown(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     content = highlight_markdown_content(collection, source_relative=source_relative)
-    output_path.write_text(content, encoding="utf-8")
+    metadata = _build_highlight_metadata(
+        output_path=output_path,
+        source_file=collection.source_file,
+        source_relative=source_relative,
+        created_at=collection.extracted_at,
+        highlight_count=len(collection.highlights),
+    )
+    updated = apply_frontmatter(content, metadata, merge_existing=True)
+    output_path.write_text(updated, encoding="utf-8")
 
 
 def placeholder_markdown(*, processed_at: datetime | None = None) -> str:
@@ -112,11 +128,28 @@ def placeholder_markdown(*, processed_at: datetime | None = None) -> str:
     )
 
 
-def save_placeholder_markdown(output_path: Path, *, processed_at: datetime | None = None) -> None:
+def save_placeholder_markdown(
+    output_path: Path,
+    *,
+    processed_at: datetime | None = None,
+    source_pdf: Path | None = None,
+    source_relative: str | None = None,
+) -> None:
     """Persist placeholder markdown when highlight extraction yields no results."""
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(placeholder_markdown(processed_at=processed_at), encoding="utf-8")
+    body = placeholder_markdown(processed_at=processed_at)
+    created_at = processed_at or datetime.now(timezone.utc)
+    metadata = _build_highlight_metadata(
+        output_path=output_path,
+        source_file=source_pdf,
+        source_relative=source_relative,
+        created_at=created_at,
+        highlight_count=0,
+        extra={"placeholder": True},
+    )
+    updated = apply_frontmatter(body, metadata, merge_existing=True)
+    output_path.write_text(updated, encoding="utf-8")
 
 
 def expected_highlight_relatives(converted_relatives: Iterable[str]) -> Dict[str, str]:
@@ -151,6 +184,7 @@ class ColorEntry:
     """Single highlight entry grouped for color aggregate outputs."""
 
     source_relative: str
+    source_path: Path
     page_number: int
     text: str
 
@@ -168,6 +202,7 @@ def aggregate_highlights_by_color(
             aggregates.setdefault(highlight.color, []).append(
                 ColorEntry(
                     source_relative=source_relative,
+                    source_path=collection.source_file,
                     page_number=highlight.page_number,
                     text=highlight.text,
                 )
@@ -224,9 +259,88 @@ def save_color_aggregates(
         slug = _color_slug(color)
         path = output_dir / f"{slug}.md"
         content = _color_markdown(color, entries, generated_at)
-        path.write_text(content, encoding="utf-8")
+        metadata = build_document_metadata(
+            project_path=infer_project_path(path),
+            generator="highlight_extraction",
+            created_at=generated_at,
+            sources=_unique_sources(entries),
+            extra={
+                "color": color,
+                "entry_count": len(entries),
+            },
+        )
+        updated = apply_frontmatter(content, metadata, merge_existing=True)
+        path.write_text(updated, encoding="utf-8")
         written[color] = path
     return written
+
+
+def _build_highlight_metadata(
+    *,
+    output_path: Path,
+    source_file: Path | None,
+    source_relative: str | None,
+    created_at: datetime,
+    highlight_count: int,
+    extra: Dict[str, object] | None = None,
+) -> Dict[str, object]:
+    created_ts = _ensure_timezone(created_at)
+    project_path = infer_project_path(output_path)
+    sources: List[SourceReference] = []
+    if source_file:
+        checksum = compute_file_checksum(source_file)
+        sources.append(
+            SourceReference(
+                path=source_file,
+                relative=source_relative or source_file.name,
+                kind=(source_file.suffix.lstrip(".") or "file"),
+                role="highlight-source",
+                checksum=checksum,
+            )
+        )
+
+    metadata_extra: Dict[str, object] = {"highlight_count": highlight_count}
+    if extra:
+        metadata_extra.update(extra)
+
+    return build_document_metadata(
+        project_path=project_path,
+        generator="highlight_extraction",
+        created_at=created_ts,
+        sources=sources,
+        extra=metadata_extra,
+    )
+
+
+def _unique_sources(entries: Sequence[ColorEntry]) -> List[SourceReference]:
+    seen: set[tuple[str, str]] = set()
+    checksum_cache: Dict[Path, str | None] = {}
+    references: List[SourceReference] = []
+    for entry in entries:
+        source_path = entry.source_path
+        source_relative = entry.source_relative
+        key = (source_path.resolve().as_posix(), source_relative)
+        if key in seen:
+            continue
+        seen.add(key)
+        if source_path not in checksum_cache:
+            checksum_cache[source_path] = compute_file_checksum(source_path)
+        references.append(
+            SourceReference(
+                path=source_path,
+                relative=source_relative,
+                kind=(source_path.suffix.lstrip(".") or "file"),
+                role="highlight-source",
+                checksum=checksum_cache[source_path],
+            )
+        )
+    return references
+
+
+def _ensure_timezone(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 __all__ = [

@@ -8,12 +8,20 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Signal
 
 from src.common.llm.base import BaseLLMProvider
 from src.common.llm.factory import create_provider
+from src.common.markdown import (
+    PromptReference,
+    SourceReference,
+    apply_frontmatter,
+    build_document_metadata,
+    compute_file_checksum,
+    infer_project_path,
+)
 from src.app.core.bulk_paths import (
     iter_map_outputs,
     iter_map_outputs_under,
@@ -219,6 +227,12 @@ class BulkReduceWorker(DashboardWorker):
                 f"Combined content tokens={token_count}, chunking={'yes' if needs_chunking else 'no'}"
             )
 
+            run_details: Dict[str, object] = {
+                "token_count": token_count,
+                "max_tokens": max_tokens,
+                "chunking": bool(needs_chunking),
+            }
+
             if not needs_chunking:
                 prompt = render_user_prompt(
                     bundle,
@@ -227,6 +241,7 @@ class BulkReduceWorker(DashboardWorker):
                     combined_content,
                 )
                 result = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
+                run_details["chunk_count"] = 1
             else:
                 chunks = generate_chunks(combined_content, max_tokens)
                 if not chunks:
@@ -237,9 +252,12 @@ class BulkReduceWorker(DashboardWorker):
                         combined_content,
                     )
                     result = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
+                    run_details["chunk_count"] = 1
+                    run_details["chunking"] = False
                 else:
                     chunk_summaries = []
                     total_chunks = len(chunks)
+                    run_details["chunk_count"] = total_chunks
                     for idx, chunk in enumerate(chunks, start=1):
                         if self.is_cancelled():
                             raise BulkAnalysisCancelled
@@ -263,7 +281,17 @@ class BulkReduceWorker(DashboardWorker):
             # Persist
             output_path, run_manifest_path = self._output_paths()
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(result, encoding="utf-8")
+            written_at = datetime.now(timezone.utc)
+            metadata = self._build_reduce_metadata(
+                output_path=output_path,
+                inputs=inputs,
+                provider_cfg=provider_cfg,
+                prompt_hash=prompt_hash,
+                run_details=run_details,
+                created_at=written_at,
+            )
+            updated = apply_frontmatter(result, metadata, merge_existing=True)
+            output_path.write_text(updated, encoding="utf-8")
             run_manifest = self._build_run_manifest(inputs, provider_cfg)
             run_manifest_path.write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
             state_manifest = self._build_state_manifest(current_signature)
@@ -283,6 +311,84 @@ class BulkReduceWorker(DashboardWorker):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+    def _build_reduce_metadata(
+        self,
+        *,
+        output_path: Path,
+        inputs: Sequence[tuple[str, Path, str]],
+        provider_cfg: ProviderConfig,
+        prompt_hash: str,
+        run_details: Dict[str, object],
+        created_at: datetime,
+    ) -> Dict[str, object]:
+        project_path = infer_project_path(output_path)
+        sources = self._source_references(inputs)
+        prompts = self._prompt_references()
+        extra: Dict[str, object] = {
+            "group_id": self._group.group_id,
+            "group_name": self._group.name,
+            "group_operation": self._group.operation,
+            "prompt_hash": prompt_hash,
+            "provider_id": provider_cfg.provider_id,
+            "model": provider_cfg.model,
+            "input_count": len(inputs),
+        }
+        extra.update(run_details)
+        return build_document_metadata(
+            project_path=project_path,
+            generator="bulk_reduce_worker",
+            created_at=created_at,
+            sources=sources,
+            prompts=prompts,
+            extra=extra,
+        )
+
+    def _source_references(self, inputs: Sequence[tuple[str, Path, str]]) -> Sequence[SourceReference]:
+        refs: List[SourceReference] = []
+        for kind, path, rel in inputs:
+            refs.append(
+                SourceReference(
+                    path=path,
+                    relative=rel,
+                    kind=(path.suffix.lstrip(".") or "file"),
+                    role=kind,
+                    checksum=compute_file_checksum(path),
+                )
+            )
+        return refs
+
+    def _prompt_references(self) -> Sequence[PromptReference]:
+        references: List[PromptReference] = []
+        system_path = (self._group.system_prompt_path or "").strip()
+        if system_path:
+            references.append(
+                PromptReference(
+                    path=self._resolve_prompt_path(system_path),
+                    role="system",
+                )
+            )
+        else:
+            references.append(PromptReference(identifier="document_analysis_system_prompt", role="system"))
+
+        user_path = (self._group.user_prompt_path or "").strip()
+        if user_path:
+            references.append(
+                PromptReference(
+                    path=self._resolve_prompt_path(user_path),
+                    role="user",
+                )
+            )
+        else:
+            references.append(PromptReference(identifier="document_summary_prompt", role="user"))
+
+        return [ref for ref in references if ref.to_dict()]
+
+    def _resolve_prompt_path(self, prompt_path: str) -> Path:
+        candidate = Path(prompt_path)
+        if candidate.is_absolute():
+            return candidate
+        return (self._project_dir / candidate).resolve()
+
     def _resolve_inputs(self) -> list[tuple[str, Path, str]]:
         """Return list of (kind, abs_path, rel_key) where kind in {'converted','map'}.
 

@@ -13,6 +13,14 @@ from PySide6.QtCore import Signal
 
 from src.common.llm.base import BaseLLMProvider
 from src.common.llm.factory import create_provider
+from src.common.markdown import (
+    PromptReference,
+    SourceReference,
+    apply_frontmatter,
+    build_document_metadata,
+    compute_file_checksum,
+    infer_project_path,
+)
 from src.app.core.bulk_analysis_runner import (
     BulkAnalysisCancelled,
     BulkAnalysisDocument,
@@ -224,7 +232,7 @@ class BulkAnalysisWorker(DashboardWorker):
                     continue
 
                 try:
-                    summary = self._process_document(
+                    summary, run_details = self._process_document(
                         provider,
                         provider_config,
                         bundle,
@@ -240,17 +248,27 @@ class BulkAnalysisWorker(DashboardWorker):
                 else:
                     try:
                         document.output_path.parent.mkdir(parents=True, exist_ok=True)
-                        document.output_path.write_text(summary, encoding="utf-8")
+                        written_at = datetime.now(timezone.utc)
+                        metadata = self._build_summary_metadata(
+                            document,
+                            provider_config,
+                            prompt_hash,
+                            run_details,
+                            created_at=written_at,
+                        )
+                        updated = apply_frontmatter(summary, metadata, merge_existing=True)
+                        document.output_path.write_text(updated, encoding="utf-8")
                     except Exception as exc:  # noqa: BLE001 - propagate via signal
                         failures += 1
                         self.logger.exception("%s write failed %s", self.job_tag, document.output_path)
                         self.file_failed.emit(document.relative_path, str(exc))
                     else:
                         successes += 1
+                        ran_timestamp = written_at.isoformat()
                         entries[document.relative_path] = {
                             "source_mtime": round(source_mtime, 6),
                             "prompt_hash": prompt_hash,
-                            "ran_at": datetime.now(timezone.utc).isoformat(),
+                            "ran_at": ran_timestamp,
                         }
 
                 progress_count = successes + failures + skipped
@@ -295,7 +313,7 @@ class BulkAnalysisWorker(DashboardWorker):
         bundle: PromptBundle,
         system_prompt: str,
         document: BulkAnalysisDocument,
-    ) -> str:
+    ) -> tuple[str, Dict[str, object]]:
         if self.is_cancelled():
             raise BulkAnalysisCancelled
 
@@ -319,6 +337,12 @@ class BulkAnalysisWorker(DashboardWorker):
                 provider_config.model,
             )
 
+        run_details: Dict[str, object] = {
+            "token_count": token_count,
+            "max_tokens": max_tokens,
+            "chunking": bool(needs_chunking),
+        }
+
         self.log_message.emit(
             f"Processing {document.relative_path} ({token_count} tokens, "
             f"chunking={'yes' if needs_chunking else 'no'})"
@@ -332,7 +356,8 @@ class BulkAnalysisWorker(DashboardWorker):
                 document.relative_path,
                 content,
             )
-            return self._invoke_provider(provider, provider_config, prompt, system_prompt)
+            run_details["chunk_count"] = 1
+            return self._invoke_provider(provider, provider_config, prompt, system_prompt), run_details
 
         chunks = generate_chunks(content, max_tokens)
         if not chunks:
@@ -342,10 +367,13 @@ class BulkAnalysisWorker(DashboardWorker):
                 document.relative_path,
                 content,
             )
-            return self._invoke_provider(provider, provider_config, prompt, system_prompt)
+            run_details["chunk_count"] = 1
+            run_details["chunking"] = False
+            return self._invoke_provider(provider, provider_config, prompt, system_prompt), run_details
 
         chunk_summaries: List[str] = []
         total_chunks = len(chunks)
+        run_details["chunk_count"] = total_chunks
         for idx, chunk in enumerate(chunks, start=1):
             if self.is_cancelled():
                 raise BulkAnalysisCancelled
@@ -370,7 +398,7 @@ class BulkAnalysisWorker(DashboardWorker):
             document_name=document.relative_path,
             metadata=self._metadata,
         )
-        return self._invoke_provider(provider, provider_config, combine_prompt, system_prompt)
+        return self._invoke_provider(provider, provider_config, combine_prompt, system_prompt), run_details
 
     def _invoke_provider(
         self,
@@ -429,3 +457,73 @@ class BulkAnalysisWorker(DashboardWorker):
                 "Check API keys and model configuration in Settings."
             )
         return provider
+
+    def _build_summary_metadata(
+        self,
+        document: BulkAnalysisDocument,
+        provider_config: ProviderConfig,
+        prompt_hash: str,
+        run_details: Dict[str, object],
+        *,
+        created_at: datetime,
+    ) -> Dict[str, object]:
+        project_path = infer_project_path(document.output_path)
+        sources = [
+            SourceReference(
+                path=document.source_path,
+                relative=document.relative_path,
+                kind=(document.source_path.suffix.lstrip(".") or "file"),
+                role="converted-document",
+                checksum=compute_file_checksum(document.source_path),
+            )
+        ]
+        prompts = self._prompt_references()
+        extra: Dict[str, object] = {
+            "group_id": self._group.group_id,
+            "group_name": self._group.name,
+            "group_operation": self._group.operation,
+            "prompt_hash": prompt_hash,
+            "provider_id": provider_config.provider_id,
+            "model": provider_config.model,
+        }
+        extra.update(run_details)
+        return build_document_metadata(
+            project_path=project_path,
+            generator="bulk_analysis_worker",
+            created_at=created_at,
+            sources=sources,
+            prompts=prompts,
+            extra=extra,
+        )
+
+    def _prompt_references(self) -> List[PromptReference]:
+        references: List[PromptReference] = []
+        system_path = (self._group.system_prompt_path or "").strip()
+        if system_path:
+            references.append(
+                PromptReference(
+                    path=self._resolve_prompt_path(system_path),
+                    role="system",
+                )
+            )
+        else:
+            references.append(PromptReference(identifier="document_analysis_system_prompt", role="system"))
+
+        user_path = (self._group.user_prompt_path or "").strip()
+        if user_path:
+            references.append(
+                PromptReference(
+                    path=self._resolve_prompt_path(user_path),
+                    role="user",
+                )
+            )
+        else:
+            references.append(PromptReference(identifier="document_summary_prompt", role="user"))
+
+        return [ref for ref in references if ref.to_dict()]
+
+    def _resolve_prompt_path(self, prompt_path: str) -> Path:
+        candidate = Path(prompt_path)
+        if candidate.is_absolute():
+            return candidate
+        return (self._project_dir / candidate).resolve()

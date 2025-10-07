@@ -130,7 +130,12 @@ class HighlightWorker(DashboardWorker):
             raise RuntimeError("Highlight extraction returned no result")
 
         if collection.is_empty():
-            save_placeholder_markdown(job.highlight_output, processed_at=datetime.now(timezone.utc))
+            save_placeholder_markdown(
+                job.highlight_output,
+                processed_at=datetime.now(timezone.utc),
+                source_pdf=job.source_pdf,
+                source_relative=job.pdf_relative,
+            )
             return collection
 
         save_highlights_markdown(

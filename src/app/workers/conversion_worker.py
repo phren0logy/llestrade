@@ -1,20 +1,26 @@
 """Background worker for document conversion jobs.
 
-Adds YAML front-matter and page markers to PDF/DOCX conversions:
-- YAML keys: source_path, source_rel, source_format, source_mtime, page_count (PDFs), converted
+Adds standardised YAML front matter and page markers to PDF/DOCX conversions:
+- Front matter describes project context, source documents, converter details, and page counts.
 - Page markers for PDFs are emitted as HTML comments:
   <!--- <project_rel_source>.pdf#page=N --->
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 import re
-from datetime import datetime
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 from PySide6.QtCore import Signal
 
+from src.common.markdown import (
+    SourceReference,
+    apply_frontmatter,
+    build_document_metadata,
+    compute_file_checksum,
+)
 from src.core.file_utils import (
     extract_text_from_pdf,
     process_docx_to_markdown,
@@ -111,12 +117,15 @@ class ConversionWorker(DashboardWorker):
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.warning("Failed to read DOCX conversion for metadata injection: %s", exc)
             return
-        header = self._yaml_header(job, source_format="docx", pages_detected=None, pages_pdf=None)
-        if not content.startswith("---\n"):
-            content = header + content
-        else:
-            content = header + content  # Prepend regardless to ensure required keys exist
-        final_path.write_text(content, encoding="utf-8")
+        metadata = self._conversion_metadata(
+            job,
+            source_format="docx",
+            pages_detected=None,
+            pages_pdf=None,
+            converter="docx-pandoc",
+        )
+        updated = apply_frontmatter(content, metadata, merge_existing=True)
+        final_path.write_text(updated, encoding="utf-8")
 
     def _convert_pdf_locally(self, job: ConversionJob) -> None:
         job.destination_path.parent.mkdir(parents=True, exist_ok=True)
@@ -137,10 +146,16 @@ class ConversionWorker(DashboardWorker):
             pages_pdf = len(fitz.open(job.source_path))
         except Exception:
             pages_pdf = None
-        header = self._yaml_header(job, source_format="pdf", pages_detected=pages_detected or None, pages_pdf=pages_pdf)
+        metadata = self._conversion_metadata(
+            job,
+            source_format="pdf",
+            pages_detected=pages_detected or None,
+            pages_pdf=pages_pdf,
+            converter="pdf-local",
+        )
         self._warn_if_page_mismatch(job, pages_detected, pages_pdf)
-        content = header + content
-        write_file_content(str(job.destination_path), content)
+        updated = apply_frontmatter(content, metadata, merge_existing=True)
+        write_file_content(str(job.destination_path), updated)
 
     def _convert_pdf_with_azure(self, job: ConversionJob) -> None:
         endpoint, key = self._azure_credentials()
@@ -180,8 +195,16 @@ class ConversionWorker(DashboardWorker):
             pages_pdf = len(fitz.open(job.source_path))
         except Exception:
             pages_pdf = None
-        header = self._yaml_header(job, source_format="pdf", pages_detected=pages_detected or None, pages_pdf=pages_pdf)
-        final_path.write_text(header + content_marked, encoding="utf-8")
+        converter_tag = f"pdf-{self._helper_id.replace('_', '-')}"
+        metadata = self._conversion_metadata(
+            job,
+            source_format="pdf",
+            pages_detected=pages_detected or None,
+            pages_pdf=pages_pdf,
+            converter=converter_tag,
+        )
+        updated = apply_frontmatter(content_marked, metadata, merge_existing=True)
+        final_path.write_text(updated, encoding="utf-8")
         self._warn_if_page_mismatch(job, pages_detected, pages_pdf)
 
         if json_path:
@@ -239,49 +262,72 @@ class ConversionWorker(DashboardWorker):
     # Metadata helpers
     # ------------------------------------------------------------------
     def _project_relative(self, job: ConversionJob) -> str:
-        """Return project-relative path to the source file if possible, else a safe relpath.
+        """Return project-relative path to the source file for page markers."""
+        _, relative = self._project_context(job)
+        return relative
 
-        Also ensures that PDFs retain their original extension in the path used for page markers.
-        """
+    def _project_context(self, job: ConversionJob) -> tuple[Path | None, str]:
+        """Return project directory (if resolved) and project-relative source path."""
         dest = job.destination_path.resolve()
         parts = dest.parts
         try:
             idx = parts.index("converted_documents")
-            project_dir = Path(*parts[:idx])
-            try:
-                rel = job.source_path.resolve().relative_to(project_dir.resolve()).as_posix()
-                return rel
-            except Exception:
-                # Fallback to os.path.relpath with potential .. segments
-                import os as _os
-                rel = _os.path.relpath(job.source_path.resolve(), project_dir.resolve())
-                return Path(rel).as_posix()
         except ValueError:
-            return job.source_path.name
+            return None, job.source_path.name
 
-    def _yaml_header(self, job: ConversionJob, *, source_format: str, pages_detected: int | None, pages_pdf: int | None) -> str:
-        src_abs = job.source_path.resolve().as_posix()
-        src_rel = self._project_relative(job)
+        project_dir = Path(*parts[:idx])
+        project_resolved = project_dir.resolve()
+        source_resolved = job.source_path.resolve()
         try:
-            mtime = datetime.fromtimestamp(int(job.source_path.stat().st_mtime)).isoformat()
+            rel = source_resolved.relative_to(project_resolved).as_posix()
         except Exception:
-            mtime = ""
-        converted_ts = datetime.now().isoformat()
-        # Assemble YAML
-        lines = [
-            "---",
-            f"source_path: {src_abs}",
-            f"source_rel: {src_rel}",
-            f"source_format: {source_format}",
-            f"source_mtime: {mtime}",
-        ]
-        if pages_detected is not None:
-            lines.append(f"pages_detected: {pages_detected}")
-        if pages_pdf is not None:
-            lines.append(f"pages_pdf: {pages_pdf}")
-        lines.append(f"converted: {converted_ts}")
-        lines.append("---\n\n")
-        return "\n".join(lines)
+            # Fallback to os.path.relpath with potential .. segments
+            import os as _os
+
+            rel = Path(_os.path.relpath(source_resolved, project_resolved)).as_posix()
+        return project_dir, rel
+
+    def _conversion_metadata(
+        self,
+        job: ConversionJob,
+        *,
+        source_format: str,
+        pages_detected: int | None,
+        pages_pdf: int | None,
+        converter: str,
+    ) -> Dict[str, object]:
+        project_dir, source_rel = self._project_context(job)
+        checksum = compute_file_checksum(job.source_path)
+        try:
+            mtime_int = int(job.source_path.stat().st_mtime)
+        except Exception:
+            mtime = None
+        else:
+            mtime = datetime.fromtimestamp(mtime_int, timezone.utc).isoformat()
+
+        extra: Dict[str, object] = {
+            "source_format": source_format,
+            "source_mtime": mtime,
+            "pages_detected": pages_detected,
+            "pages_pdf": pages_pdf,
+            "converter": converter,
+        }
+
+        metadata = build_document_metadata(
+            project_path=project_dir,
+            generator="conversion_worker",
+            sources=[
+                SourceReference(
+                    path=job.source_path,
+                    relative=source_rel,
+                    kind=source_format,
+                    role="primary",
+                    checksum=checksum,
+                )
+            ],
+            extra=extra,
+        )
+        return metadata
 
     def _insert_azure_page_markers(self, markdown: str, source_rel: str) -> tuple[str, int]:
         """Attempt to insert page markers into Azure DI Markdown by parsing headings.
