@@ -931,24 +931,44 @@ class ProjectWorkspace(QWidget):
         self._block_source_tree_signal = False
 
         all_directories = {self._normalise_relative_path(entry) for entry in self._iter_directories(root_path)}
+        known_set = {
+            self._normalise_relative_path(entry)
+            for entry in (self._project_manager.source_state.known_folders or [])
+        }
         if not acknowledged_set and all_directories:
             acknowledged_set = set(all_directories)
-            self._project_manager.source_state.acknowledged_folders = sorted(acknowledged_set)
-            self._project_manager._write_sources_state()
-        new_directories = self._compute_new_directories(all_directories, selected_set, acknowledged_set)
+            initial_ack = sorted(acknowledged_set)
+            if initial_ack != (self._project_manager.source_state.acknowledged_folders or []):
+                self._project_manager.update_source_state(
+                    acknowledged_folders=initial_ack,
+                )
+
+        new_directories = sorted(
+            path for path in all_directories
+            if path and path not in known_set
+        )
         for relative in new_directories:
             self._mark_directory_as_new(relative)
         if new_directories:
             self._prompt_for_new_directories(new_directories)
 
-        missing_directories = sorted(
-            {
-                path for path in selected_set
-                if path and path not in all_directories
-            }
-        )
+        removed_directories = {
+            path for path in known_set
+            if path and path not in all_directories
+        }
+        selected_missing = {
+            path for path in selected_set
+            if path and path not in all_directories
+        }
+        missing_directories = sorted(removed_directories | selected_missing)
         if missing_directories:
             self._handle_missing_directories(missing_directories)
+
+        known_snapshot = sorted(all_directories)
+        if known_snapshot != (self._project_manager.source_state.known_folders or []):
+            self._project_manager.update_source_state(
+                known_folders=known_snapshot,
+            )
 
         if self._feature_flags.bulk_analysis_groups_enabled:
             self._populate_group_source_tree()

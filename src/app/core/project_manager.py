@@ -107,6 +107,7 @@ class SourceTreeState:
     root: str = ""  # relative path from project dir (allows .. for external roots)
     selected_folders: List[str] = field(default_factory=list)  # relative to root
     acknowledged_folders: List[str] = field(default_factory=list)  # folders the user has already reviewed
+    known_folders: List[str] = field(default_factory=list)  # directories discovered previously
     include_root_files: bool = False
     last_scan: Optional[str] = None
     warnings: List[str] = field(default_factory=list)
@@ -120,6 +121,7 @@ class SourceTreeState:
         payload = {**data}
         payload.setdefault("selected_folders", [])
         payload.setdefault("acknowledged_folders", [])
+        payload.setdefault("known_folders", [])
         payload.setdefault("warnings", [])
         return cls(**payload)
 
@@ -952,6 +954,7 @@ class ProjectManager(QObject):
         root: Optional[str] = None,
         selected_folders: Optional[List[str]] = None,
         acknowledged_folders: Optional[List[str]] = None,
+        known_folders: Optional[List[str]] = None,
         include_root_files: Optional[bool] = None,
         warnings: Optional[List[str]] = None,
         last_scan: Optional[str] = None,
@@ -962,6 +965,8 @@ class ProjectManager(QObject):
             self.source_state.selected_folders = selected_folders
         if acknowledged_folders is not None:
             self.source_state.acknowledged_folders = acknowledged_folders
+        if known_folders is not None:
+            self.source_state.known_folders = known_folders
         if include_root_files is not None:
             self.source_state.include_root_files = include_root_files
         if warnings is not None:
