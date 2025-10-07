@@ -31,3 +31,8 @@ debug_summarization_*.log
 
 # pytest
 .pytest_cache/
+
+.crush/
+.uv_cache/
+.uv-cache/
+
