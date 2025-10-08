@@ -20,8 +20,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QTabWidget,
-    QTableWidget,
-    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -118,12 +116,7 @@ class ProjectWorkspace(QWidget):
         self._bulk_progress: Dict[str, tuple[int, int]] = {}
         self._bulk_failures: Dict[str, List[str]] = {}
         self._cancelling_groups: set[str] = set()
-        self._bulk_analysis_tab: QWidget | None = None
-        self._bulk_analysis_table: QTableWidget | None = None
-        self._bulk_analysis_empty_label: QLabel | None = None
-        self._bulk_analysis_info_label: QLabel | None = None
-        self._bulk_analysis_log: QTextEdit | None = None
-        self._group_source_tree: QTreeWidget | None = None
+        self._bulk_analysis_tab: BulkAnalysisTab | None = None
         self._bulk_controller: BulkAnalysisController | None = None
         self._missing_bulk_label: QLabel | None = None
         self._extract_highlights_button: QPushButton | None = None
@@ -506,12 +499,6 @@ class ProjectWorkspace(QWidget):
             on_open_latest_combined=self._open_latest_combined,
             on_delete_group=self._confirm_delete_group,
         )
-        # Maintain legacy attribute access for tests and existing callers.
-        self._bulk_analysis_table = tab.table
-        self._bulk_analysis_empty_label = tab.empty_label
-        self._bulk_analysis_info_label = tab.info_label
-        self._bulk_analysis_log = tab.log_text
-        self._group_source_tree = tab.group_tree
         return tab
 
     def set_project(self, project_manager: ProjectManager) -> None:
@@ -537,6 +524,14 @@ class ProjectWorkspace(QWidget):
 
     def project_manager(self) -> Optional[ProjectManager]:
         return self._project_manager
+
+    @property
+    def bulk_controller(self) -> BulkAnalysisController | None:
+        return self._bulk_controller
+
+    @property
+    def bulk_tab(self) -> BulkAnalysisTab | None:
+        return self._bulk_analysis_tab
 
     def shutdown(self) -> None:
         """Cancel background work before disposing of the workspace."""

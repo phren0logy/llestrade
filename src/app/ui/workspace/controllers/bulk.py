@@ -76,6 +76,11 @@ class BulkAnalysisController:
         self._tab.info_label.setText(self._info_message)
         self._tab.group_tree.clear()
 
+    @property
+    def tab(self) -> BulkAnalysisTab:
+        """Expose the underlying tab widget for testing or orchestration."""
+        return self._tab
+
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------

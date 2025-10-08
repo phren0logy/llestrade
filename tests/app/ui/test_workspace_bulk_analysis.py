@@ -98,8 +98,9 @@ def test_workspace_run_executes_worker_and_updates_ui(tmp_path: Path, qt_app: QA
     workspace.set_project(manager)
     QCoreApplication.processEvents()
 
-    table = workspace._bulk_analysis_table
-    assert table is not None
+    controller = workspace.bulk_controller
+    assert controller is not None
+    table = controller.tab.table
     assert table.rowCount() == 1
 
     action_widget = table.cellWidget(0, 4)
@@ -167,8 +168,9 @@ def test_workspace_cancel_updates_status_and_cleans_state(tmp_path: Path, qt_app
     workspace.set_project(manager)
     QCoreApplication.processEvents()
 
-    table = workspace._bulk_analysis_table
-    assert table is not None
+    controller = workspace.bulk_controller
+    assert controller is not None
+    table = controller.tab.table
     action_widget = table.cellWidget(0, 4)
     run_button = _find_button(action_widget, "Run Pending")
     run_button.click()
