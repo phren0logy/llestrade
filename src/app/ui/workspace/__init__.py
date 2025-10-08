@@ -2,6 +2,6 @@
 
 from .shell import WorkspaceShell
 from .documents_tab import DocumentsTab
+from .bulk_tab import BulkAnalysisTab
 
-__all__ = ["WorkspaceShell", "DocumentsTab"]
-
+__all__ = ["WorkspaceShell", "DocumentsTab", "BulkAnalysisTab"]
