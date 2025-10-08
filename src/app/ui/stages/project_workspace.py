@@ -212,7 +212,7 @@ class ProjectWorkspace(QWidget):
 
     def _build_documents_tab(self) -> QWidget:
         tab = DocumentsTab(parent=self)
-        self._documents_controller = DocumentsController(self, tab)
+        self._documents_controller = DocumentsController(self, tab, self._start_conversion)
         self._source_root_label = tab.source_root_label
         self._counts_label = tab.counts_label
         self._last_scan_label = tab.last_scan_label

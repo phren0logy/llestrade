@@ -6,7 +6,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Set, TYPE_CHECKING
+from typing import Callable, Dict, List, Optional, Sequence, Set, TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
@@ -33,9 +33,15 @@ if TYPE_CHECKING:  # pragma: no cover - type checking only
 class DocumentsController:
     """Coordinate state and interactions for the documents tab."""
 
-    def __init__(self, workspace: "ProjectWorkspace", tab: DocumentsTab) -> None:
+    def __init__(
+        self,
+        workspace: "ProjectWorkspace",
+        tab: DocumentsTab,
+        run_conversion: Callable[[List[ConversionJob]], None],
+    ) -> None:
         self._workspace = workspace
         self._tab = tab
+        self._run_conversion = run_conversion
         self._project_manager: Optional[ProjectManager] = None
         self._source_tree_nodes: Dict[str, QTreeWidgetItem] = {}
         self._block_source_tree_signal = False
@@ -119,7 +125,7 @@ class DocumentsController:
             if reply != QMessageBox.Yes:
                 return
 
-        workspace._start_conversion(jobs)
+        self._run_conversion(jobs)
 
     def collect_conversion_jobs(
         self,
