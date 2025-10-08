@@ -25,12 +25,6 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
     QDialog,
-    QComboBox,
-    QGroupBox,
-    QLineEdit,
-    QProgressBar,
-    QSpinBox,
-    QTextEdit,
 )
 from PySide6.QtWidgets import QHeaderView
 
@@ -40,49 +34,31 @@ from src.app.core.file_tracker import WorkspaceMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.bulk_paths import iter_map_outputs
-from src.app.core.report_inputs import (
-    REPORT_CATEGORY_BULK_COMBINED,
-    REPORT_CATEGORY_BULK_MAP,
-    REPORT_CATEGORY_CONVERTED,
-    REPORT_CATEGORY_HIGHLIGHT_COLOR,
-    REPORT_CATEGORY_HIGHLIGHT_DOCUMENT,
-    ReportInputDescriptor,
-    category_display_name,
-)
-from src.app.core.refinement_prompt import (
-    read_generation_prompt,
-    read_refinement_prompt,
-    validate_generation_prompt,
-    validate_refinement_prompt,
-)
-from src.app.core.report_template_sections import load_template_sections
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.bulk_analysis_group_dialog import BulkAnalysisGroupDialog
 from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
-from src.app.ui.workspace import BulkAnalysisTab, DocumentsTab
-from src.app.ui.workspace.controllers import BulkAnalysisController, DocumentsController
+from src.app.ui.workspace import BulkAnalysisTab, DocumentsTab, HighlightsTab, ReportsTab
+from src.app.ui.workspace.controllers import (
+    BulkAnalysisController,
+    DocumentsController,
+    HighlightsController,
+    ReportsController,
+)
 from src.app.ui.workspace.qt_flags import (
     ITEM_IS_ENABLED,
     ITEM_IS_TRISTATE,
     ITEM_IS_USER_CHECKABLE,
 )
+from src.app.ui.workspace.services import HighlightsService, ReportsService
 from src.app.workers import (
     BulkAnalysisWorker,
     BulkReduceWorker,
     ConversionWorker,
-    HighlightWorker,
-    ReportWorker,
     WorkerCoordinator,
     get_worker_pool,
 )
-from src.config.prompt_store import (
-    get_template_custom_dir,
-    get_bundled_dir,
-    get_custom_dir,
-    get_repo_prompts_dir,
-)
+from src.app.workers.highlight_worker import HighlightExtractionSummary
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
-from src.app.core.prompt_placeholders import format_prompt, placeholder_summary
 
 LOGGER = logging.getLogger(__name__)
 
@@ -119,44 +95,15 @@ class ProjectWorkspace(QWidget):
         self._bulk_analysis_tab: BulkAnalysisTab | None = None
         self._bulk_controller: BulkAnalysisController | None = None
         self._missing_bulk_label: QLabel | None = None
-        self._extract_highlights_button: QPushButton | None = None
-        self._highlight_running = False
-        self._highlight_total = 0
-        self._highlight_errors: List[str] = []
         self._missing_highlights_label: QLabel | None = None
-        self._highlights_tab: QWidget | None = None
-        self._highlight_counts_label: QLabel | None = None
-        self._highlight_last_run_label: QLabel | None = None
-        self._highlight_status_label: QLabel | None = None
-        self._highlight_tree: QTreeWidget | None = None
-        self._open_highlights_button: QPushButton | None = None
-        self._reports_tab: QWidget | None = None
-        self._report_inputs_tree: QTreeWidget | None = None
-        self._report_selected_inputs: Set[str] = set()
-        self._report_model_combo: QComboBox | None = None
-        self._report_custom_model_edit: QLineEdit | None = None
-        self._report_custom_model_label: QLabel | None = None
-        self._report_custom_context_spin: QSpinBox | None = None
-        self._report_custom_context_label: QLabel | None = None
-        self._report_generation_user_prompt_edit: QLineEdit | None = None
-        self._report_refinement_prompt_edit: QLineEdit | None = None
-        self._report_generate_button: QPushButton | None = None
-        self._report_progress_bar: QProgressBar | None = None
-        self._report_log: QTextEdit | None = None
-        self._report_template_edit: QLineEdit | None = None
-        self._report_transcript_edit: QLineEdit | None = None
-        self._report_generation_system_prompt_edit: QLineEdit | None = None
-        self._report_refinement_system_prompt_edit: QLineEdit | None = None
-        self._report_history_list: QTreeWidget | None = None
-        self._report_open_draft_button: QPushButton | None = None
-        self._report_open_refined_button: QPushButton | None = None
-        self._report_open_reasoning_button: QPushButton | None = None
-        self._report_open_manifest_button: QPushButton | None = None
-        self._report_open_inputs_button: QPushButton | None = None
-        self._report_last_result: Optional[Dict[str, str]] = None
-        self._report_running = False
+        self._highlights_tab: HighlightsTab | None = None
+        self._highlights_controller: HighlightsController | None = None
+        self._reports_tab: ReportsTab | None = None
+        self._reports_controller: ReportsController | None = None
 
         self._documents_controller: DocumentsController | None = None
+        self._highlight_service = HighlightsService(self._workers)
+        self._reports_service = ReportsService(self._workers)
         self._build_ui()
         if project_manager:
             self.set_project(project_manager)
@@ -220,269 +167,20 @@ class ProjectWorkspace(QWidget):
         self._source_tree.itemChanged.connect(self._on_source_item_changed)
         return tab
 
-    def _wrap_line_edit_with_button(self, line_edit: QLineEdit, button: QPushButton) -> QWidget:
-        container = QWidget()
-        layout = QHBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.addWidget(line_edit)
-        layout.addWidget(button)
-        return container
-
-    def _build_highlights_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(8)
-
-        header_layout = QHBoxLayout()
-        header_layout.setContentsMargins(0, 0, 0, 0)
-        self._highlight_counts_label = QLabel("Highlights extracted: 0 | Pending: 0")
-        header_layout.addWidget(self._highlight_counts_label)
-        header_layout.addStretch()
-        self._highlight_last_run_label = QLabel("Last run: —")
-        self._highlight_last_run_label.setStyleSheet("color: #666;")
-        header_layout.addWidget(self._highlight_last_run_label)
-        layout.addLayout(header_layout)
-
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 0, 0, 0)
-        self._extract_highlights_button = QPushButton("Extract Highlights")
-        self._extract_highlights_button.setEnabled(False)
-        self._extract_highlights_button.clicked.connect(self._trigger_highlight_extraction)
-        button_row.addWidget(self._extract_highlights_button)
-
-        self._open_highlights_button = QPushButton("Open Highlights Folder")
-        self._open_highlights_button.setEnabled(False)
-        self._open_highlights_button.clicked.connect(self._open_highlights_folder)
-        button_row.addWidget(self._open_highlights_button)
-
-        button_row.addStretch()
-        layout.addLayout(button_row)
-
-        self._highlight_status_label = QLabel("Highlights have not been extracted yet.")
-        self._highlight_status_label.setWordWrap(True)
-        self._highlight_status_label.setStyleSheet("color: #555;")
-        layout.addWidget(self._highlight_status_label)
-
-        self._highlight_tree = QTreeWidget()
-        self._highlight_tree.setColumnCount(2)
-        self._highlight_tree.setHeaderLabels(["Category", "Relative Path"])
-        self._highlight_tree.setHeaderHidden(False)
-        self._highlight_tree.setIndentation(18)
-        self._highlight_tree.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._highlight_tree.itemDoubleClicked.connect(self._open_highlight_item)
-        layout.addWidget(self._highlight_tree)
-
-        return widget
-
-    def _build_reports_tab(self) -> QWidget:
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setSpacing(10)
-
-        top_layout = QHBoxLayout()
-        top_layout.setSpacing(12)
-
-        inputs_group = QGroupBox("Select Inputs")
-        inputs_layout = QVBoxLayout(inputs_group)
-        self._report_inputs_tree = QTreeWidget()
-        self._report_inputs_tree.setColumnCount(2)
-        self._report_inputs_tree.setHeaderLabels(["Input", "Project Path"])
-        self._report_inputs_tree.setUniformRowHeights(True)
-        self._report_inputs_tree.setSelectionMode(QAbstractItemView.NoSelection)
-        self._report_inputs_tree.itemChanged.connect(self._on_report_input_changed)
-        inputs_layout.addWidget(self._report_inputs_tree)
-        top_layout.addWidget(inputs_group, 1)
-
-        config_group = QGroupBox("Configuration")
-        config_layout = QVBoxLayout(config_group)
-        config_layout.setSpacing(6)
-
-        model_row = QHBoxLayout()
-        model_row.setContentsMargins(0, 0, 0, 0)
-        model_row.addWidget(QLabel("Model:"))
-        self._report_model_combo = self._build_report_model_combo()
-        self._report_model_combo.currentIndexChanged.connect(self._on_report_model_changed)
-        model_row.addWidget(self._report_model_combo)
-        config_layout.addLayout(model_row)
-
-        self._report_custom_model_label = QLabel("Custom model id:")
-        self._report_custom_model_edit = QLineEdit()
-        custom_model_row = QHBoxLayout()
-        custom_model_row.setContentsMargins(0, 0, 0, 0)
-        custom_model_row.addWidget(self._report_custom_model_label)
-        custom_model_row.addWidget(self._report_custom_model_edit)
-        config_layout.addLayout(custom_model_row)
-
-        self._report_custom_context_label = QLabel("Context window:")
-        self._report_custom_context_spin = QSpinBox()
-        self._report_custom_context_spin.setRange(10_000, 400_000)
-        self._report_custom_context_spin.setSingleStep(1_000)
-        context_row = QHBoxLayout()
-        context_row.setContentsMargins(0, 0, 0, 0)
-        context_row.addWidget(self._report_custom_context_label)
-        context_row.addWidget(self._report_custom_context_spin)
-        context_row.addWidget(QLabel("tokens"))
-        config_layout.addLayout(context_row)
-
-        template_label = QLabel("Template (required):")
-        config_layout.addWidget(template_label)
-        self._report_template_edit = QLineEdit()
-        template_browse = QPushButton("Browse…")
-        template_browse.clicked.connect(self._browse_report_template)
-        config_layout.addWidget(
-            self._wrap_line_edit_with_button(self._report_template_edit, template_browse)
+    def _build_highlights_tab(self) -> HighlightsTab:
+        tab = HighlightsTab(parent=self)
+        self._highlights_controller = HighlightsController(
+            self,
+            tab,
+            on_extract_requested=self._handle_highlight_extract_requested,
+            counts_label=self._counts_label,
         )
+        return tab
 
-        transcript_label = QLabel("Transcript (optional):")
-        config_layout.addWidget(transcript_label)
-        self._report_transcript_edit = QLineEdit()
-        transcript_browse = QPushButton("Browse…")
-        transcript_browse.clicked.connect(self._browse_report_transcript)
-        config_layout.addWidget(
-            self._wrap_line_edit_with_button(self._report_transcript_edit, transcript_browse)
-        )
-
-        generation_user_label = QLabel("Generation user prompt:")
-        config_layout.addWidget(generation_user_label)
-        self._report_generation_user_prompt_edit = QLineEdit()
-        self._report_generation_user_prompt_edit.setToolTip(
-            placeholder_summary("report_generation_user_prompt")
-        )
-        self._report_generation_user_prompt_edit.textChanged.connect(self._update_report_controls)
-        generation_user_browse = QPushButton("Browse…")
-        generation_user_browse.clicked.connect(self._browse_generation_user_prompt)
-        config_layout.addWidget(
-            self._wrap_line_edit_with_button(
-                self._report_generation_user_prompt_edit,
-                generation_user_browse,
-            )
-        )
-        generation_preview_button = QPushButton("Preview generation prompt")
-        generation_preview_button.clicked.connect(self._preview_generation_prompt)
-        config_layout.addWidget(generation_preview_button)
-
-        generation_system_label = QLabel("Generation system prompt:")
-        config_layout.addWidget(generation_system_label)
-        self._report_generation_system_prompt_edit = QLineEdit()
-        self._report_generation_system_prompt_edit.setToolTip(
-            placeholder_summary("report_generation_system_prompt")
-        )
-        self._report_generation_system_prompt_edit.textChanged.connect(self._update_report_controls)
-        gen_system_browse = QPushButton("Browse…")
-        gen_system_browse.clicked.connect(self._browse_generation_system_prompt)
-        config_layout.addWidget(
-            self._wrap_line_edit_with_button(
-                self._report_generation_system_prompt_edit,
-                gen_system_browse,
-            )
-        )
-
-        refinement_user_label = QLabel("Refinement user prompt:")
-        config_layout.addWidget(refinement_user_label)
-        self._report_refinement_prompt_edit = QLineEdit()
-        self._report_refinement_prompt_edit.setToolTip(
-            placeholder_summary("refinement_prompt")
-        )
-        self._report_refinement_prompt_edit.textChanged.connect(self._update_report_controls)
-        refinement_browse = QPushButton("Browse…")
-        refinement_browse.clicked.connect(self._browse_refinement_prompt)
-        config_layout.addWidget(
-            self._wrap_line_edit_with_button(self._report_refinement_prompt_edit, refinement_browse)
-        )
-        refinement_preview_button = QPushButton("Preview refinement prompt")
-        refinement_preview_button.clicked.connect(self._preview_refinement_prompt)
-        config_layout.addWidget(refinement_preview_button)
-
-        refinement_system_label = QLabel("Refinement system prompt:")
-        config_layout.addWidget(refinement_system_label)
-        self._report_refinement_system_prompt_edit = QLineEdit()
-        self._report_refinement_system_prompt_edit.setToolTip(
-            placeholder_summary("report_refinement_system_prompt")
-        )
-        self._report_refinement_system_prompt_edit.textChanged.connect(self._update_report_controls)
-        ref_system_browse = QPushButton("Browse…")
-        ref_system_browse.clicked.connect(self._browse_refinement_system_prompt)
-        config_layout.addWidget(
-            self._wrap_line_edit_with_button(
-                self._report_refinement_system_prompt_edit,
-                ref_system_browse,
-            )
-        )
-
-        if self._report_generation_user_prompt_edit and not self._report_generation_user_prompt_edit.text().strip():
-            default_generation_user = self._default_generation_user_prompt_path()
-            if default_generation_user:
-                self._report_generation_user_prompt_edit.setText(default_generation_user)
-        if self._report_generation_system_prompt_edit and not self._report_generation_system_prompt_edit.text().strip():
-            default_generation_system = self._default_generation_system_prompt_path()
-            if default_generation_system:
-                self._report_generation_system_prompt_edit.setText(default_generation_system)
-        if self._report_refinement_prompt_edit and not self._report_refinement_prompt_edit.text().strip():
-            default_refinement = self._default_refinement_user_prompt_path()
-            if default_refinement:
-                self._report_refinement_prompt_edit.setText(default_refinement)
-        if self._report_refinement_system_prompt_edit and not self._report_refinement_system_prompt_edit.text().strip():
-            default_refinement_system = self._default_refinement_system_prompt_path()
-            if default_refinement_system:
-                self._report_refinement_system_prompt_edit.setText(default_refinement_system)
-
-
-        top_layout.addWidget(config_group, 1)
-        layout.addLayout(top_layout)
-
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 0, 0, 0)
-        self._report_generate_button = QPushButton("Generate & Refine Report")
-        self._report_generate_button.clicked.connect(self._start_report_job)
-        button_row.addWidget(self._report_generate_button)
-        open_reports = QPushButton("Open Reports Folder")
-        open_reports.clicked.connect(self._open_reports_folder)
-        button_row.addWidget(open_reports)
-        button_row.addStretch()
-        layout.addLayout(button_row)
-
-        self._report_progress_bar = QProgressBar()
-        self._report_progress_bar.setRange(0, 100)
-        self._report_progress_bar.setValue(0)
-        layout.addWidget(self._report_progress_bar)
-
-        self._report_log = QTextEdit()
-        self._report_log.setReadOnly(True)
-        self._report_log.setMinimumHeight(140)
-        layout.addWidget(self._report_log)
-
-        history_group = QGroupBox("Recent Reports")
-        history_layout = QVBoxLayout(history_group)
-        self._report_history_list = QTreeWidget()
-        self._report_history_list.setColumnCount(3)
-        self._report_history_list.setHeaderLabels(["Generated", "Model", "Outputs"])
-        self._report_history_list.itemSelectionChanged.connect(self._on_report_history_selected)
-        history_layout.addWidget(self._report_history_list)
-
-        history_buttons = QHBoxLayout()
-        self._report_open_draft_button = QPushButton("Open Draft")
-        self._report_open_draft_button.clicked.connect(lambda: self._open_report_history_file("draft"))
-        history_buttons.addWidget(self._report_open_draft_button)
-        self._report_open_refined_button = QPushButton("Open Refined")
-        self._report_open_refined_button.clicked.connect(lambda: self._open_report_history_file("refined"))
-        history_buttons.addWidget(self._report_open_refined_button)
-        self._report_open_reasoning_button = QPushButton("Open Reasoning")
-        self._report_open_reasoning_button.clicked.connect(lambda: self._open_report_history_file("reasoning"))
-        history_buttons.addWidget(self._report_open_reasoning_button)
-        self._report_open_manifest_button = QPushButton("Open Manifest")
-        self._report_open_manifest_button.clicked.connect(lambda: self._open_report_history_file("manifest"))
-        history_buttons.addWidget(self._report_open_manifest_button)
-        self._report_open_inputs_button = QPushButton("Open Inputs")
-        self._report_open_inputs_button.clicked.connect(lambda: self._open_report_history_file("inputs"))
-        history_buttons.addWidget(self._report_open_inputs_button)
-        history_buttons.addStretch()
-        history_layout.addLayout(history_buttons)
-
-        layout.addWidget(history_group)
-
-        self._on_report_model_changed()
-        self._update_report_history_buttons()
-        return widget
+    def _build_reports_tab(self) -> ReportsTab:
+        tab = ReportsTab(parent=self)
+        self._reports_controller = ReportsController(self, tab, service=self._reports_service)
+        return tab
 
     def _build_bulk_analysis_tab(self) -> QWidget:
         tab = BulkAnalysisTab(parent=self)
@@ -507,6 +205,11 @@ class ProjectWorkspace(QWidget):
         self._documents_controller.set_project(project_manager)
         if self._bulk_controller:
             self._bulk_controller.set_project(project_manager)
+        if self._highlights_controller:
+            self._highlights_controller.set_project(project_manager)
+            self._highlights_controller.set_conversion_running(self._conversion_running)
+        if self._reports_controller:
+            self._reports_controller.set_project(project_manager)
         self._running_groups.clear()
         self._workers.clear()
         self._workspace_metrics = None
@@ -517,9 +220,7 @@ class ProjectWorkspace(QWidget):
         )
         if self._edit_metadata_button:
             self._edit_metadata_button.setEnabled(True)
-        self._update_highlight_button_state()
         self._update_metadata_label()
-        self._load_report_preferences()
         self.refresh()
 
     def project_manager(self) -> Optional[ProjectManager]:
@@ -533,6 +234,10 @@ class ProjectWorkspace(QWidget):
     def bulk_tab(self) -> BulkAnalysisTab | None:
         return self._bulk_analysis_tab
 
+    @property
+    def reports_controller(self) -> ReportsController | None:
+        return self._reports_controller
+
     def shutdown(self) -> None:
         """Cancel background work before disposing of the workspace."""
 
@@ -540,10 +245,13 @@ class ProjectWorkspace(QWidget):
         self._running_groups.clear()
         self._bulk_progress.clear()
         self._bulk_failures.clear()
-        self._highlight_errors.clear()
         self._documents_controller.shutdown()
         if self._bulk_controller:
             self._bulk_controller.set_project(None)
+        if self._highlights_controller:
+            self._highlights_controller.set_project(None)
+        if self._reports_controller:
+            self._reports_controller.shutdown()
 
     def refresh(self) -> None:
         if self._documents_controller:
@@ -554,9 +262,8 @@ class ProjectWorkspace(QWidget):
             self._populate_source_tree()
             self._update_source_root_label()
             self._refresh_file_tracker()
-        self._refresh_reports_tab()
-        self._refresh_highlights_tab()
-        self._update_highlight_button_state()
+        self._refresh_reports_view()
+        self._refresh_highlights_view()
         if self._feature_flags.bulk_analysis_groups_enabled:
             self._prune_running_groups()
             self._refresh_bulk_analysis_groups()
@@ -652,6 +359,66 @@ class ProjectWorkspace(QWidget):
             )
 
         self._update_last_scan_label()
+
+    def _refresh_highlights_view(self) -> None:
+        if not self._highlights_controller:
+            return
+        highlight_state = self._project_manager.highlight_state if self._project_manager else None
+        self._highlights_controller.set_conversion_running(self._conversion_running)
+        self._highlights_controller.refresh(
+            metrics=self._workspace_metrics,
+            highlight_state=highlight_state,
+        )
+
+    def _refresh_reports_view(self) -> None:
+        if self._reports_controller:
+            self._reports_controller.refresh()
+
+    def _handle_highlight_extract_requested(self) -> None:
+        if not self._project_manager or not self._highlights_controller:
+            return
+        if self._highlight_service.is_running() or self._highlights_controller.is_running():
+            QMessageBox.information(
+                self,
+                "Highlights",
+                "Highlight extraction is already in progress.",
+            )
+            return
+
+        started = self._highlight_service.run(
+            project_manager=self._project_manager,
+            on_started=self._highlights_controller.begin_extraction,
+            on_progress=self._highlights_controller.update_progress,
+            on_failed=self._highlights_controller.record_failure,
+            on_finished=self._on_highlight_run_finished,
+        )
+        if not started:
+            QMessageBox.information(
+                self,
+                "Highlights",
+                "No converted PDFs are ready for highlight extraction.",
+            )
+
+    def _on_highlight_run_finished(
+        self,
+        summary: HighlightExtractionSummary | None,
+        successes: int,
+        failures: int,
+    ) -> None:
+        if self._highlights_controller:
+            self._highlights_controller.finish(summary=summary, failures=failures)
+
+        if summary and self._project_manager:
+            self._project_manager.record_highlight_run(
+                generated_at=summary.generated_at,
+                documents_processed=summary.documents_processed,
+                documents_with_highlights=summary.documents_with_highlights,
+                total_highlights=summary.total_highlights,
+                color_files_written=summary.color_files_written,
+            )
+
+        self._refresh_file_tracker()
+        self._refresh_highlights_view()
 
     # ------------------------------------------------------------------
     # Source tree helpers
@@ -778,17 +545,9 @@ class ProjectWorkspace(QWidget):
         if self._documents_controller:
             self._documents_controller.expand_to_item(item)
 
-    def _highlight_directory_item(self, relative: str) -> None:
-        if self._documents_controller:
-            self._documents_controller.highlight_directory_item(relative)
-
     def _handle_missing_directories(self, missing_dirs: Sequence[str]) -> None:
         if self._documents_controller:
             self._documents_controller.handle_missing_directories(missing_dirs)
-
-    def _cleanup_removed_directories(self, converted_root: Path, highlights_root: Path, colors_root: Path, missing: Sequence[str]) -> None:
-        if self._documents_controller:
-            self._documents_controller.cleanup_removed_directories(converted_root, highlights_root, colors_root, missing)
 
     def _on_source_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         if self._documents_controller:
@@ -897,8 +656,8 @@ class ProjectWorkspace(QWidget):
         self._conversion_errors: List[str] = []
         self._rescan_button.setEnabled(False)
         self._counts_label.setText(f"Converting documents (0/{self._conversion_total})…")
-        if self._extract_highlights_button:
-            self._extract_highlights_button.setEnabled(False)
+        if self._highlights_controller:
+            self._highlights_controller.set_conversion_running(True)
 
         self._inflight_sources.update(job.source_path for job in jobs)
 
@@ -912,8 +671,7 @@ class ProjectWorkspace(QWidget):
                 w, js, success, failed
             )
         )
-
-       
+        
         self._workers.start(self._conversion_key(), worker)
 
     def _on_conversion_progress(self, processed: int, total: int, relative_path: str) -> None:
@@ -946,9 +704,10 @@ class ProjectWorkspace(QWidget):
 
         self._conversion_running = False
         self._rescan_button.setEnabled(True)
-        self._update_highlight_button_state()
+        if self._highlights_controller:
+            self._highlights_controller.set_conversion_running(False)
         self._refresh_file_tracker()
-        self._refresh_highlights_tab()
+        self._refresh_highlights_view()
         if failures:
             error_text = "\n".join(self._conversion_errors) or "Unknown errors"
             QMessageBox.warning(
@@ -960,1336 +719,6 @@ class ProjectWorkspace(QWidget):
     # ------------------------------------------------------------------
     # Highlight extraction helpers
     # ------------------------------------------------------------------
-    def _open_highlights_folder(self) -> None:
-        if not self._project_manager or not self._project_manager.project_dir:
-            return
-        folder = self._project_manager.project_dir / "highlights"
-        folder.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
-
-    def _open_highlight_item(self, item: QTreeWidgetItem, column: int) -> None:  # noqa: ARG002
-        path = item.data(0, Qt.UserRole)
-        if not path:
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-
-    def _populate_highlight_tree(self) -> None:
-        if not self._highlight_tree:
-            return
-        tree = self._highlight_tree
-        tree.clear()
-        if not self._project_manager or not self._project_manager.project_dir:
-            return
-
-        project_dir = self._project_manager.project_dir
-        documents_root = project_dir / "highlights" / "documents"
-        colors_root = project_dir / "highlights" / "colors"
-
-        documents_item = QTreeWidgetItem(["Documents", ""])
-        documents_item.setExpanded(True)
-        if documents_root.exists():
-            for path in sorted(documents_root.rglob("*.highlights.md")):
-                relative = path.relative_to(documents_root).as_posix()
-                child = QTreeWidgetItem(["Document", relative])
-                child.setData(0, Qt.UserRole, str(path))
-                documents_item.addChild(child)
-        tree.addTopLevelItem(documents_item)
-
-        colors_item = QTreeWidgetItem(["Colors", ""])
-        colors_item.setExpanded(True)
-        if colors_root.exists():
-            for path in sorted(colors_root.glob("*.md")):
-                relative = path.relative_to(colors_root).as_posix()
-                child = QTreeWidgetItem(["Color", relative])
-                child.setData(0, Qt.UserRole, str(path))
-                colors_item.addChild(child)
-        tree.addTopLevelItem(colors_item)
-        tree.resizeColumnToContents(0)
-
-    def _refresh_highlights_tab(self) -> None:
-        if not self._highlights_tab:
-            return
-
-        if not self._project_manager:
-            if self._highlight_counts_label:
-                self._highlight_counts_label.setText("Highlights extracted: 0 | Pending: 0")
-            if self._highlight_last_run_label:
-                self._highlight_last_run_label.setText("Last run: —")
-            if self._highlight_status_label and not self._highlight_running:
-                self._highlight_status_label.setText("Highlights have not been extracted yet.")
-            if self._open_highlights_button:
-                self._open_highlights_button.setEnabled(False)
-            if self._highlight_tree:
-                self._highlight_tree.clear()
-            return
-
-        if self._open_highlights_button:
-            self._open_highlights_button.setEnabled(True)
-
-        metrics = None
-        try:
-            if self._workspace_metrics is None:
-                self._workspace_metrics = self._project_manager.get_workspace_metrics()
-            metrics = self._workspace_metrics.dashboard if self._workspace_metrics else None
-        except Exception:
-            metrics = None
-
-        if metrics and self._highlight_counts_label:
-            pdf_total = metrics.highlights_total + metrics.pending_highlights
-            message = f"Highlights extracted: {metrics.highlights_total} of {pdf_total}"
-            if metrics.pending_highlights:
-                message += f" (pending {metrics.pending_highlights})"
-        else:
-            message = "Highlights extracted: 0"
-        if self._highlight_counts_label:
-            self._highlight_counts_label.setText(message)
-
-        state = self._project_manager.highlight_state
-        last_run_text = "Last run: —"
-        if state.last_run_at:
-            try:
-                parsed = datetime.fromisoformat(state.last_run_at)
-                last_run_text = "Last run: " + parsed.astimezone().strftime("%Y-%m-%d %H:%M")
-            except ValueError:
-                last_run_text = f"Last run: {state.last_run_at}"
-        if self._highlight_last_run_label:
-            self._highlight_last_run_label.setText(last_run_text)
-
-        if self._highlight_status_label and not self._highlight_running:
-            if state.last_run_at:
-                details = (
-                    f"Last run captured {state.total_highlights} highlight(s) across "
-                    f"{state.documents_with_highlights} document(s). Color files: {state.color_files}."
-                )
-                self._highlight_status_label.setText(details)
-            else:
-                self._highlight_status_label.setText("Highlights have not been extracted yet.")
-
-        self._populate_highlight_tree()
-
-    def _update_highlight_button_state(self) -> None:
-        if not self._extract_highlights_button:
-            return
-        if not self._project_manager or self._highlight_running or self._conversion_running:
-            self._extract_highlights_button.setEnabled(False)
-            return
-        try:
-            jobs_available = bool(self._project_manager.build_highlight_jobs())
-        except Exception:
-            jobs_available = False
-        self._extract_highlights_button.setEnabled(jobs_available)
-
-    def _highlight_key(self) -> str:
-        return "highlights:run"
-
-    def _trigger_highlight_extraction(self) -> None:
-        if not self._project_manager:
-            return
-        if self._highlight_running:
-            QMessageBox.information(
-                self,
-                "Highlights",
-                "Highlight extraction is already in progress.",
-            )
-            return
-
-        jobs = self._project_manager.build_highlight_jobs()
-        if not jobs:
-            QMessageBox.information(
-                self,
-                "Highlights",
-                "No converted PDFs are ready for highlight extraction.",
-            )
-            return
-
-        self._start_highlight_worker(jobs)
-
-    def _start_highlight_worker(self, jobs) -> None:
-        self._highlight_running = True
-        self._highlight_total = len(jobs)
-        self._highlight_errors = []
-        self._counts_label.setText(f"Extracting highlights (0/{self._highlight_total})…")
-        if self._extract_highlights_button:
-            self._extract_highlights_button.setEnabled(False)
-        if self._highlight_status_label:
-            self._highlight_status_label.setText(
-                f"Extracting highlights (0/{self._highlight_total})…"
-            )
-        self._update_highlight_button_state()
-        worker = HighlightWorker(jobs)
-        worker.progress.connect(self._on_highlight_progress)
-        worker.file_failed.connect(self._on_highlight_failed)
-        worker.finished.connect(
-            lambda success, failed, w=worker: self._on_highlight_finished(w, success, failed)
-        )
-        self._workers.start(self._highlight_key(), worker)
-
-    def _on_highlight_progress(self, processed: int, total: int, relative_path: str) -> None:
-        self._counts_label.setText(
-            f"Extracting highlights ({processed}/{total})… {relative_path}"
-        )
-        if self._highlight_status_label:
-            self._highlight_status_label.setText(
-                f"Extracting highlights ({processed}/{total})… {relative_path}"
-            )
-
-    def _on_highlight_failed(self, source_path: str, error: str) -> None:
-        self._highlight_errors.append(f"{Path(source_path).name}: {error}")
-
-    def _on_highlight_finished(self, worker: HighlightWorker, successes: int, failures: int) -> None:
-        stored = self._workers.pop(self._highlight_key())
-        # Always attempt to delete the actual worker and any stored reference safely
-        if worker and isValid(worker):
-            worker.deleteLater()
-        if stored and stored is not worker and isValid(stored):
-            stored.deleteLater()
-
-        self._highlight_running = False
-        self._update_highlight_button_state()
-
-        summary = worker.summary
-        if summary and self._project_manager:
-            self._project_manager.record_highlight_run(
-                generated_at=summary.generated_at,
-                documents_processed=summary.documents_processed,
-                documents_with_highlights=summary.documents_with_highlights,
-                total_highlights=summary.total_highlights,
-                color_files_written=summary.color_files_written,
-            )
-
-        self._refresh_file_tracker()
-        self._refresh_highlights_tab()
-
-        if failures:
-            message = "\n".join(self._highlight_errors) or "Unknown errors"
-            QMessageBox.warning(
-                self,
-                "Highlight Extraction Issues",
-                "Some highlights could not be extracted:\n\n" + message,
-            )
-        elif summary is None and self._highlight_status_label:
-            self._highlight_status_label.setText("Highlight extraction finished.")
-
-    # ------------------------------------------------------------------
-    # Report generation helpers
-    # ------------------------------------------------------------------
-    def _build_report_model_combo(self) -> QComboBox:
-        combo = QComboBox()
-        combo.setEditable(False)
-        combo.addItem("Custom…", ("custom", ""))
-        combo.addItem(
-            "Anthropic Claude (claude-sonnet-4-5-20250929)",
-            ("anthropic", "claude-sonnet-4-5-20250929"),
-        )
-        combo.addItem(
-            "Anthropic Claude (claude-opus-4-1-20250805)",
-            ("anthropic", "claude-opus-4-1-20250805"),
-        )
-        return combo
-
-    def _on_report_model_changed(self) -> None:
-        data = self._report_model_combo.currentData() if self._report_model_combo else None
-        is_custom = bool(data) and data[0] == "custom"
-        for widget in (
-            self._report_custom_model_label,
-            self._report_custom_model_edit,
-            self._report_custom_context_label,
-            self._report_custom_context_spin,
-        ):
-            if widget:
-                widget.setVisible(is_custom)
-        self._update_report_controls()
-
-    def _browse_report_template(self) -> None:
-        initial = None
-        try:
-            initial = get_template_custom_dir()
-        except Exception:
-            if self._project_manager and self._project_manager.project_dir:
-                initial = self._project_manager.project_dir
-            else:
-                initial = Path.home()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Template",
-            str(initial),
-            "Markdown/Text Files (*.md *.txt);;All Files (*)",
-        )
-        if file_path and self._report_template_edit:
-            self._report_template_edit.setText(file_path)
-        self._update_report_controls()
-
-    def _browse_refinement_prompt(self) -> None:
-        initial = None
-        try:
-            initial = get_custom_dir()
-        except Exception:
-            initial = Path.home()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Refinement Prompt",
-            str(initial),
-            "Markdown/Text Files (*.md *.txt);;All Files (*)",
-        )
-        if file_path and self._report_refinement_prompt_edit:
-            self._report_refinement_prompt_edit.setText(file_path)
-        self._update_report_controls()
-
-    def _browse_generation_system_prompt(self) -> None:
-        initial = None
-        try:
-            initial = get_custom_dir()
-        except Exception:
-            initial = Path.home()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Generation System Prompt",
-            str(initial),
-            "Markdown/Text Files (*.md *.txt);;All Files (*)",
-        )
-        if file_path and self._report_generation_system_prompt_edit:
-            self._report_generation_system_prompt_edit.setText(file_path)
-        self._update_report_controls()
-
-    def _browse_generation_user_prompt(self) -> None:
-        initial = None
-        try:
-            initial = get_custom_dir()
-        except Exception:
-            initial = Path.home()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Generation User Prompt",
-            str(initial),
-            "Markdown/Text Files (*.md *.txt);;All Files (*)",
-        )
-        if file_path and self._report_generation_user_prompt_edit:
-            self._report_generation_user_prompt_edit.setText(file_path)
-        self._update_report_controls()
-
-    def _browse_refinement_system_prompt(self) -> None:
-        initial = None
-        try:
-            initial = get_custom_dir()
-        except Exception:
-            initial = Path.home()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Refinement System Prompt",
-            str(initial),
-            "Markdown/Text Files (*.md *.txt);;All Files (*)",
-        )
-        if file_path and self._report_refinement_system_prompt_edit:
-            self._report_refinement_system_prompt_edit.setText(file_path)
-        self._update_report_controls()
-
-    def _default_refinement_user_prompt_path(self) -> str:
-        try:
-            bundled_path = get_bundled_dir() / "refinement_prompt.md"
-            if bundled_path.exists():
-                return str(bundled_path)
-        except Exception:
-            LOGGER.debug("Unable to resolve bundled refinement prompt path", exc_info=True)
-        repo_dir = get_repo_prompts_dir()
-        repo_path = repo_dir / "refinement_prompt.md"
-        if repo_path.exists():
-            return str(repo_path)
-        return ""
-
-    def _default_generation_user_prompt_path(self) -> str:
-        try:
-            bundled_path = get_bundled_dir() / "report_generation_user_prompt.md"
-            if bundled_path.exists():
-                return str(bundled_path)
-        except Exception:
-            LOGGER.debug(
-                "Unable to resolve bundled generation user prompt path",
-                exc_info=True,
-            )
-        repo_dir = get_repo_prompts_dir()
-        repo_path = repo_dir / "report_generation_user_prompt.md"
-        if repo_path.exists():
-            return str(repo_path)
-        return ""
-
-    def _default_generation_system_prompt_path(self) -> str:
-        try:
-            bundled_path = get_bundled_dir() / "report_generation_system_prompt.md"
-            if bundled_path.exists():
-                return str(bundled_path)
-        except Exception:
-            LOGGER.debug(
-                "Unable to resolve bundled generation system prompt path",
-                exc_info=True,
-            )
-        repo_dir = get_repo_prompts_dir()
-        repo_path = repo_dir / "report_generation_system_prompt.md"
-        if repo_path.exists():
-            return str(repo_path)
-        return ""
-
-    def _default_refinement_system_prompt_path(self) -> str:
-        try:
-            bundled_path = get_bundled_dir() / "report_refinement_system_prompt.md"
-            if bundled_path.exists():
-                return str(bundled_path)
-        except Exception:
-            LOGGER.debug(
-                "Unable to resolve bundled refinement system prompt path",
-                exc_info=True,
-            )
-        repo_dir = get_repo_prompts_dir()
-        repo_path = repo_dir / "report_refinement_system_prompt.md"
-        if repo_path.exists():
-            return str(repo_path)
-        return ""
-
-    def _format_prompt_preview(self, template: str, context: dict[str, str]) -> str:
-        cleaned = {k: (v or "") for k, v in context.items()}
-        return format_prompt(template, cleaned)
-
-    def _build_additional_documents_text(self, project_dir: Path) -> str:
-        lines: List[str] = []
-        for key in sorted(self._report_selected_inputs):
-            if ":" not in key:
-                continue
-            category, relative = key.split(":", 1)
-            absolute = (project_dir / relative).resolve()
-            if not absolute.exists() or not absolute.is_file():
-                continue
-            try:
-                content = absolute.read_text(encoding="utf-8").strip()
-            except Exception:
-                continue
-            lines.append(f"<!--- report-input: {category} | {relative} --->")
-            lines.append(f"# {category_display_name(category)}: {relative}")
-            if content:
-                lines.append(content)
-            lines.append("")
-        if not lines:
-            return ""
-        return "\n".join(lines).strip()
-
-    def _preview_generation_prompt(self) -> None:
-        if not self._project_manager or not self._project_manager.project_dir:
-            QMessageBox.warning(self, "Prompt Preview", "Open a project to preview prompts.")
-            return
-        if not self._report_template_edit:
-            return
-        template_path_str = self._report_template_edit.text().strip()
-        if not template_path_str:
-            QMessageBox.warning(self, "Prompt Preview", "Select a template first.")
-            return
-        template_path = Path(template_path_str).expanduser()
-        if not template_path.exists():
-            QMessageBox.warning(self, "Prompt Preview", f"Template not found:\n{template_path}")
-            return
-
-        if not self._report_generation_user_prompt_edit:
-            return
-        gen_prompt_path_str = self._report_generation_user_prompt_edit.text().strip()
-        if not gen_prompt_path_str:
-            QMessageBox.warning(self, "Prompt Preview", "Select a generation user prompt first.")
-            return
-        gen_prompt_path = Path(gen_prompt_path_str).expanduser()
-        if not gen_prompt_path.exists():
-            QMessageBox.warning(self, "Prompt Preview", f"Generation user prompt not found:\n{gen_prompt_path}")
-            return
-        try:
-            generation_user_prompt = read_generation_prompt(gen_prompt_path)
-            validate_generation_prompt(generation_user_prompt)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Prompt Preview", str(exc))
-            return
-        except Exception:
-            QMessageBox.warning(self, "Prompt Preview", "Unable to read generation user prompt.")
-            return
-
-        try:
-            sections = load_template_sections(template_path)
-        except Exception:
-            QMessageBox.warning(self, "Prompt Preview", "Unable to parse template sections.")
-            return
-        if not sections:
-            QMessageBox.warning(self, "Prompt Preview", "Template does not contain any sections.")
-            return
-        section = sections[0]
-        template_section = section.body.strip() or section.title or "Template section"
-
-        project_dir = Path(self._project_manager.project_dir)
-        additional_documents = self._build_additional_documents_text(project_dir)
-
-        transcript_text = ""
-        if self._report_transcript_edit and self._report_transcript_edit.text().strip():
-            transcript_path = Path(self._report_transcript_edit.text().strip()).expanduser()
-            if transcript_path.exists():
-                try:
-                    transcript_text = transcript_path.read_text(encoding="utf-8")
-                except Exception:
-                    transcript_text = ""
-
-        system_prompt_text = ""
-        if self._report_generation_system_prompt_edit and self._report_generation_system_prompt_edit.text().strip():
-            system_path = Path(self._report_generation_system_prompt_edit.text().strip()).expanduser()
-            if system_path.exists():
-                try:
-                    system_prompt_text = system_path.read_text(encoding="utf-8")
-                except Exception:
-                    system_prompt_text = ""
-        if not system_prompt_text:
-            system_prompt_text = "(Generation system prompt is empty.)"
-
-        user_prompt_text = self._format_prompt_preview(
-            generation_user_prompt,
-            {
-                "template_section": template_section,
-                "transcript": transcript_text,
-                "additional_documents": additional_documents,
-            },
-        )
-
-        dialog = PromptPreviewDialog(self)
-        dialog.set_prompts(system_prompt_text, user_prompt_text)
-        dialog.exec()
-
-    def _preview_refinement_prompt(self) -> None:
-        if not self._project_manager or not self._project_manager.project_dir:
-            QMessageBox.warning(self, "Prompt Preview", "Open a project to preview prompts.")
-            return
-        if not self._report_template_edit:
-            return
-        template_path_str = self._report_template_edit.text().strip()
-        if not template_path_str:
-            QMessageBox.warning(self, "Prompt Preview", "Select a template first.")
-            return
-        template_path = Path(template_path_str).expanduser()
-        template_text = ""
-        try:
-            template_text = template_path.read_text(encoding="utf-8")
-        except Exception:
-            QMessageBox.warning(self, "Prompt Preview", "Unable to read template file.")
-            return
-
-        if not self._report_refinement_prompt_edit:
-            return
-        refinement_path_str = self._report_refinement_prompt_edit.text().strip()
-        if not refinement_path_str:
-            QMessageBox.warning(self, "Prompt Preview", "Select a refinement user prompt first.")
-            return
-        refinement_path = Path(refinement_path_str).expanduser()
-        if not refinement_path.exists():
-            QMessageBox.warning(self, "Prompt Preview", f"Refinement user prompt not found:\n{refinement_path}")
-            return
-        try:
-            refinement_user_prompt = read_refinement_prompt(refinement_path)
-            validate_refinement_prompt(refinement_user_prompt)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Prompt Preview", str(exc))
-            return
-        except Exception:
-            QMessageBox.warning(self, "Prompt Preview", "Unable to read refinement user prompt.")
-            return
-
-        generation_preview_section = ""
-        try:
-            sections = load_template_sections(template_path)
-            if sections:
-                generation_preview_section = sections[0].body.strip()
-        except Exception:
-            generation_preview_section = ""
-        draft_preview = generation_preview_section or "Draft content preview"
-
-        transcript_text = ""
-        if self._report_transcript_edit and self._report_transcript_edit.text().strip():
-            transcript_path = Path(self._report_transcript_edit.text().strip()).expanduser()
-            if transcript_path.exists():
-                try:
-                    transcript_text = transcript_path.read_text(encoding="utf-8")
-                except Exception:
-                    transcript_text = ""
-
-        system_prompt_text = ""
-        if self._report_refinement_system_prompt_edit and self._report_refinement_system_prompt_edit.text().strip():
-            system_path = Path(self._report_refinement_system_prompt_edit.text().strip()).expanduser()
-            if system_path.exists():
-                try:
-                    system_prompt_text = system_path.read_text(encoding="utf-8")
-                except Exception:
-                    system_prompt_text = ""
-        if not system_prompt_text:
-            system_prompt_text = "(Refinement system prompt is empty.)"
-
-        user_prompt_text = self._format_prompt_preview(
-            refinement_user_prompt,
-            {
-                "draft_report": draft_preview,
-                "template": template_text,
-                "transcript": transcript_text,
-            },
-        )
-
-        dialog = PromptPreviewDialog(self)
-        dialog.set_prompts(system_prompt_text, user_prompt_text)
-        dialog.exec()
-    def _browse_report_transcript(self) -> None:
-        initial = None
-        if self._project_manager and self._project_manager.project_dir:
-            initial = self._project_manager.project_dir
-        else:
-            initial = Path.home()
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Transcript",
-            str(initial),
-            "Markdown/Text Files (*.md *.txt);;All Files (*)",
-        )
-        if file_path and self._report_transcript_edit:
-            self._report_transcript_edit.setText(file_path)
-        self._update_report_controls()
-
-    def _collect_report_inputs(self) -> List[ReportInputDescriptor]:
-        descriptors: List[ReportInputDescriptor] = []
-        if not self._project_manager or not self._project_manager.project_dir:
-            return descriptors
-
-        project_dir = Path(self._project_manager.project_dir)
-
-        def add_descriptor(category: str, absolute: Path, label: str) -> None:
-            descriptors.append(
-                ReportInputDescriptor(
-                    category=category,
-                    relative_path=absolute.relative_to(project_dir).as_posix(),
-                    label=label,
-                )
-            )
-
-        converted_root = project_dir / "converted_documents"
-        if converted_root.exists():
-            for path in sorted(converted_root.rglob("*")):
-                if not path.is_file():
-                    continue
-                if path.suffix.lower() not in {".md", ".txt"}:
-                    continue
-                add_descriptor(
-                    REPORT_CATEGORY_CONVERTED,
-                    path,
-                    path.relative_to(converted_root).as_posix(),
-                )
-
-        bulk_root = project_dir / "bulk_analysis"
-        if bulk_root.exists():
-            for slug_dir in sorted(bulk_root.iterdir()):
-                if not slug_dir.is_dir():
-                    continue
-                slug = slug_dir.name
-                for path, rel in sorted(iter_map_outputs(project_dir, slug), key=lambda item: item[1]):
-                    add_descriptor(
-                        REPORT_CATEGORY_BULK_MAP,
-                        path,
-                        f"{slug}/{rel}",
-                    )
-                reduce_dir = slug_dir / "reduce"
-                if reduce_dir.exists():
-                    for path in sorted(reduce_dir.rglob("*.md")):
-                        add_descriptor(
-                            REPORT_CATEGORY_BULK_COMBINED,
-                            path,
-                            f"{slug_dir.name}/reduce/{path.relative_to(reduce_dir).as_posix()}",
-                        )
-
-        highlight_docs = project_dir / "highlights" / "documents"
-        if highlight_docs.exists():
-            for path in sorted(highlight_docs.rglob("*.md")):
-                add_descriptor(
-                    REPORT_CATEGORY_HIGHLIGHT_DOCUMENT,
-                    path,
-                    path.relative_to(highlight_docs).as_posix(),
-                )
-
-        highlight_colors = project_dir / "highlights" / "colors"
-        if highlight_colors.exists():
-            for path in sorted(highlight_colors.glob("*.md")):
-                add_descriptor(
-                    REPORT_CATEGORY_HIGHLIGHT_COLOR,
-                    path,
-                    path.relative_to(highlight_colors).as_posix(),
-                )
-
-        return descriptors
-
-    def _populate_report_inputs_tree(self, descriptors: List[ReportInputDescriptor]) -> None:
-        if not self._report_inputs_tree:
-            return
-        tree = self._report_inputs_tree
-        tree.blockSignals(True)
-        tree.clear()
-
-        by_category: Dict[str, List[ReportInputDescriptor]] = {}
-        for descriptor in descriptors:
-            by_category.setdefault(descriptor.category, []).append(descriptor)
-
-        for category, label in (
-            (REPORT_CATEGORY_CONVERTED, category_display_name(REPORT_CATEGORY_CONVERTED)),
-            (REPORT_CATEGORY_BULK_MAP, category_display_name(REPORT_CATEGORY_BULK_MAP)),
-            (REPORT_CATEGORY_BULK_COMBINED, category_display_name(REPORT_CATEGORY_BULK_COMBINED)),
-            (REPORT_CATEGORY_HIGHLIGHT_DOCUMENT, category_display_name(REPORT_CATEGORY_HIGHLIGHT_DOCUMENT)),
-            (REPORT_CATEGORY_HIGHLIGHT_COLOR, category_display_name(REPORT_CATEGORY_HIGHLIGHT_COLOR)),
-        ):
-            entries = by_category.get(category)
-            if not entries:
-                continue
-            parent = QTreeWidgetItem([label, ""])
-            parent.setFlags(parent.flags() | ITEM_IS_USER_CHECKABLE | ITEM_IS_TRISTATE)
-            parent.setCheckState(0, Qt.Unchecked)
-            tree.addTopLevelItem(parent)
-
-            for descriptor in entries:
-                child = QTreeWidgetItem([descriptor.label, descriptor.relative_path])
-                child.setFlags(child.flags() | ITEM_IS_USER_CHECKABLE)
-                key = descriptor.key()
-                child.setData(0, Qt.UserRole, key)
-                state = Qt.Checked if key in self._report_selected_inputs else Qt.Unchecked
-                child.setCheckState(0, state)
-                parent.addChild(child)
-
-        tree.expandAll()
-        tree.blockSignals(False)
-        self._update_report_controls()
-
-    def _on_report_input_changed(self, item: QTreeWidgetItem, column: int) -> None:  # noqa: ARG002
-        data = item.data(0, Qt.UserRole)
-        if not data:
-            return
-        key = str(data)
-        if item.checkState(0) == Qt.Checked:
-            self._report_selected_inputs.add(key)
-        else:
-            self._report_selected_inputs.discard(key)
-        self._update_report_controls()
-
-    def _update_report_controls(self) -> None:
-        if not self._report_generate_button:
-            return
-        if not self._project_manager:
-            self._report_generate_button.setEnabled(False)
-            return
-        has_inputs = bool(self._report_selected_inputs)
-        transcript_ok = bool(self._report_transcript_edit and self._report_transcript_edit.text().strip())
-        template_text = self._report_template_edit.text().strip() if self._report_template_edit else ""
-        template_ok = bool(template_text and Path(template_text).expanduser().is_file())
-        refinement_text = (
-            self._report_refinement_prompt_edit.text().strip()
-            if self._report_refinement_prompt_edit
-            else ""
-        )
-        refinement_ok = bool(refinement_text and Path(refinement_text).expanduser().is_file())
-        generation_user_text = (
-            self._report_generation_user_prompt_edit.text().strip()
-            if self._report_generation_user_prompt_edit
-            else ""
-        )
-        generation_user_ok = bool(
-            generation_user_text and Path(generation_user_text).expanduser().is_file()
-        )
-        generation_system_text = (
-            self._report_generation_system_prompt_edit.text().strip()
-            if self._report_generation_system_prompt_edit
-            else ""
-        )
-        generation_system_ok = bool(
-            generation_system_text and Path(generation_system_text).expanduser().is_file()
-        )
-        refinement_system_text = (
-            self._report_refinement_system_prompt_edit.text().strip()
-            if self._report_refinement_system_prompt_edit
-            else ""
-        )
-        refinement_system_ok = bool(
-            refinement_system_text and Path(refinement_system_text).expanduser().is_file()
-        )
-        model_ok = True
-        if self._report_model_combo:
-            data = self._report_model_combo.currentData()
-            if data and data[0] == "custom":
-                model_ok = bool(self._report_custom_model_edit and self._report_custom_model_edit.text().strip())
-        enabled = (
-            (has_inputs or transcript_ok)
-            and model_ok
-            and template_ok
-            and refinement_ok
-            and generation_user_ok
-            and generation_system_ok
-            and refinement_system_ok
-            and not self._report_running
-        )
-        self._report_generate_button.setEnabled(enabled)
-
-    def _refresh_reports_tab(self) -> None:
-        if not self._reports_tab:
-            return
-        if not self._project_manager or not self._project_manager.project_dir:
-            self._report_selected_inputs.clear()
-            if self._report_inputs_tree:
-                self._report_inputs_tree.clear()
-            if self._report_history_list:
-                self._report_history_list.clear()
-            self._update_report_controls()
-            self._update_report_history_buttons()
-            return
-
-        descriptors = self._collect_report_inputs()
-        self._populate_report_inputs_tree(descriptors)
-        self._refresh_report_history()
-        self._update_report_controls()
-
-    def _start_report_job(self) -> None:
-        if self._report_running:
-            QMessageBox.information(self, "Report Generator", "A report generation run is already in progress.")
-            return
-        if not self._project_manager or not self._project_manager.project_dir:
-            QMessageBox.warning(self, "Report Generator", "No project is currently loaded.")
-            return
-
-        model_data = self._report_model_combo.currentData() if self._report_model_combo else None
-        provider_id = "anthropic"
-        model_id = "claude-sonnet-4-5-20250929"
-        custom_model = None
-        if model_data:
-            if model_data[0] == "custom":
-                custom_model = self._report_custom_model_edit.text().strip() if self._report_custom_model_edit else ""
-                if not custom_model:
-                    QMessageBox.warning(self, "Report Generator", "Enter a model id for the custom option.")
-                    return
-            else:
-                provider_id, model_id = model_data
-
-        context_window = None
-        if self._report_custom_context_spin and custom_model:
-            context_window = int(self._report_custom_context_spin.value())
-        elif self._report_custom_context_spin and not custom_model:
-            context_window = None
-
-        template_path: Path | None = None
-        if self._report_template_edit:
-            text = self._report_template_edit.text().strip()
-            if text:
-                template_path = Path(text).expanduser()
-        if not template_path:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Select a report template before generating a report.",
-            )
-            return
-        if not template_path.is_file():
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                f"The selected template does not exist:\n{template_path}",
-            )
-            return
-
-        generation_user_prompt_path: Path | None = None
-        if self._report_generation_user_prompt_edit:
-            text = self._report_generation_user_prompt_edit.text().strip()
-            if text:
-                generation_user_prompt_path = Path(text).expanduser()
-        if not generation_user_prompt_path:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Select a generation user prompt before generating a report.",
-            )
-            return
-        if not generation_user_prompt_path.is_file():
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                f"The selected generation user prompt does not exist:\n{generation_user_prompt_path}",
-            )
-            return
-        try:
-            generation_user_content = read_generation_prompt(generation_user_prompt_path)
-            validate_generation_prompt(generation_user_content)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Report Generator", str(exc))
-            return
-        except Exception:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Unable to read the generation user prompt.",
-            )
-            return
-
-        generation_system_prompt_path: Path | None = None
-        if self._report_generation_system_prompt_edit:
-            text = self._report_generation_system_prompt_edit.text().strip()
-            if text:
-                generation_system_prompt_path = Path(text).expanduser()
-        if not generation_system_prompt_path:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Select a generation system prompt before generating a report.",
-            )
-            return
-        if not generation_system_prompt_path.is_file():
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                f"The selected generation system prompt does not exist:\n{generation_system_prompt_path}",
-            )
-            return
-
-        refinement_user_prompt_path: Path | None = None
-        if self._report_refinement_prompt_edit:
-            text = self._report_refinement_prompt_edit.text().strip()
-            if text:
-                refinement_user_prompt_path = Path(text).expanduser()
-        if not refinement_user_prompt_path:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Select a refinement user prompt before generating a report.",
-            )
-            return
-        if not refinement_user_prompt_path.is_file():
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                f"The selected refinement user prompt does not exist:\n{refinement_user_prompt_path}",
-            )
-            return
-        try:
-            refinement_user_content = read_refinement_prompt(refinement_user_prompt_path)
-            validate_refinement_prompt(refinement_user_content)
-        except ValueError as exc:
-            QMessageBox.warning(self, "Report Generator", str(exc))
-            return
-        except Exception:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Unable to read the refinement user prompt.",
-            )
-            return
-
-        refinement_system_prompt_path: Path | None = None
-        if self._report_refinement_system_prompt_edit:
-            text = self._report_refinement_system_prompt_edit.text().strip()
-            if text:
-                refinement_system_prompt_path = Path(text).expanduser()
-        if not refinement_system_prompt_path:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Select a refinement system prompt before generating a report.",
-            )
-            return
-        if not refinement_system_prompt_path.is_file():
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                f"The selected refinement system prompt does not exist:\n{refinement_system_prompt_path}",
-            )
-            return
-
-        transcript_path: Path | None = None
-        if self._report_transcript_edit:
-            text = self._report_transcript_edit.text().strip()
-            if text:
-                transcript_path = Path(text).expanduser()
-                if not transcript_path.is_file():
-                    QMessageBox.warning(
-                        self,
-                        "Report Generator",
-                        f"The selected transcript does not exist:\n{transcript_path}",
-                    )
-                    return
-
-        selected_pairs: List[tuple[str, str]] = []
-        for key in sorted(self._report_selected_inputs):
-            if ":" not in key:
-                continue
-            category, relative = key.split(":", 1)
-            selected_pairs.append((category, relative))
-
-        if not selected_pairs and not transcript_path:
-            QMessageBox.warning(
-                self,
-                "Report Generator",
-                "Select at least one input or provide a transcript before generating a report.",
-            )
-            return
-
-        project_dir = Path(self._project_manager.project_dir)
-        metadata = self._project_manager.metadata or ProjectMetadata(
-            case_name=self._project_manager.project_name or ""
-        )
-
-        self._project_manager.update_report_preferences(
-            selected_inputs=sorted(self._report_selected_inputs),
-            provider_id=provider_id,
-            model=model_id,
-            custom_model=custom_model,
-            context_window=context_window,
-            template_path=str(template_path),
-            transcript_path=str(transcript_path) if transcript_path else None,
-            generation_user_prompt=str(generation_user_prompt_path),
-            refinement_user_prompt=str(refinement_user_prompt_path),
-            generation_system_prompt=str(generation_system_prompt_path),
-            refinement_system_prompt=str(refinement_system_prompt_path),
-        )
-
-        worker = ReportWorker(
-            project_dir=project_dir,
-            inputs=selected_pairs,
-            provider_id=provider_id,
-            model=model_id,
-            custom_model=custom_model,
-            context_window=context_window,
-            template_path=template_path,
-            transcript_path=transcript_path,
-            generation_user_prompt_path=generation_user_prompt_path,
-            refinement_user_prompt_path=refinement_user_prompt_path,
-            generation_system_prompt_path=generation_system_prompt_path,
-            refinement_system_prompt_path=refinement_system_prompt_path,
-            metadata=metadata,
-        )
-
-        worker.progress.connect(self._on_report_progress)
-        worker.log_message.connect(self._append_report_log)
-        worker.finished.connect(lambda result, w=worker: self._on_report_finished(w, result))
-        worker.failed.connect(lambda message, w=worker: self._on_report_failed(w, message))
-
-        self._report_last_result = None
-        self._report_running = True
-        if self._report_progress_bar:
-            self._report_progress_bar.setValue(0)
-        if self._report_log:
-            self._report_log.clear()
-        self._update_report_controls()
-        self._update_report_history_buttons()
-        self._workers.start(self._report_key(), worker)
-
-    def _report_key(self) -> str:
-        return "report:run"
-
-    def _on_report_progress(self, percent: int, message: str) -> None:
-        if self._report_progress_bar:
-            self._report_progress_bar.setValue(percent)
-        self._append_report_log(message)
-
-    def _append_report_log(self, message: str) -> None:
-        if not self._report_log:
-            return
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self._report_log.append(f"[{timestamp}] {message}")
-
-    def _on_report_finished(self, worker: ReportWorker, result: Dict[str, object]) -> None:
-        stored = self._workers.pop(self._report_key())
-        if worker and isValid(worker):
-            worker.deleteLater()
-        if stored and stored is not worker and isValid(stored):
-            stored.deleteLater()
-
-        self._report_running = False
-        self._update_report_controls()
-
-        self._report_last_result = result
-        self._append_report_log("Report generation completed successfully.")
-        if self._report_progress_bar:
-            self._report_progress_bar.setValue(100)
-
-        if self._project_manager:
-            timestamp_raw = str(result.get("timestamp"))
-            try:
-                timestamp = datetime.fromisoformat(timestamp_raw)
-            except Exception:
-                timestamp = datetime.now(timezone.utc)
-            draft_path = Path(str(result.get("draft_path")))
-            refined_path = Path(str(result.get("refined_path")))
-            reasoning_value = result.get("reasoning_path")
-            reasoning_path = Path(str(reasoning_value)) if reasoning_value else None
-            manifest_value = result.get("manifest_path")
-            manifest_path = Path(str(manifest_value)) if manifest_value else None
-            inputs_value = result.get("inputs_path")
-            inputs_path = Path(str(inputs_value)) if inputs_value else None
-            provider = str(result.get("provider", "anthropic"))
-            model = str(result.get("model", ""))
-            custom_model = result.get("custom_model")
-            context_window = result.get("context_window")
-            try:
-                context_window_int = int(context_window) if context_window is not None else None
-            except (ValueError, TypeError):
-                context_window_int = None
-            inputs = list(result.get("inputs", []))
-
-            instructions_snapshot = str(result.get("instructions", ""))
-            generation_user_prompt = (
-                str(result.get("generation_user_prompt") or "").strip()
-                or (
-                    self._report_generation_user_prompt_edit.text().strip()
-                    if self._report_generation_user_prompt_edit
-                    else ""
-                )
-            )
-            refinement_user_prompt = (
-                str(result.get("refinement_user_prompt") or "").strip()
-                or (
-                    self._report_refinement_prompt_edit.text().strip()
-                    if self._report_refinement_prompt_edit
-                    else ""
-                )
-            )
-            generation_system_prompt = (
-                str(result.get("generation_system_prompt") or "").strip()
-                or (
-                    self._report_generation_system_prompt_edit.text().strip()
-                    if self._report_generation_system_prompt_edit
-                    else ""
-                )
-            )
-            refinement_system_prompt = (
-                str(result.get("refinement_system_prompt") or "").strip()
-                or (
-                    self._report_refinement_system_prompt_edit.text().strip()
-                    if self._report_refinement_system_prompt_edit
-                    else ""
-                )
-            )
-
-            template_value = (
-                self._report_template_edit.text().strip()
-                if self._report_template_edit and self._report_template_edit.text().strip()
-                else None
-            )
-            transcript_value = (
-                self._report_transcript_edit.text().strip()
-                if self._report_transcript_edit and self._report_transcript_edit.text().strip()
-                else None
-            )
-
-            self._project_manager.record_report_run(
-                timestamp=timestamp,
-                draft_path=draft_path,
-                refined_path=refined_path,
-                reasoning_path=reasoning_path,
-                manifest_path=manifest_path,
-                inputs_path=inputs_path,
-                provider=provider,
-                model=model,
-                custom_model=str(custom_model) if custom_model else None,
-                context_window=context_window_int,
-                inputs=inputs,
-                template_path=template_value,
-                transcript_path=transcript_value,
-                instructions=instructions_snapshot,
-                generation_user_prompt=generation_user_prompt or None,
-                refinement_user_prompt=refinement_user_prompt or None,
-                generation_system_prompt=generation_system_prompt or None,
-                refinement_system_prompt=refinement_system_prompt or None,
-            )
-
-        self._refresh_report_history()
-        self._update_report_history_buttons()
-
-    def _on_report_failed(self, worker: ReportWorker, message: str) -> None:
-        stored = self._workers.pop(self._report_key())
-        if worker and isValid(worker):
-            worker.deleteLater()
-        if stored and stored is not worker and isValid(stored):
-            stored.deleteLater()
-
-        self._report_running = False
-        self._update_report_controls()
-        self._update_report_history_buttons()
-
-        QMessageBox.critical(self, "Report Generator", message)
-        self._append_report_log(f"Error: {message}")
-
-    def _refresh_report_history(self) -> None:
-        if not self._report_history_list:
-            return
-        self._report_history_list.blockSignals(True)
-        self._report_history_list.clear()
-
-        if not self._project_manager:
-            self._report_history_list.blockSignals(False)
-            return
-
-        history = self._project_manager.report_state.history
-        for index, entry in enumerate(history):
-            try:
-                timestamp_display = datetime.fromisoformat(entry.timestamp).astimezone().strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                timestamp_display = entry.timestamp
-            model_label = entry.custom_model or entry.model or ""
-            outputs_text = (
-                Path(entry.refined_path).name
-                if entry.refined_path
-                else Path(entry.draft_path).name
-            )
-            item = QTreeWidgetItem([timestamp_display, model_label, outputs_text])
-            item.setData(0, Qt.UserRole, index)
-            self._report_history_list.addTopLevelItem(item)
-
-        if history and self._report_history_list.topLevelItemCount() > 0:
-            self._report_history_list.setCurrentItem(self._report_history_list.topLevelItem(0))
-
-        self._report_history_list.blockSignals(False)
-        self._update_report_history_buttons()
-
-    def _on_report_history_selected(self) -> None:
-        self._update_report_history_buttons()
-
-    def _update_report_history_buttons(self) -> None:
-        buttons = [
-            self._report_open_draft_button,
-            self._report_open_refined_button,
-            self._report_open_reasoning_button,
-            self._report_open_manifest_button,
-            self._report_open_inputs_button,
-        ]
-        for button in buttons:
-            if button:
-                button.setEnabled(False)
-
-        if not self._report_history_list or not self._project_manager:
-            return
-
-        item = self._report_history_list.currentItem()
-        if not item:
-            return
-
-        index = item.data(0, Qt.UserRole)
-        if index is None:
-            return
-        try:
-            entry = self._project_manager.report_state.history[int(index)]
-        except (ValueError, IndexError):
-            return
-
-        if self._report_open_draft_button and entry.draft_path:
-            self._report_open_draft_button.setEnabled(True)
-        if self._report_open_refined_button and entry.refined_path:
-            self._report_open_refined_button.setEnabled(True)
-        if self._report_open_reasoning_button and entry.reasoning_path:
-            self._report_open_reasoning_button.setEnabled(bool(entry.reasoning_path))
-        if self._report_open_manifest_button and entry.manifest_path:
-            self._report_open_manifest_button.setEnabled(True)
-        if self._report_open_inputs_button and entry.inputs_path:
-            self._report_open_inputs_button.setEnabled(True)
-
-    def _open_report_history_file(self, kind: str) -> None:
-        if not self._project_manager or not self._report_history_list:
-            return
-        item = self._report_history_list.currentItem()
-        if not item:
-            return
-        index = item.data(0, Qt.UserRole)
-        if index is None:
-            return
-        try:
-            entry = self._project_manager.report_state.history[int(index)]
-        except (ValueError, IndexError):
-            return
-
-        mapping = {
-            "draft": entry.draft_path,
-            "refined": entry.refined_path,
-            "reasoning": entry.reasoning_path,
-            "manifest": entry.manifest_path,
-            "inputs": entry.inputs_path,
-        }
-        target = mapping.get(kind)
-        if not target:
-            QMessageBox.information(self, "Report Files", "Requested file is not available.")
-            return
-        path = Path(target)
-        if not path.exists():
-            QMessageBox.warning(self, "Report Files", f"File not found: {path}")
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-
-    def _open_reports_folder(self) -> None:
-        if not self._project_manager or not self._project_manager.project_dir:
-            return
-        folder = Path(self._project_manager.project_dir) / "reports"
-        folder.mkdir(parents=True, exist_ok=True)
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
-
-    def _load_report_preferences(self) -> None:
-        if not self._project_manager:
-            return
-        state = self._project_manager.report_state
-        self._report_selected_inputs = set(state.last_selected_inputs or [])
-
-        if self._report_model_combo:
-            if state.last_custom_model:
-                custom_index = self._report_model_combo.findData(("custom", ""))
-                if custom_index >= 0:
-                    self._report_model_combo.setCurrentIndex(custom_index)
-                if self._report_custom_model_edit:
-                    self._report_custom_model_edit.setText(state.last_custom_model)
-            else:
-                target = (
-                    state.last_provider or "anthropic",
-                    state.last_model or "claude-sonnet-4-5-20250929",
-                )
-                index = self._report_model_combo.findData(target)
-                if index >= 0:
-                    self._report_model_combo.setCurrentIndex(index)
-                else:
-                    self._report_model_combo.setCurrentIndex(1)
-
-        if self._report_custom_context_spin:
-            if state.last_context_window:
-                self._report_custom_context_spin.setValue(int(state.last_context_window))
-            else:
-                self._report_custom_context_spin.setValue(200_000)
-
-        if self._report_template_edit:
-            self._report_template_edit.setText(state.last_template or "")
-        if self._report_transcript_edit:
-            self._report_transcript_edit.setText(state.last_transcript or "")
-        if self._report_generation_user_prompt_edit:
-            if state.last_generation_user_prompt:
-                self._report_generation_user_prompt_edit.setText(state.last_generation_user_prompt)
-            elif not self._report_generation_user_prompt_edit.text().strip():
-                self._report_generation_user_prompt_edit.setText(
-                    self._default_generation_user_prompt_path()
-                )
-        if self._report_refinement_prompt_edit:
-            if state.last_refinement_user_prompt:
-                self._report_refinement_prompt_edit.setText(state.last_refinement_user_prompt)
-            elif not self._report_refinement_prompt_edit.text().strip():
-                self._report_refinement_prompt_edit.setText(
-                    self._default_refinement_user_prompt_path()
-                )
-        if self._report_generation_system_prompt_edit:
-            if state.last_generation_system_prompt:
-                self._report_generation_system_prompt_edit.setText(state.last_generation_system_prompt)
-            elif not self._report_generation_system_prompt_edit.text().strip():
-                self._report_generation_system_prompt_edit.setText(
-                    self._default_generation_system_prompt_path()
-                )
-        if self._report_refinement_system_prompt_edit:
-            if state.last_refinement_system_prompt:
-                self._report_refinement_system_prompt_edit.setText(state.last_refinement_system_prompt)
-            elif not self._report_refinement_system_prompt_edit.text().strip():
-                self._report_refinement_system_prompt_edit.setText(
-                    self._default_refinement_system_prompt_path()
-                )
-
-        self._on_report_model_changed()
-        self._update_report_controls()
-        self._update_report_history_buttons()
-
-
-
-
     def _refresh_bulk_analysis_groups(self) -> None:
         if not self._feature_flags.bulk_analysis_groups_enabled:
             return

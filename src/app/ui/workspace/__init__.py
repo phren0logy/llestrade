@@ -1,7 +1,9 @@
 """Workspace UI package for decomposed dashboard tabs."""
 
-from .shell import WorkspaceShell
-from .documents_tab import DocumentsTab
 from .bulk_tab import BulkAnalysisTab
+from .documents_tab import DocumentsTab
+from .highlights_tab import HighlightsTab
+from .reports_tab import ReportsTab
+from .shell import WorkspaceShell
 
-__all__ = ["WorkspaceShell", "DocumentsTab", "BulkAnalysisTab"]
+__all__ = ["BulkAnalysisTab", "DocumentsTab", "HighlightsTab", "ReportsTab", "WorkspaceShell"]
