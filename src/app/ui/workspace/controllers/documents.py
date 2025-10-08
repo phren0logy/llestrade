@@ -12,6 +12,11 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QBrush
 from PySide6.QtWidgets import QMessageBox, QTreeWidgetItem
 
+from src.app.core.conversion_manager import (
+    ConversionJob,
+    DuplicateSource,
+    build_conversion_jobs,
+)
 from src.app.core.file_tracker import WorkspaceMetrics
 from src.app.core.project_manager import ProjectManager
 from src.app.ui.workspace.documents_tab import DocumentsTab
@@ -48,6 +53,24 @@ class DocumentsController:
         self._project_manager = project_manager
         self._workspace_metrics = None
         self._pending_file_tracker_refresh = False
+        self._source_tree_nodes.clear()
+        self._block_source_tree_signal = False
+        self._new_directory_alerts.clear()
+        self._new_dir_prompt_active = False
+        self._current_warnings = []
+        self._missing_root_prompted = False
+
+        tree = self._tab.source_tree
+        tree.clear()
+        tree.setDisabled(project_manager is None)
+
+        if project_manager is None:
+            self._tab.source_root_label.setText("Source root: not set")
+            self._tab.counts_label.setText("Converted: 0 | Highlights: 0 | Bulk analysis: 0")
+            self._tab.last_scan_label.setText("")
+            self._tab.missing_highlights_label.setText("Highlights missing: —")
+            self._tab.missing_bulk_label.setText("Bulk analysis missing: —")
+        self.set_root_warning([])
 
     def shutdown(self) -> None:
         self._source_tree_nodes.clear()
@@ -63,6 +86,71 @@ class DocumentsController:
         self.update_source_root_label()
         metrics = self.refresh_file_tracker()
         return metrics
+
+    def trigger_conversion(self, auto_run: bool) -> None:
+        project_manager = self._project_manager
+        if not project_manager:
+            return
+        workspace = self._workspace
+        if workspace._conversion_running:
+            QMessageBox.information(
+                workspace,
+                "Conversion Running",
+                "Document conversion is already in progress.",
+            )
+            return
+
+        jobs, duplicates = self.collect_conversion_jobs(workspace._inflight_sources)
+        if duplicates:
+            self.show_duplicate_notice(duplicates)
+        if not jobs:
+            if not auto_run and not duplicates:
+                QMessageBox.information(workspace, "Conversion", "No new files detected.")
+            return
+
+        if not auto_run:
+            reply = QMessageBox.question(
+                workspace,
+                "Convert Documents",
+                f"Convert {len(jobs)} new document(s) to markdown now?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.Yes,
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+        workspace._start_conversion(jobs)
+
+    def collect_conversion_jobs(
+        self,
+        inflight_sources: Set[Path],
+    ) -> tuple[list[ConversionJob], Sequence[DuplicateSource]]:
+        if not self._project_manager:
+            return [], []
+        plan = build_conversion_jobs(self._project_manager)
+        jobs = [job for job in plan.jobs if job.source_path not in inflight_sources]
+        return jobs, plan.duplicates
+
+    def show_duplicate_notice(self, duplicates: Sequence[DuplicateSource]) -> None:
+        if not duplicates:
+            return
+        workspace = self._workspace
+        preview_limit = 10
+        listed = list(duplicates[:preview_limit])
+        lines = [
+            f"- {duplicate.duplicate_relative} matches {duplicate.primary_relative}"
+            for duplicate in listed
+        ]
+        remaining = len(duplicates) - len(listed)
+        if remaining > 0:
+            lines.append(f"…and {remaining} more duplicate files.")
+
+        message = (
+            "Duplicate files detected. Matching documents will be skipped to avoid converting"
+            " the same content twice.\n\n"
+            + "\n".join(lines)
+        )
+        QMessageBox.warning(workspace, "Duplicate Files Skipped", message)
 
     def refresh_file_tracker(self) -> WorkspaceMetrics | None:
         project_manager = self._project_manager
@@ -304,6 +392,9 @@ class DocumentsController:
     # ------------------------------------------------------------------
     # Tree helpers (adapted from original ProjectWorkspace implementation)
     # ------------------------------------------------------------------
+    def populate_directory_contents(self, *args, **kwargs) -> None:
+        self._populate_directory_contents(*args, **kwargs)
+
     def _populate_directory_contents(
         self,
         parent_item: QTreeWidgetItem,
@@ -663,4 +754,3 @@ class DocumentsController:
         if response == QMessageBox.Yes:
             self._missing_root_prompted = False
             self._workspace._select_source_root()
-
