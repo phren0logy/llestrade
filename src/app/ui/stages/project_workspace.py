@@ -56,6 +56,7 @@ from src.app.ui.workspace.services import (
 from src.app.workers import ConversionWorker, WorkerCoordinator, get_worker_pool
 from src.app.workers.highlight_worker import HighlightExtractionSummary
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
+from src.app.ui.widgets import BannerAction, SmartBanner
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,8 +88,8 @@ class ProjectWorkspace(QWidget):
         self._conversion_total = 0
         self._bulk_analysis_tab: BulkAnalysisTab | None = None
         self._bulk_controller: BulkAnalysisController | None = None
-        self._missing_bulk_label: QLabel | None = None
-        self._missing_highlights_label: QLabel | None = None
+        self._bulk_banner: SmartBanner | None = None
+        self._highlights_banner: SmartBanner | None = None
         self._highlights_tab: HighlightsTab | None = None
         self._highlights_controller: HighlightsController | None = None
         self._reports_tab: ReportsTab | None = None
@@ -154,8 +155,8 @@ class ProjectWorkspace(QWidget):
         self._rescan_button = tab.rescan_button
         self._source_tree = tab.source_tree
         self._root_warning_label = tab.root_warning_label
-        self._missing_highlights_label = tab.missing_highlights_label
-        self._missing_bulk_label = tab.missing_bulk_label
+        self._highlights_banner = tab.highlights_banner
+        self._bulk_banner = tab.bulk_banner
 
         self._rescan_button.clicked.connect(lambda: self._trigger_conversion(auto_run=False))
         self._source_tree.itemChanged.connect(self._on_source_item_changed)
@@ -307,10 +308,10 @@ class ProjectWorkspace(QWidget):
             self._workspace_metrics = self._project_manager.get_workspace_metrics(refresh=True)
         except Exception:
             self._counts_label.setText("Scan failed")
-            if getattr(self, "_missing_highlights_label", None):
-                self._missing_highlights_label.setText("")
-            if getattr(self, "_missing_bulk_label", None):
-                self._missing_bulk_label.setText("")
+            if self._highlights_banner:
+                self._highlights_banner.reset()
+            if self._bulk_banner:
+                self._bulk_banner.reset()
             return
 
         metrics = self._workspace_metrics.dashboard
@@ -336,15 +337,49 @@ class ProjectWorkspace(QWidget):
         bulk_missing = list(self._workspace_metrics.bulk_missing)
         highlights_missing = list(self._workspace_metrics.highlights_missing)
 
-        if getattr(self, "_missing_highlights_label", None):
-            self._missing_highlights_label.setText(
-                "Highlights missing: " + (", ".join(highlights_missing) if highlights_missing else "None")
-            )
+        if self._highlights_banner:
+            if highlights_missing:
+                total = metrics.pending_highlights or len(highlights_missing)
+                plural = "s" if total != 1 else ""
+                self._highlights_banner.set_role("warning")
+                self._highlights_banner.set_message(
+                    f"Highlights pending for {total} PDF{plural}.",
+                    "Review the queue to see which documents still need highlights.",
+                )
+                self._highlights_banner.set_actions(
+                    [
+                        BannerAction(
+                            label="Review list",
+                            callback=self.show_pending_highlights,
+                            is_default=True,
+                        )
+                    ]
+                )
+                self._highlights_banner.show()
+            else:
+                self._highlights_banner.reset()
 
-        if getattr(self, "_missing_bulk_label", None):
-            self._missing_bulk_label.setText(
-                "Bulk analysis missing: " + (", ".join(bulk_missing) if bulk_missing else "None")
-            )
+        if self._bulk_banner:
+            if bulk_missing:
+                total = metrics.pending_bulk_analysis or len(bulk_missing)
+                plural = "s" if total != 1 else ""
+                self._bulk_banner.set_role("warning")
+                self._bulk_banner.set_message(
+                    f"Bulk analysis pending for {total} document{plural}.",
+                    "Open the Bulk Analysis tab to create or refresh group runs.",
+                )
+                self._bulk_banner.set_actions(
+                    [
+                        BannerAction(
+                            label="Open Bulk Analysis",
+                            callback=self.show_bulk_analysis_tab,
+                            is_default=True,
+                        )
+                    ]
+                )
+                self._bulk_banner.show()
+            else:
+                self._bulk_banner.reset()
 
         self._update_last_scan_label()
 
@@ -357,6 +392,24 @@ class ProjectWorkspace(QWidget):
             metrics=self._workspace_metrics,
             highlight_state=highlight_state,
         )
+
+    def show_pending_highlights(self) -> None:
+        """Switch to the highlights tab and focus the pending list."""
+        if not self._highlights_tab:
+            return
+        index = self._tabs.indexOf(self._highlights_tab)
+        if index != -1:
+            self._tabs.setCurrentIndex(index)
+        if self._highlights_controller:
+            self._highlights_controller.show_pending_list()
+
+    def show_bulk_analysis_tab(self) -> None:
+        """Switch to the bulk analysis tab if available."""
+        if not self._bulk_analysis_tab:
+            return
+        index = self._tabs.indexOf(self._bulk_analysis_tab)
+        if index != -1:
+            self._tabs.setCurrentIndex(index)
 
     def _refresh_reports_view(self) -> None:
         if self._reports_controller:

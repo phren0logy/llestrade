@@ -4,16 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Optional
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import QLabel, QMessageBox, QTreeWidgetItem, QWidget
+from PySide6.QtWidgets import QLabel, QListWidgetItem, QMessageBox, QTreeWidgetItem, QWidget
 
 from src.app.core.file_tracker import WorkspaceMetrics
 from src.app.core.project_manager import HighlightState, ProjectManager
 from src.app.ui.workspace.highlights_tab import HighlightsTab
 from src.app.workers.highlight_worker import HighlightExtractionSummary
+from src.app.ui.widgets import BannerAction
 
 
 class HighlightsController:
@@ -39,10 +40,14 @@ class HighlightsController:
 
         self._errors: list[str] = []
         self._last_relative_path: str = ""
+        self._show_pending_details = False
+        self._current_missing: list[str] = []
+        self._current_pending_total = 0
 
         self._tab.extract_button.clicked.connect(self._handle_extract_clicked)
         self._tab.open_folder_button.clicked.connect(self._open_highlights_folder)
         self._tab.tree.itemDoubleClicked.connect(self._open_highlight_item)
+        self._tab.pending_list.itemDoubleClicked.connect(self._open_pending_path)
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -105,6 +110,13 @@ class HighlightsController:
                 self._tab.status_label.setText("Highlights have not been extracted yet.")
 
         self._populate_tree()
+        missing = list(metrics.highlights_missing) if metrics else []
+        self._current_missing = missing
+        pending_total = dashboard.pending_highlights if dashboard else len(missing)
+        self._current_pending_total = pending_total
+        if not missing:
+            self._show_pending_details = False
+        self._update_pending_panel()
         self._update_extract_button_state()
 
     # ------------------------------------------------------------------
@@ -154,6 +166,18 @@ class HighlightsController:
 
     def is_running(self) -> bool:
         return self._running
+
+    def show_pending_list(self) -> None:
+        """Expose the pending highlight roster."""
+        if not self._current_missing:
+            return
+        self._show_pending_details = True
+        self._update_pending_panel()
+        list_widget = self._tab.pending_list
+        if list_widget.count() > 0:
+            list_widget.setCurrentRow(0)
+        list_widget.scrollToTop()
+        list_widget.setFocus()
 
     # ------------------------------------------------------------------
     # Helpers
@@ -213,6 +237,61 @@ class HighlightsController:
         tree.addTopLevelItem(colors_item)
         tree.resizeColumnToContents(0)
 
+    def _update_pending_panel(self) -> None:
+        banner = self._tab.pending_banner
+        list_widget = self._tab.pending_list
+
+        if not self._current_missing:
+            banner.reset()
+            list_widget.hide()
+            list_widget.clear()
+            return
+
+        total = self._current_pending_total or len(self._current_missing)
+        plural = "s" if total != 1 else ""
+        action_label = "Hide list" if self._show_pending_details else "Review list"
+
+        banner.set_role("warning")
+        banner.set_message(
+            f"Highlights pending for {total} PDF{plural}.",
+            "Turn on the pending view to confirm which documents still need highlights.",
+        )
+        banner.set_actions(
+            [
+                BannerAction(
+                    label=action_label,
+                    callback=self._toggle_pending_list,
+                    is_default=True,
+                )
+            ]
+        )
+        banner.show()
+
+        if self._show_pending_details:
+            list_widget.setUpdatesEnabled(False)
+            list_widget.clear()
+            for relative in sorted(self._current_missing):
+                list_widget.addItem(relative)
+            list_widget.setUpdatesEnabled(True)
+            list_widget.show()
+        else:
+            list_widget.hide()
+
+    def _toggle_pending_list(self) -> None:
+        self._show_pending_details = not self._show_pending_details
+        self._update_pending_panel()
+        if self._show_pending_details and self._tab.pending_list.count() > 0:
+            self._tab.pending_list.setCurrentRow(0)
+
+    def _open_pending_path(self, item: QListWidgetItem) -> None:
+        manager = self._project_manager
+        if not manager or not manager.project_dir:
+            return
+        relative = Path(item.text())
+        target = manager.project_dir / relative
+        if target.exists():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
     def _reset_view(self) -> None:
         self._tab.counts_label.setText("Highlights extracted: 0 | Pending: 0")
         self._tab.last_run_label.setText("Last run: —")
@@ -220,6 +299,12 @@ class HighlightsController:
             self._tab.status_label.setText("Highlights have not been extracted yet.")
         self._tab.open_folder_button.setEnabled(False)
         self._tab.tree.clear()
+        self._tab.pending_banner.reset()
+        self._tab.pending_list.clear()
+        self._tab.pending_list.hide()
+        self._current_missing.clear()
+        self._current_pending_total = 0
+        self._show_pending_details = False
         self._update_extract_button_state()
 
     def _update_extract_button_state(self) -> None:

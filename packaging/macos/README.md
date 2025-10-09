@@ -10,6 +10,14 @@ PYINSTALLER_CONFIG_DIR=.pyinstaller UV_CACHE_DIR=.uv_cache uv run pyinstaller sc
 
 The spec emits `dist/darwin/Llestrade.app` so Finder launches straight into the GUI (no stray Terminal window) and nests PyInstaller’s `_internal` payload inside the bundle.
 
+For convenience, you can run:
+
+```bash
+./packaging/macos/build_app.sh [--skip-icon] [--fresh-dist]
+```
+
+This wrapper regenerates the icon (unless skipped), sets up the PyInstaller cache directories, and drops the resulting `Llestrade.app` under `dist/darwin/`.
+
 ## Icon pipeline
 
 1. Place the master 1024×1024 PNG at `assets/icons/llestrade.png`.

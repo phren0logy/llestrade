@@ -9,6 +9,7 @@ from pathlib import Path
 import os
 from datetime import datetime
 from typing import Dict, Optional, Any
+from threading import Lock
 
 try:
     import keyring
@@ -19,6 +20,11 @@ except ImportError:
 
 from PySide6.QtCore import QObject, Signal, QSettings
 from src.config.paths import app_config_dir
+
+# Shared cache so multiple SecureSettings instances reuse a single keychain lookup.
+_GLOBAL_API_KEY_CACHE: Dict[str, Optional[str]] = {}
+_CACHE_LOCK = Lock()
+_CACHE_MISS = object()
 
 
 class SecureSettings(QObject):
@@ -46,8 +52,8 @@ class SecureSettings(QObject):
         self.settings_dir.mkdir(parents=True, exist_ok=True)
         self.settings_path = self.settings_dir / self.SETTINGS_FILE
         
-        # Cache for API keys to avoid repeated keychain access
-        self._api_key_cache: Dict[str, str] = {}
+        # Cache for API keys to avoid repeated keychain access (shared across instances)
+        self._api_key_cache = _GLOBAL_API_KEY_CACHE
         
         # Load regular settings
         self._settings = self._load_settings()
@@ -110,7 +116,8 @@ class SecureSettings(QObject):
                     f"api_key_{provider}",
                     api_key
                 )
-                self._api_key_cache[provider] = api_key
+                with _CACHE_LOCK:
+                    self._api_key_cache[provider] = api_key
                 self.api_key_changed.emit(provider)
                 self.logger.info(f"API key for {provider} stored securely")
                 return True
@@ -124,31 +131,34 @@ class SecureSettings(QObject):
                 self._settings["api_keys"] = {}
             self._settings["api_keys"][provider] = api_key
             self._save_settings()
-            self._api_key_cache[provider] = api_key
+            with _CACHE_LOCK:
+                self._api_key_cache[provider] = api_key
             self.api_key_changed.emit(provider)
             return True
     
     def get_api_key(self, provider: str) -> Optional[str]:
         """Retrieve API key from OS keychain."""
-        # Check cache first
-        if provider in self._api_key_cache:
-            return self._api_key_cache[provider]
-        
-        if KEYRING_AVAILABLE:
-            try:
-                key = keyring.get_password(self.SERVICE_NAME, f"api_key_{provider}")
-                if key:
-                    self._api_key_cache[provider] = key
-                return key
-            except Exception as e:
-                self.logger.error(f"Failed to retrieve API key: {e}")
-        
-        # Fallback to settings file
-        api_keys = self._settings.get("api_keys", {})
-        key = api_keys.get(provider)
-        if key:
+        with _CACHE_LOCK:
+            cached = self._api_key_cache.get(provider, _CACHE_MISS)
+            if cached is not _CACHE_MISS:
+                return cached
+
+            # Cache miss: hit the keychain (or fallback) while holding the lock
+            key: Optional[str] = None
+            if KEYRING_AVAILABLE:
+                try:
+                    key = keyring.get_password(self.SERVICE_NAME, f"api_key_{provider}")
+                    if key:
+                        self._api_key_cache[provider] = key
+                        return key
+                except Exception as e:
+                    self.logger.error(f"Failed to retrieve API key: {e}")
+
+            # Fallback to settings file
+            api_keys = self._settings.get("api_keys", {})
+            key = api_keys.get(provider)
             self._api_key_cache[provider] = key
-        return key
+            return key
     
     def remove_api_key(self, provider: str) -> bool:
         """Remove API key from OS keychain."""
@@ -171,8 +181,8 @@ class SecureSettings(QObject):
             success = True
         
         # Clear cache
-        if provider in self._api_key_cache:
-            del self._api_key_cache[provider]
+        with _CACHE_LOCK:
+            self._api_key_cache.pop(provider, None)
         
         if success:
             self.api_key_changed.emit(provider)

@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from src.app.ui.widgets import SmartBanner
+
 
 class DocumentsTab(QWidget):
     """Encapsulate the Documents tab UI elements.
@@ -44,11 +46,11 @@ class DocumentsTab(QWidget):
         self.root_warning_label.setStyleSheet("color: #b26a00;")
         self.root_warning_label.hide()
 
-        self.missing_highlights_label = QLabel("Highlights missing: —")
-        self.missing_highlights_label.setWordWrap(True)
+        self.highlights_banner = SmartBanner(parent=self)
+        self.highlights_banner.hide()
 
-        self.missing_bulk_label = QLabel("Bulk analysis missing: —")
-        self.missing_bulk_label.setWordWrap(True)
+        self.bulk_banner = SmartBanner(parent=self)
+        self.bulk_banner.hide()
 
         self._build_layout()
 
@@ -77,8 +79,8 @@ class DocumentsTab(QWidget):
 
         # Additional status labels
         layout.addWidget(self.root_warning_label)
-        layout.addWidget(self.missing_highlights_label)
-        layout.addWidget(self.missing_bulk_label)
+        layout.addWidget(self.highlights_banner)
+        layout.addWidget(self.bulk_banner)
 
         layout.addStretch()
 
@@ -89,4 +91,3 @@ class DocumentsTab(QWidget):
 
     def clear_tree(self) -> None:
         self.source_tree.clear()
-

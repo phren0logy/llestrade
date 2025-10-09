@@ -25,6 +25,7 @@ from src.app.ui.workspace.qt_flags import (
     ITEM_IS_TRISTATE,
     ITEM_IS_USER_CHECKABLE,
 )
+from src.app.ui.widgets import BannerAction
 
 if TYPE_CHECKING:  # pragma: no cover - type checking only
     from src.app.ui.stages.project_workspace import ProjectWorkspace
@@ -65,6 +66,8 @@ class DocumentsController:
         self._new_dir_prompt_active = False
         self._current_warnings = []
         self._missing_root_prompted = False
+        self._tab.highlights_banner.reset()
+        self._tab.bulk_banner.reset()
 
         tree = self._tab.source_tree
         tree.clear()
@@ -74,8 +77,6 @@ class DocumentsController:
             self._tab.source_root_label.setText("Source root: not set")
             self._tab.counts_label.setText("Converted: 0 | Highlights: 0 | Bulk analysis: 0")
             self._tab.last_scan_label.setText("")
-            self._tab.missing_highlights_label.setText("Highlights missing: —")
-            self._tab.missing_bulk_label.setText("Bulk analysis missing: —")
         self.set_root_warning([])
 
     def shutdown(self) -> None:
@@ -163,8 +164,8 @@ class DocumentsController:
         counts_label = self._tab.counts_label
         if not project_manager:
             counts_label.setText("Converted: 0 | Highlights: 0 | Bulk analysis: 0")
-            self._tab.missing_highlights_label.setText("Highlights missing: —")
-            self._tab.missing_bulk_label.setText("Bulk analysis missing: —")
+            self._tab.highlights_banner.reset()
+            self._tab.bulk_banner.reset()
             self._workspace_metrics = None
             return None
 
@@ -172,8 +173,8 @@ class DocumentsController:
             self._workspace_metrics = project_manager.get_workspace_metrics(refresh=True)
         except Exception:
             counts_label.setText("Scan failed")
-            self._tab.missing_highlights_label.setText("")
-            self._tab.missing_bulk_label.setText("")
+            self._tab.highlights_banner.reset()
+            self._tab.bulk_banner.reset()
             return None
 
         metrics = self._workspace_metrics.dashboard
@@ -196,12 +197,8 @@ class DocumentsController:
         highlights_missing = list(self._workspace_metrics.highlights_missing)
         bulk_missing = list(self._workspace_metrics.bulk_missing)
 
-        self._tab.missing_highlights_label.setText(
-            "Highlights missing: " + (", ".join(highlights_missing) if highlights_missing else "None")
-        )
-        self._tab.missing_bulk_label.setText(
-            "Bulk analysis missing: " + (", ".join(bulk_missing) if bulk_missing else "None")
-        )
+        self._update_highlights_banner(highlights_missing, metrics.pending_highlights)
+        self._update_bulk_banner(bulk_missing, metrics.pending_bulk_analysis)
 
         self.update_last_scan_label()
         return self._workspace_metrics
@@ -394,6 +391,57 @@ class DocumentsController:
     @property
     def workspace_metrics(self) -> WorkspaceMetrics | None:
         return self._workspace_metrics
+
+    # ------------------------------------------------------------------
+    # Banner helpers
+    # ------------------------------------------------------------------
+    def _update_highlights_banner(self, missing: Sequence[str], pending_count: int) -> None:
+        banner = self._tab.highlights_banner
+        if not missing:
+            banner.reset()
+            return
+
+        total = pending_count or len(missing)
+        plural = "s" if total != 1 else ""
+        banner.set_role("warning")
+        banner.set_message(
+            f"Highlights pending for {total} PDF{plural}.",
+            "Review the queue to see which documents still need highlights.",
+        )
+        banner.set_actions(
+            [
+                BannerAction(
+                    label="Review list",
+                    callback=self._workspace.show_pending_highlights,
+                    is_default=True,
+                )
+            ]
+        )
+        banner.show()
+
+    def _update_bulk_banner(self, missing: Sequence[str], pending_count: int) -> None:
+        banner = self._tab.bulk_banner
+        if not missing:
+            banner.reset()
+            return
+
+        total = pending_count or len(missing)
+        plural = "s" if total != 1 else ""
+        banner.set_role("warning")
+        banner.set_message(
+            f"Bulk analysis pending for {total} document{plural}.",
+            "Open the Bulk Analysis tab to create or refresh group runs.",
+        )
+        banner.set_actions(
+            [
+                BannerAction(
+                    label="Open Bulk Analysis",
+                    callback=self._workspace.show_bulk_analysis_tab,
+                    is_default=True,
+                )
+            ]
+        )
+        banner.show()
 
     # ------------------------------------------------------------------
     # Tree helpers (adapted from original ProjectWorkspace implementation)

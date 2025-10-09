@@ -7,11 +7,14 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QHBoxLayout,
     QLabel,
+    QListWidget,
     QPushButton,
     QTreeWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from src.app.ui.widgets import SmartBanner
 
 
 class HighlightsTab(QWidget):
@@ -45,6 +48,15 @@ class HighlightsTab(QWidget):
         self.tree.setHeaderHidden(False)
         self.tree.setWordWrap(True)
 
+        self.pending_banner = SmartBanner(parent=self)
+        self.pending_banner.hide()
+
+        self.pending_list = QListWidget()
+        self.pending_list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.pending_list.setUniformItemSizes(True)
+        self.pending_list.setMinimumHeight(140)
+        self.pending_list.hide()
+
         self._build_layout()
 
     def _build_layout(self) -> None:
@@ -66,6 +78,8 @@ class HighlightsTab(QWidget):
         layout.addLayout(button_row)
 
         layout.addWidget(self.status_label)
+        layout.addWidget(self.pending_banner)
+        layout.addWidget(self.pending_list)
         layout.addWidget(self.tree, stretch=1)
 
 
