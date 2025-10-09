@@ -332,7 +332,7 @@ class BulkAnalysisController:
         except Exception:
             return None, set(), set()
 
-        values = manager.placeholder_mapping()
+        values = manager.project_placeholder_values()
 
         required: set[str] = set()
         optional: set[str] = set()
@@ -477,6 +477,8 @@ class BulkAnalysisController:
             metadata=manager.metadata,
             default_provider=provider_default,
             force_rerun=force_rerun,
+             placeholder_values=manager.project_placeholder_values(),
+             project_name=manager.project_name,
             on_progress=self._handle_progress,
             on_failed=self._handle_failed,
             on_log=self._handle_log,
@@ -568,6 +570,8 @@ class BulkAnalysisController:
             group=group,
             metadata=manager.metadata,
             force_rerun=force_rerun,
+            placeholder_values=manager.project_placeholder_values(),
+            project_name=manager.project_name,
             on_progress=self._handle_progress,
             on_failed=self._handle_failed,
             on_log=self._handle_log,

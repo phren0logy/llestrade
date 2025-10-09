@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 from shiboken6 import isValid
 
@@ -31,6 +31,8 @@ class ReportJobConfig:
     refinement_system_prompt_path: Path
     metadata: ProjectMetadata
     max_report_tokens: int = 60_000
+    placeholder_values: Mapping[str, str] | None = None
+    project_name: str = ""
 
 
 class ReportsService:
@@ -72,6 +74,8 @@ class ReportsService:
             refinement_system_prompt_path=config.refinement_system_prompt_path,
             metadata=config.metadata,
             max_report_tokens=config.max_report_tokens,
+            placeholder_values=config.placeholder_values,
+            project_name=config.project_name,
         )
 
         worker.progress.connect(on_progress)

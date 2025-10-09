@@ -7,7 +7,9 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+
+import frontmatter
 
 from PySide6.QtCore import Signal
 
@@ -33,6 +35,7 @@ from src.app.core.bulk_analysis_runner import (
     render_user_prompt,
     should_chunk,
 )
+from src.app.core.placeholders.system import SourceFileContext, system_placeholder_map
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.secure_settings import SecureSettings
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
@@ -94,6 +97,7 @@ def _compute_prompt_hash(
     provider_config: ProviderConfig,
     group: BulkAnalysisGroup,
     metadata: Optional[ProjectMetadata],
+    placeholder_values: Mapping[str, str] | None = None,
 ) -> str:
     metadata_summary: Dict[str, str] = {}
     if metadata:
@@ -113,7 +117,10 @@ def _compute_prompt_hash(
         "use_reasoning": group.use_reasoning,
         "model_context_window": group.model_context_window,
         "metadata": metadata_summary,
+        "placeholder_requirements": group.placeholder_requirements,
     }
+    if placeholder_values:
+        payload["placeholders"] = {k: placeholder_values.get(k, "") for k in sorted(placeholder_values)}
 
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8"))
     return digest.hexdigest()
@@ -161,6 +168,8 @@ class BulkAnalysisWorker(DashboardWorker):
         metadata: Optional[ProjectMetadata],
         default_provider: Tuple[str, Optional[str]] = ("anthropic", None),
         force_rerun: bool = False,
+        placeholder_values: Mapping[str, str] | None = None,
+        project_name: str = "",
     ) -> None:
         super().__init__(worker_name="bulk_analysis")
 
@@ -170,10 +179,62 @@ class BulkAnalysisWorker(DashboardWorker):
         self._metadata = metadata
         self._default_provider = default_provider
         self._force_rerun = force_rerun
+        self._base_placeholders = dict(placeholder_values or {})
+        self._project_name = project_name
+        self._run_timestamp = datetime.now(timezone.utc)
 
     # ------------------------------------------------------------------
     # QRunnable API
     # ------------------------------------------------------------------
+    def _build_placeholder_map(
+        self,
+        *,
+        source: Optional[SourceFileContext] = None,
+        reduce_sources: Optional[Sequence[SourceFileContext]] = None,
+    ) -> Dict[str, str]:
+        placeholders = dict(self._base_placeholders)
+        system_values = system_placeholder_map(
+            project_name=self._project_name,
+            timestamp=self._run_timestamp,
+            source=source,
+            reduce_sources=reduce_sources,
+        )
+        placeholders.update(system_values)
+        return placeholders
+
+    def _extract_source_context(self, metadata: Dict[str, object], document: BulkAnalysisDocument) -> SourceFileContext:
+        sources = metadata.get("sources")
+        if isinstance(sources, list) and sources:
+            entry = sources[0] or {}
+            rel = entry.get("relative") if isinstance(entry, dict) else None
+            path_value = entry.get("path") if isinstance(entry, dict) else None
+            rel_path = str(rel).strip() if rel else document.relative_path
+            absolute: Path
+            if isinstance(path_value, str) and path_value.strip():
+                candidate = Path(path_value).expanduser()
+                if not candidate.is_absolute():
+                    candidate = (self._project_dir / candidate).resolve()
+                absolute = candidate
+            else:
+                absolute = (self._project_dir / rel_path).resolve()
+            return SourceFileContext(absolute_path=absolute, relative_path=rel_path)
+
+        rel_path = document.relative_path
+        absolute = (self._project_dir / rel_path).resolve()
+        return SourceFileContext(absolute_path=absolute, relative_path=rel_path)
+
+    def _load_document(self, document: BulkAnalysisDocument) -> tuple[str, Dict[str, object], SourceFileContext]:
+        raw = document.source_path.read_text(encoding="utf-8")
+        try:
+            post = frontmatter.loads(raw)
+            body = post.content or ""
+            metadata = dict(post.metadata or {})
+        except Exception:
+            body = raw
+            metadata = {}
+        source_context = self._extract_source_context(metadata, document)
+        return body, metadata, source_context
+
     def _run(self) -> None:  # pragma: no cover - executed in worker thread
         provider: Optional[BaseLLMProvider] = None
         successes = 0
@@ -194,12 +255,23 @@ class BulkAnalysisWorker(DashboardWorker):
             self.logger.info("%s starting bulk analysis (docs=%s)", self.job_tag, total)
             provider_config = self._resolve_provider()
             bundle = load_prompts(self._project_dir, self._group, self._metadata)
-            system_prompt = render_system_prompt(bundle, self._metadata)
+            global_placeholders = self._build_placeholder_map()
+            system_prompt = render_system_prompt(
+                bundle,
+                self._metadata,
+                placeholder_values=global_placeholders,
+            )
             provider = self._create_provider(provider_config, system_prompt)
             if provider is None:
                 raise RuntimeError("Bulk analysis provider failed to initialise")
 
-            prompt_hash = _compute_prompt_hash(bundle, provider_config, self._group, self._metadata)
+            prompt_hash = _compute_prompt_hash(
+                bundle,
+                provider_config,
+                self._group,
+                self._metadata,
+                placeholder_values=self._base_placeholders,
+            )
             manifest_path = _manifest_path(self._project_dir, self._group)
             manifest = _load_manifest(manifest_path)
             entries = manifest.setdefault("documents", {})  # type: ignore[arg-type]
@@ -238,6 +310,7 @@ class BulkAnalysisWorker(DashboardWorker):
                         bundle,
                         system_prompt,
                         document,
+                        global_placeholders,
                     )
                 except BulkAnalysisCancelled:
                     raise
@@ -313,26 +386,30 @@ class BulkAnalysisWorker(DashboardWorker):
         bundle: PromptBundle,
         system_prompt: str,
         document: BulkAnalysisDocument,
+        global_placeholders: Dict[str, str],
     ) -> tuple[str, Dict[str, object]]:
         if self.is_cancelled():
             raise BulkAnalysisCancelled
 
-        content = document.source_path.read_text(encoding="utf-8")
+        body, metadata, source_context = self._load_document(document)
+        doc_placeholders = dict(global_placeholders)
+        doc_placeholders.update(self._build_placeholder_map(source=source_context))
+
         override_window = getattr(self._group, "model_context_window", None)
         if isinstance(override_window, int) and override_window > 0:
             from src.common.llm.tokens import TokenCounter
 
             token_info = TokenCounter.count(
-                text=content,
+                text=body,
                 provider=provider_config.provider_id,
                 model=provider_config.model or "",
             )
-            token_count = token_info.get("token_count") if token_info.get("success") else len(content) // 4
+            token_count = token_info.get("token_count") if token_info.get("success") else len(body) // 4
             max_tokens = max(int(override_window * 0.5), 4000)
             needs_chunking = token_count > max_tokens
         else:
             needs_chunking, token_count, max_tokens = should_chunk(
-                content,
+                body,
                 provider_config.provider_id,
                 provider_config.model,
             )
@@ -347,25 +424,33 @@ class BulkAnalysisWorker(DashboardWorker):
             f"Processing {document.relative_path} ({token_count} tokens, "
             f"chunking={'yes' if needs_chunking else 'no'})"
         )
-        self.logger.debug("%s processing %s tokens=%s chunking=%s", self.job_tag, document.relative_path, token_count, 'yes' if needs_chunking else 'no')
+        self.logger.debug(
+            "%s processing %s tokens=%s chunking=%s",
+            self.job_tag,
+            document.relative_path,
+            token_count,
+            'yes' if needs_chunking else 'no',
+        )
 
         if not needs_chunking:
             prompt = render_user_prompt(
                 bundle,
                 self._metadata,
                 document.relative_path,
-                content,
+                body,
+                placeholder_values=doc_placeholders,
             )
             run_details["chunk_count"] = 1
             return self._invoke_provider(provider, provider_config, prompt, system_prompt), run_details
 
-        chunks = generate_chunks(content, max_tokens)
+        chunks = generate_chunks(body, max_tokens)
         if not chunks:
             prompt = render_user_prompt(
                 bundle,
                 self._metadata,
                 document.relative_path,
-                content,
+                body,
+                placeholder_values=doc_placeholders,
             )
             run_details["chunk_count"] = 1
             run_details["chunking"] = False
@@ -384,6 +469,7 @@ class BulkAnalysisWorker(DashboardWorker):
                 chunk,
                 chunk_index=idx,
                 chunk_total=total_chunks,
+                placeholder_values=doc_placeholders,
             )
             summary = self._invoke_provider(
                 provider,
@@ -397,6 +483,7 @@ class BulkAnalysisWorker(DashboardWorker):
             chunk_summaries,
             document_name=document.relative_path,
             metadata=self._metadata,
+            placeholder_values=doc_placeholders,
         )
         return self._invoke_provider(provider, provider_config, combine_prompt, system_prompt), run_details
 

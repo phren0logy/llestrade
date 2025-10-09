@@ -800,6 +800,8 @@ class ReportsController:
             generation_system_prompt_path=gen_system_path,
             refinement_system_prompt_path=ref_system_path,
             metadata=metadata,
+            placeholder_values=manager.project_placeholder_values(),
+            project_name=manager.project_name,
         )
 
         started = self._service.run(

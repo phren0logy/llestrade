@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Sequence
+from typing import Callable, Mapping, Optional, Sequence
 
 from shiboken6 import isValid
 
@@ -33,6 +33,8 @@ class BulkAnalysisService:
         metadata: Optional[ProjectMetadata],
         default_provider: tuple[str, str | None],
         force_rerun: bool,
+        placeholder_values: Mapping[str, str],
+        project_name: str,
         on_progress: Callable[[str, int, int, str], None],
         on_failed: Callable[[str, str, str], None],
         on_log: Callable[[str, str], None],
@@ -49,6 +51,8 @@ class BulkAnalysisService:
             metadata=metadata,
             default_provider=default_provider,
             force_rerun=force_rerun,
+            placeholder_values=placeholder_values,
+            project_name=project_name,
         )
 
         gid = group.group_id
@@ -74,6 +78,8 @@ class BulkAnalysisService:
         group: BulkAnalysisGroup,
         metadata: Optional[ProjectMetadata],
         force_rerun: bool,
+        placeholder_values: Mapping[str, str],
+        project_name: str,
         on_progress: Callable[[str, int, int, str], None],
         on_failed: Callable[[str, str, str], None],
         on_log: Callable[[str, str], None],
@@ -88,6 +94,8 @@ class BulkAnalysisService:
             group=group,
             metadata=metadata,
             force_rerun=force_rerun,
+            placeholder_values=placeholder_values,
+            project_name=project_name,
         )
 
         gid = group.group_id

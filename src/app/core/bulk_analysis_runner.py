@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Sequence
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from src.common.llm.chunking import ChunkingStrategy
 from src.common.llm.tokens import TokenCounter
@@ -106,10 +106,17 @@ def load_prompts(
     return PromptBundle(system_template=system_template, user_template=user_template)
 
 
-def render_system_prompt(bundle: PromptBundle, metadata: Optional[ProjectMetadata]) -> str:
+def render_system_prompt(
+    bundle: PromptBundle,
+    metadata: Optional[ProjectMetadata],
+    *,
+    placeholder_values: Mapping[str, str] | None = None,
+) -> str:
     """Format the system prompt with available metadata."""
 
     context = _metadata_context(metadata)
+    if placeholder_values:
+        context.update({k: v for k, v in placeholder_values.items() if v is not None})
     return format_prompt(bundle.system_template, context)
 
 
@@ -119,6 +126,7 @@ def render_user_prompt(
     document_name: str,
     document_content: str,
     *,
+    placeholder_values: Mapping[str, str] | None = None,
     chunk_index: Optional[int] = None,
     chunk_total: Optional[int] = None,
 ) -> str:
@@ -131,6 +139,8 @@ def render_user_prompt(
             "document_content": document_content,
         }
     )
+    if placeholder_values:
+        context.update({k: v for k, v in placeholder_values.items() if v is not None})
     if chunk_index is not None and chunk_total is not None:
         context.update(
             {
@@ -176,6 +186,7 @@ def combine_chunk_summaries(
     *,
     document_name: str,
     metadata: Optional[ProjectMetadata],
+    placeholder_values: Mapping[str, str] | None = None,
 ) -> tuple[str, Dict[str, str]]:
     """Prepare the final prompt for combining chunk summaries."""
 
@@ -187,6 +198,8 @@ def combine_chunk_summaries(
             "chunk_summaries": combined,
         }
     )
+    if placeholder_values:
+        context.update({k: v for k, v in placeholder_values.items() if v is not None})
     prompt = format_prompt(
         (
             "Create a unified bulk analysis by combining these partial results of document: {document_name}\n\n"

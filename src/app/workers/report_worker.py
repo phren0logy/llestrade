@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Signal
 
@@ -25,6 +25,7 @@ from src.app.core.refinement_prompt import (
     validate_refinement_prompt,
 )
 from src.app.core.prompt_placeholders import format_prompt
+from src.app.core.placeholders.system import system_placeholder_map
 from src.app.core.report_template_sections import (
     TemplateSection,
     load_template_sections,
@@ -67,6 +68,8 @@ class ReportWorker(DashboardWorker):
         refinement_system_prompt_path: Path,
         metadata: ProjectMetadata,
         max_report_tokens: int = 60_000,
+        placeholder_values: Mapping[str, str] | None = None,
+        project_name: str = "",
     ) -> None:
         super().__init__(worker_name="report")
         self._project_dir = project_dir
@@ -85,10 +88,23 @@ class ReportWorker(DashboardWorker):
         self._metadata = metadata
         self._max_report_tokens = max_report_tokens
         self._refine_usage: Optional[int] = None
+        self._base_placeholders = dict(placeholder_values or {})
+        effective_name = project_name or metadata.case_name or project_dir.name
+        self._project_name = effective_name
+        self._run_timestamp = datetime.now(timezone.utc)
 
     # ------------------------------------------------------------------
     # QRunnable implementation
     # ------------------------------------------------------------------
+    def _placeholder_map(self) -> Dict[str, str]:
+        placeholders = dict(self._base_placeholders)
+        system_values = system_placeholder_map(
+            project_name=self._project_name,
+            timestamp=self._run_timestamp,
+        )
+        placeholders.update(system_values)
+        return placeholders
+
     def _run(self) -> None:  # pragma: no cover - exercised via tests
         try:
             if self._template_path is None:
@@ -194,6 +210,7 @@ class ReportWorker(DashboardWorker):
                 additional_documents=additional_documents,
                 transcript_text=transcript_text,
                 system_prompt=generation_system_prompt,
+                placeholder_map=placeholder_map,
             )
 
             draft_content = self._combine_section_outputs(section_outputs)
@@ -239,6 +256,7 @@ class ReportWorker(DashboardWorker):
                 refinement_template=self._refinement_prompt_content,
                 draft_content=draft_content,
                 system_prompt=refinement_system_prompt,
+                placeholder_map=placeholder_map,
             )
             refinement_prompts = [
                 self._prompt_reference(self._refinement_user_prompt_path, role="refinement-user"),
@@ -376,6 +394,7 @@ class ReportWorker(DashboardWorker):
         additional_documents: str,
         transcript_text: str,
         system_prompt: str,
+        placeholder_map: Mapping[str, str],
     ) -> List[dict]:
         provider = self._create_provider(system_prompt)
         outputs: List[dict] = []
@@ -389,6 +408,7 @@ class ReportWorker(DashboardWorker):
                 "document_content": additional_documents,
                 "section_title": section.title,
             }
+            context.update(placeholder_map)
             prompt = format_prompt(user_prompt_template, context)
 
             pct = 5 + int(40 * index / max(total, 1))
@@ -484,6 +504,7 @@ class ReportWorker(DashboardWorker):
         refinement_template: str,
         draft_content: str,
         system_prompt: str,
+        placeholder_map: Mapping[str, str],
     ) -> tuple[str, Optional[str]]:
         template_raw = ""
         if self._template_path and self._template_path.exists():
@@ -498,6 +519,7 @@ class ReportWorker(DashboardWorker):
                 "draft_report": draft_content,
                 "template": template_raw,
                 "transcript": transcript_raw,
+                **placeholder_map,
             },
         )
         provider = self._create_provider(system_prompt)

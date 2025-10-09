@@ -8,7 +8,9 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+
+import frontmatter
 
 from PySide6.QtCore import Signal
 
@@ -41,6 +43,7 @@ from src.app.core.bulk_analysis_runner import (
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.secure_settings import SecureSettings
+from src.app.core.placeholders.system import SourceFileContext, system_placeholder_map
 from .base import DashboardWorker
 
 LOGGER = logging.getLogger(__name__)
@@ -87,6 +90,7 @@ def _compute_prompt_hash(
     provider_cfg: ProviderConfig,
     group: BulkAnalysisGroup,
     metadata: Optional[ProjectMetadata],
+    placeholder_values: Mapping[str, str] | None = None,
 ) -> str:
     metadata_summary: Dict[str, str] = {}
     if metadata:
@@ -108,7 +112,10 @@ def _compute_prompt_hash(
         "system_prompt_path": group.system_prompt_path,
         "user_prompt_path": group.user_prompt_path,
         "metadata": metadata_summary,
+        "placeholder_requirements": group.placeholder_requirements,
     }
+    if placeholder_values:
+        payload["placeholders"] = {k: placeholder_values.get(k, "") for k in sorted(placeholder_values)}
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
@@ -155,26 +162,76 @@ class BulkReduceWorker(DashboardWorker):
         group: BulkAnalysisGroup,
         metadata: Optional[ProjectMetadata],
         force_rerun: bool = False,
+        placeholder_values: Mapping[str, str] | None = None,
+        project_name: str = "",
     ) -> None:
         super().__init__(worker_name="bulk_reduce")
         self._project_dir = project_dir
         self._group = group
         self._metadata = metadata
         self._force_rerun = force_rerun
+        self._base_placeholders = dict(placeholder_values or {})
+        self._project_name = project_name
+        self._run_timestamp = datetime.now(timezone.utc)
 
     # ------------------------------------------------------------------
     # QRunnable API
     # ------------------------------------------------------------------
+    def _build_placeholder_map(
+        self,
+        *,
+        source: Optional[SourceFileContext] = None,
+        reduce_sources: Optional[Sequence[SourceFileContext]] = None,
+    ) -> Dict[str, str]:
+        placeholders = dict(self._base_placeholders)
+        system_values = system_placeholder_map(
+            project_name=self._project_name,
+            timestamp=self._run_timestamp,
+            source=source,
+            reduce_sources=reduce_sources,
+        )
+        placeholders.update(system_values)
+        return placeholders
+
+    def _extract_source_contexts(self, path: Path) -> List[SourceFileContext]:
+        try:
+            raw = path.read_text(encoding="utf-8")
+            post = frontmatter.loads(raw)
+            metadata = dict(post.metadata or {})
+        except Exception:
+            metadata = {}
+
+        contexts: List[SourceFileContext] = []
+        sources = metadata.get("sources")
+        if isinstance(sources, list):
+            for entry in sources:
+                if not isinstance(entry, dict):
+                    continue
+                rel = entry.get("relative") or entry.get("path")
+                if not isinstance(rel, str) or not rel.strip():
+                    continue
+                rel_path = rel.strip()
+                abs_candidate = entry.get("path") if isinstance(entry.get("path"), str) else None
+                if isinstance(abs_candidate, str) and abs_candidate.strip():
+                    candidate = Path(abs_candidate).expanduser()
+                    if not candidate.is_absolute():
+                        candidate = (self._project_dir / candidate).resolve()
+                    absolute = candidate
+                else:
+                    absolute = (self._project_dir / rel_path).resolve()
+                contexts.append(SourceFileContext(absolute_path=absolute, relative_path=rel_path))
+        if not contexts:
+            rel_path = path.relative_to(self._project_dir).as_posix()
+            contexts.append(SourceFileContext(absolute_path=path.resolve(), relative_path=rel_path))
+        unique: Dict[str, SourceFileContext] = {}
+        for ctx in contexts:
+            unique[ctx.relative_path] = ctx
+        return list(unique.values())
+
     def _run(self) -> None:  # pragma: no cover - executed in worker thread
         try:
             provider_cfg = self._resolve_provider()
             bundle = load_prompts(self._project_dir, self._group, self._metadata)
-            system_prompt = render_system_prompt(bundle, self._metadata)
-            prompt_hash = _compute_prompt_hash(bundle, provider_cfg, self._group, self._metadata)
-
-            provider = self._create_provider(provider_cfg, system_prompt)
-            if provider is None:
-                raise RuntimeError("Reduce provider failed to initialise")
 
             inputs = self._resolve_inputs()
             total = len(inputs)
@@ -182,6 +239,30 @@ class BulkReduceWorker(DashboardWorker):
                 self.log_message.emit("No inputs selected for combined operation.")
                 self.finished.emit(0, 0)
                 return
+
+            aggregate_contexts_map: Dict[str, SourceFileContext] = {}
+            for _, path, _ in inputs:
+                for ctx in self._extract_source_contexts(path):
+                    aggregate_contexts_map[ctx.relative_path] = ctx
+            aggregate_contexts = list(aggregate_contexts_map.values())
+
+            placeholders_global = self._build_placeholder_map(reduce_sources=aggregate_contexts)
+            system_prompt = render_system_prompt(
+                bundle,
+                self._metadata,
+                placeholder_values=placeholders_global,
+            )
+            prompt_hash = _compute_prompt_hash(
+                bundle,
+                provider_cfg,
+                self._group,
+                self._metadata,
+                placeholder_values=self._base_placeholders,
+            )
+
+            provider = self._create_provider(provider_cfg, system_prompt)
+            if provider is None:
+                raise RuntimeError("Reduce provider failed to initialise")
 
             signature_inputs = _inputs_signature(inputs)
             state_manifest_path = _manifest_path(self._project_dir, self._group)
@@ -239,6 +320,7 @@ class BulkReduceWorker(DashboardWorker):
                     self._metadata,
                     self._group.name,
                     combined_content,
+                    placeholder_values=placeholders_global,
                 )
                 result = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
                 run_details["chunk_count"] = 1
@@ -250,6 +332,7 @@ class BulkReduceWorker(DashboardWorker):
                         self._metadata,
                         self._group.name,
                         combined_content,
+                        placeholder_values=placeholders_global,
                     )
                     result = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
                     run_details["chunk_count"] = 1
@@ -268,6 +351,7 @@ class BulkReduceWorker(DashboardWorker):
                             chunk,
                             chunk_index=idx,
                             chunk_total=total_chunks,
+                            placeholder_values=placeholders_global,
                         )
                         summary = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
                         chunk_summaries.append(summary)
@@ -275,6 +359,7 @@ class BulkReduceWorker(DashboardWorker):
                         chunk_summaries,
                         document_name=self._group.name,
                         metadata=self._metadata,
+                        placeholder_values=placeholders_global,
                     )
                     result = self._invoke_provider(provider, provider_cfg, combine_prompt, system_prompt)
 

@@ -974,6 +974,11 @@ class ProjectManager(QObject):
             for entry in self.placeholders.entries
         ]
 
+    def project_placeholder_values(self) -> Dict[str, str]:
+        """Return user-defined placeholder key/value pairs."""
+
+        return self.placeholders.as_mapping()
+
     def placeholder_mapping(self) -> Dict[str, str]:
         values = self.placeholders.as_mapping()
         system = system_placeholder_map(
