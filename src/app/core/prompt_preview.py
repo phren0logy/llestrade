@@ -4,15 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Mapping, Optional
 
 from src.app.core.bulk_analysis_runner import (
     load_prompts,
-    render_system_prompt,
-    render_user_prompt,
 )
+from src.app.core.bulk_analysis_runner import _metadata_context  # type: ignore[attr-defined]
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
+from src.app.core.prompt_placeholders import get_prompt_spec, format_prompt
 
 
 class PromptPreviewError(RuntimeError):
@@ -21,8 +21,13 @@ class PromptPreviewError(RuntimeError):
 
 @dataclass(slots=True)
 class PromptPreview:
-    system_prompt: str
-    user_prompt: str
+    system_template: str
+    user_template: str
+    system_rendered: str
+    user_rendered: str
+    values: dict[str, str]
+    required: set[str]
+    optional: set[str]
 
 
 def generate_prompt_preview(
@@ -31,6 +36,7 @@ def generate_prompt_preview(
     *,
     metadata: Optional[ProjectMetadata] = None,
     max_content_lines: int = 10,
+    placeholder_values: Optional[Mapping[str, str]] = None,
 ) -> PromptPreview:
     """Return a preview of the system/user prompts for the supplied group."""
 
@@ -39,7 +45,14 @@ def generate_prompt_preview(
         raise PromptPreviewError("Project directory is not available.")
 
     bundle = load_prompts(project_dir, group, metadata)
-    system_prompt = render_system_prompt(bundle, metadata)
+    metadata_context = _metadata_context(metadata)
+
+    base_values: dict[str, str] = dict(placeholder_values or {})
+    for key, value in metadata_context.items():
+        base_values.setdefault(key, value)
+
+    system_values = dict(base_values)
+    system_rendered = format_prompt(bundle.system_template, system_values)
 
     operation = getattr(group, "operation", "per_document") or "per_document"
     if operation == "combined":
@@ -57,14 +70,37 @@ def generate_prompt_preview(
         raise PromptPreviewError(f"Preview source missing: {preview_path}") from exc
 
     truncated_content = _truncate_markdown(content, max_content_lines)
-    user_prompt = render_user_prompt(
-        bundle,
-        metadata,
-        document_name,
-        truncated_content,
+    user_context = dict(base_values)
+    user_context.update(
+        {
+            "document_name": document_name,
+            "document_content": truncated_content,
+        }
     )
+    user_rendered = format_prompt(bundle.user_template, user_context)
 
-    return PromptPreview(system_prompt=system_prompt, user_prompt=user_prompt)
+    required: set[str] = set()
+    optional: set[str] = set()
+    system_spec = get_prompt_spec("document_analysis_system_prompt")
+    if system_spec:
+        required.update(system_spec.required)
+        optional.update(system_spec.optional)
+    user_spec = get_prompt_spec("document_bulk_analysis_prompt")
+    if user_spec:
+        required.update(user_spec.required)
+        optional.update(user_spec.optional)
+
+    values = {**system_values, **user_context}
+
+    return PromptPreview(
+        system_template=bundle.system_template,
+        user_template=bundle.user_template,
+        system_rendered=system_rendered,
+        user_rendered=user_rendered,
+        values=values,
+        required=required,
+        optional=optional,
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -64,6 +64,7 @@ class BulkAnalysisGroup:
     model_context_window: Optional[int] = None
     system_prompt_path: str = ""
     user_prompt_path: str = ""
+    placeholder_requirements: Dict[str, bool] = field(default_factory=dict)
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
     slug: Optional[str] = None
@@ -132,6 +133,7 @@ class BulkAnalysisGroup:
             "model_context_window": self.model_context_window,
             "system_prompt_path": self.system_prompt_path,
             "user_prompt_path": self.user_prompt_path,
+            "placeholder_requirements": self.placeholder_requirements,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
             "slug": self.slug,
@@ -171,6 +173,7 @@ class BulkAnalysisGroup:
             ),
             system_prompt_path=str(payload.get("system_prompt_path", "")),
             user_prompt_path=str(payload.get("user_prompt_path", "")),
+            placeholder_requirements=dict(payload.get("placeholder_requirements", {})),
             created_at=_parse_datetime(payload.get("created_at")),
             updated_at=_parse_datetime(payload.get("updated_at")),
             slug=payload.get("slug"),

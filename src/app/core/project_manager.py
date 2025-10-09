@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 from .secure_settings import SecureSettings
 from .file_tracker import DashboardMetrics, WorkspaceMetrics, build_workspace_metrics
-from .placeholders import PlaceholderEntry, ProjectPlaceholders, SYSTEM_PLACEHOLDERS
+from .placeholders import PlaceholderEntry, ProjectPlaceholders, SYSTEM_PLACEHOLDERS, system_placeholder_map
 
 
 @dataclass
@@ -973,6 +973,15 @@ class ProjectManager(QObject):
             PlaceholderEntry(key=entry.key, value=entry.value, read_only=entry.read_only)
             for entry in self.placeholders.entries
         ]
+
+    def placeholder_mapping(self) -> Dict[str, str]:
+        values = self.placeholders.as_mapping()
+        system = system_placeholder_map(
+            project_name=self.metadata.case_name if self.metadata else self.project_name,
+        )
+        for key, value in system.items():
+            values.setdefault(key, value)
+        return values
     
     # Cost tracking
     def add_cost(self, amount: float, provider: str, stage: str):

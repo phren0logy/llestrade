@@ -782,6 +782,7 @@ class ProjectWorkspace(QWidget):
             self._project_manager.project_dir,
             self,
             metadata=self._project_manager.metadata,
+            placeholder_values=self._project_manager.placeholder_mapping(),
         )
         if dialog.exec() == QDialog.Accepted:
             group = dialog.build_group()
@@ -836,7 +837,12 @@ class ProjectWorkspace(QWidget):
         metadata = self._project_manager.metadata
 
         try:
-            preview = generate_prompt_preview(project_dir, group, metadata=metadata)
+            preview = generate_prompt_preview(
+                project_dir,
+                group,
+                metadata=metadata,
+                placeholder_values=self._project_manager.placeholder_mapping(),
+            )
         except PromptPreviewError as exc:
             QMessageBox.warning(self, "Prompt Preview", str(exc))
             return
@@ -846,7 +852,7 @@ class ProjectWorkspace(QWidget):
             return
 
         dialog = PromptPreviewDialog(self)
-        dialog.set_prompts(preview.system_prompt, preview.user_prompt)
+        dialog.set_preview(preview)
         dialog.exec()
 
     def _open_latest_combined(self, group: BulkAnalysisGroup) -> None:

@@ -15,13 +15,15 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTreeWidgetItem,
     QWidget,
-    QTableWidgetItem,
 )
 
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.file_tracker import WorkspaceGroupMetrics, WorkspaceMetrics
 from src.app.ui.workspace.bulk_tab import BulkAnalysisTab
 from src.app.ui.workspace.services import BulkAnalysisService
+from src.app.core.bulk_analysis_runner import load_prompts
+from src.app.core.prompt_placeholders import get_prompt_spec
+from src.app.core.placeholders.analyzer import analyse_prompts, PlaceholderAnalysis
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from src.app.core.project_manager import ProjectManager
@@ -321,6 +323,67 @@ class BulkAnalysisController:
             tree.addTopLevelItem(parent)
         tree.expandAll()
 
+    def _analyse_placeholders(self, group: BulkAnalysisGroup) -> tuple[PlaceholderAnalysis | None, set[str], set[str]]:
+        manager = self._project_manager
+        if not manager or not manager.project_dir:
+            return None, set(), set()
+        try:
+            bundle = load_prompts(Path(manager.project_dir), group, manager.metadata)
+        except Exception:
+            return None, set(), set()
+
+        values = manager.placeholder_mapping()
+
+        required: set[str] = set()
+        optional: set[str] = set()
+        if group.placeholder_requirements:
+            for key, is_required in group.placeholder_requirements.items():
+                if is_required:
+                    required.add(key)
+                else:
+                    optional.add(key)
+        else:
+            user_spec = get_prompt_spec("document_bulk_analysis_prompt")
+            if user_spec:
+                required.update(user_spec.required)
+                optional.update(user_spec.optional)
+            system_spec = get_prompt_spec("document_analysis_system_prompt")
+            if system_spec:
+                required.update(system_spec.required)
+                optional.update(system_spec.optional)
+
+        if group.operation == "per_document":
+            required.add("document_content")
+            values.setdefault("document_content", "<document>")
+        else:
+            optional.update({
+                "reduce_source_list",
+                "reduce_source_table",
+                "reduce_source_count",
+            })
+
+        dynamic_keys = {
+            "document_content",
+            "source_pdf_filename",
+            "source_pdf_relative_path",
+            "source_pdf_absolute_path",
+            "reduce_source_list",
+            "reduce_source_table",
+            "reduce_source_count",
+        }
+
+        analysis = analyse_prompts(
+            bundle.system_template,
+            bundle.user_template,
+            available_values=values,
+            required_keys=required,
+            optional_keys=optional,
+        )
+
+        missing_required = set(analysis.missing_required) - dynamic_keys
+        missing_optional = set(analysis.missing_optional) - dynamic_keys
+        return analysis, missing_required, missing_optional
+
     # ------------------------------------------------------------------
     # Actions
     # ------------------------------------------------------------------
@@ -371,6 +434,31 @@ class BulkAnalysisController:
                     "All documents already have bulk analysis results. Use 'Run All' to re-process everything.",
                 )
                 return
+
+        analysis, missing_required, missing_optional = self._analyse_placeholders(group)
+        if analysis:
+            if missing_required or missing_optional:
+                messages: list[str] = []
+                if missing_required:
+                    messages.append(
+                        "Required placeholders without values:\n  - "
+                        + "\n  - ".join(sorted(f"{{{name}}}" for name in missing_required))
+                    )
+                if missing_optional:
+                    messages.append(
+                        "Optional placeholders without values:\n  - "
+                        + "\n  - ".join(sorted(f"{{{name}}}" for name in missing_optional))
+                    )
+                messages.append("Continue with the run?")
+                reply = QMessageBox.question(
+                    self._workspace,
+                    "Placeholder Values Missing",
+                    "\n\n".join(messages),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply != QMessageBox.Yes:
+                    return
 
         provider_default = (
             (manager.settings or {}).get("llm_provider", ""),
@@ -444,6 +532,31 @@ class BulkAnalysisController:
             )
             if confirm != QMessageBox.Yes:
                 return
+
+        analysis, missing_required, missing_optional = self._analyse_placeholders(group)
+        if analysis:
+            if missing_required or missing_optional:
+                messages: list[str] = []
+                if missing_required:
+                    messages.append(
+                        "Required placeholders without values:\n  - "
+                        + "\n  - ".join(sorted(f"{{{name}}}" for name in missing_required))
+                    )
+                if missing_optional:
+                    messages.append(
+                        "Optional placeholders without values:\n  - "
+                        + "\n  - ".join(sorted(f"{{{name}}}" for name in missing_optional))
+                    )
+                messages.append("Continue with the run?")
+                reply = QMessageBox.question(
+                    self._workspace,
+                    "Placeholder Values Missing",
+                    "\n\n".join(messages),
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
+                if reply != QMessageBox.Yes:
+                    return
 
         self._running_groups.add(gid)
         self._progress_map[gid] = (0, 1)

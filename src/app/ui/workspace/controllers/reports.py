@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import Qt, QUrl
 from PySide6.QtGui import QDesktopServices
@@ -13,8 +13,9 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox, QTreeWidgetItem, QWidget
 
 from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
-from src.app.core.prompt_placeholders import format_prompt, placeholder_summary
-from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
+from src.app.core.prompt_placeholders import format_prompt, placeholder_summary, get_prompt_spec
+from src.app.core.placeholders.analyzer import analyse_prompts
+from src.app.core.prompt_preview import PromptPreview
 from src.app.core.refinement_prompt import (
     read_generation_prompt,
     read_refinement_prompt,
@@ -33,6 +34,7 @@ from src.app.core.report_inputs import (
 from src.app.ui.workspace.qt_flags import ITEM_IS_TRISTATE, ITEM_IS_USER_CHECKABLE
 from src.app.ui.workspace.reports_tab import ReportsTab
 from src.app.ui.workspace.services import ReportJobConfig, ReportsService
+from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
 from src.config.prompt_store import (
     get_bundled_dir,
     get_custom_dir,
@@ -101,6 +103,79 @@ class ReportsController:
         self._tab.log_text.clear()
         self._tab.history_list.clear()
         self._tab.open_reports_button.setEnabled(False)
+
+    def _validate_placeholders_before_run(self) -> bool:
+        manager = self._project_manager
+        if not manager or not manager.project_dir:
+            return False
+
+        values = manager.placeholder_mapping()
+        missing_required: set[str] = set()
+        missing_optional: set[str] = set()
+        dynamic_keys = {
+            "template_section",
+            "transcript",
+            "additional_documents",
+            "draft_report",
+            "template",
+            "document_content",
+            "chunk_index",
+            "chunk_total",
+        }
+
+        def _analyse(template: str, spec_key: str | None, *, is_system: bool) -> None:
+            nonlocal missing_required, missing_optional
+            if not template.strip():
+                return
+            required: Iterable[str] = ()
+            optional: Iterable[str] = ()
+            if spec_key:
+                spec = get_prompt_spec(spec_key)
+                if spec:
+                    required = spec.required
+                    optional = spec.optional
+            analysis = analyse_prompts(
+                template if is_system else "",
+                template if not is_system else "",
+                available_values=values,
+                required_keys=required,
+                optional_keys=optional,
+            )
+            missing_required |= set(analysis.missing_required) - dynamic_keys
+            missing_optional |= set(analysis.missing_optional) - dynamic_keys
+
+        generation_user = self._read_prompt_file(self._tab.generation_user_prompt_edit.text())
+        generation_system = self._read_prompt_file(self._tab.generation_system_prompt_edit.text())
+        refinement_user = self._read_prompt_file(self._tab.refinement_user_prompt_edit.text())
+        refinement_system = self._read_prompt_file(self._tab.refinement_system_prompt_edit.text())
+
+        _analyse(generation_user, "report_generation_user_prompt", is_system=False)
+        _analyse(generation_system, "report_generation_system_prompt", is_system=True)
+        _analyse(refinement_user, "refinement_prompt", is_system=False)
+        _analyse(refinement_system, "report_refinement_system_prompt", is_system=True)
+
+        if missing_required or missing_optional:
+            messages: list[str] = []
+            if missing_required:
+                messages.append(
+                    "Required placeholders without values:\n  - "
+                    + "\n  - ".join(sorted(f"{{{key}}}" for key in missing_required))
+                )
+            if missing_optional:
+                messages.append(
+                    "Optional placeholders without values:\n  - "
+                    + "\n  - ".join(sorted(f"{{{key}}}" for key in missing_optional))
+                )
+            messages.append("Continue with the report run?")
+            reply = QMessageBox.question(
+                self._workspace,
+                "Placeholder Values Missing",
+                "\n\n".join(messages),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            return reply == QMessageBox.Yes
+        return True
 
     def is_running(self) -> bool:
         return self._report_running
@@ -505,6 +580,8 @@ class ReportsController:
             title="Generation Prompt Preview",
             prompt_path=self._tab.generation_user_prompt_edit.text().strip(),
             system_prompt_path=self._tab.generation_system_prompt_edit.text().strip(),
+            prompt_spec_key="report_generation_user_prompt",
+            system_spec_key="report_generation_system_prompt",
         )
 
     def _preview_generation_system_prompt(self) -> None:
@@ -512,6 +589,7 @@ class ReportsController:
             title="Generation System Prompt Preview",
             prompt_path=self._tab.generation_system_prompt_edit.text().strip(),
             system_prompt_path="",
+            system_spec_key="report_generation_system_prompt",
         )
 
     def _preview_refinement_prompt(self) -> None:
@@ -519,6 +597,8 @@ class ReportsController:
             title="Refinement Prompt Preview",
             prompt_path=self._tab.refinement_user_prompt_edit.text().strip(),
             system_prompt_path=self._tab.refinement_system_prompt_edit.text().strip(),
+            prompt_spec_key="refinement_prompt",
+            system_spec_key="report_refinement_system_prompt",
         )
 
     def _preview_refinement_system_prompt(self) -> None:
@@ -526,29 +606,84 @@ class ReportsController:
             title="Refinement System Prompt Preview",
             prompt_path=self._tab.refinement_system_prompt_edit.text().strip(),
             system_prompt_path="",
+            system_spec_key="report_refinement_system_prompt",
         )
 
-    def _show_prompt_preview(self, *, title: str, prompt_path: str, system_prompt_path: str) -> None:
+    def _show_prompt_preview(
+        self,
+        *,
+        title: str,
+        prompt_path: str,
+        system_prompt_path: str,
+        prompt_spec_key: str | None = None,
+        system_spec_key: str | None = None,
+    ) -> None:
         manager = self._project_manager
-        if not manager:
+        if not manager or not manager.project_dir:
             QMessageBox.warning(self._workspace, title, "Open a project first.")
             return
-        project_dir = Path(manager.project_dir)
-        try:
-            preview = generate_prompt_preview(
-                project_dir=project_dir,
-                prompt_path=Path(prompt_path) if prompt_path else None,
-                system_prompt_path=Path(system_prompt_path) if system_prompt_path else None,
-                prompt_formatter=format_prompt,
-            )
-        except PromptPreviewError as exc:
-            QMessageBox.warning(self._workspace, title, str(exc))
-            return
-        except Exception:
-            QMessageBox.warning(self._workspace, title, "Unable to render the prompt preview.")
-            return
 
-        QMessageBox.information(self._workspace, title, preview)
+        system_template = self._read_prompt_file(system_prompt_path) if system_prompt_path else ""
+        user_template = self._read_prompt_file(prompt_path) if prompt_path else ""
+
+        values = manager.placeholder_mapping()
+        system_rendered = format_prompt(system_template, values) if system_template else ""
+        user_rendered = format_prompt(user_template, values) if user_template else ""
+
+        required: set[str] = set()
+        optional: set[str] = set()
+        if system_spec_key:
+            spec = get_prompt_spec(system_spec_key)
+            if spec:
+                required.update(spec.required)
+                optional.update(spec.optional)
+        if prompt_spec_key:
+            spec = get_prompt_spec(prompt_spec_key)
+            if spec:
+                required.update(spec.required)
+                optional.update(spec.optional)
+
+        preview = PromptPreview(
+            system_template=system_template,
+            user_template=user_template,
+            system_rendered=system_rendered,
+            user_rendered=user_rendered,
+            values=values,
+            required=required,
+            optional=optional,
+        )
+
+        dialog = PromptPreviewDialog(self._workspace)
+        dialog.set_preview(preview)
+        dialog.exec()
+
+    def _read_prompt_file(self, path_str: str) -> str:
+        path_str = (path_str or "").strip()
+        if not path_str:
+            return ""
+        manager = self._project_manager
+        if not manager or not manager.project_dir:
+            return ""
+        path = Path(path_str).expanduser()
+        candidates: List[Path] = []
+        if path.is_absolute():
+            candidates.append(path)
+        else:
+            candidates.extend(
+                [
+                    Path(manager.project_dir) / path,
+                    get_custom_dir() / path,
+                    get_bundled_dir() / path,
+                    get_repo_prompts_dir() / path,
+                ]
+            )
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    return candidate.read_text(encoding="utf-8")
+            except Exception:
+                continue
+        return ""
 
     # ------------------------------------------------------------------
     # Job orchestration
@@ -564,6 +699,9 @@ class ReportsController:
         manager = self._project_manager
         if not manager or not manager.project_dir:
             QMessageBox.warning(self._workspace, "Report Generator", "No project is currently loaded.")
+            return
+
+        if not self._validate_placeholders_before_run():
             return
 
         provider_id, model_id, custom_model, context_window = self._resolve_model_selection()

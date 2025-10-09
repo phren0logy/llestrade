@@ -3,29 +3,32 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, List
+from typing import Dict, Mapping, Optional, List
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QCheckBox,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
+    QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QVBoxLayout,
-    QWidget,
-    QComboBox,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
-    QLabel,
-    QGroupBox,
-    QCheckBox,
-    QSpinBox,
+    QVBoxLayout,
+    QWidget,
 )
 
 from src.config.app_config import get_available_providers_and_models
@@ -34,6 +37,8 @@ from src.config.paths import app_resource_root
 from src.app.core.bulk_paths import iter_map_outputs
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.project_manager import ProjectMetadata
+from src.app.core.placeholders.analyzer import find_placeholders
+from src.app.core.prompt_placeholders import get_prompt_spec
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 from src.app.core.prompt_placeholders import placeholder_summary
 from .prompt_preview_dialog import PromptPreviewDialog
@@ -51,10 +56,13 @@ class BulkAnalysisGroupDialog(QDialog):
         parent: Optional[QWidget] = None,
         *,
         metadata: Optional[ProjectMetadata] = None,
+        placeholder_values: Optional[Mapping[str, str]] = None,
     ) -> None:
         super().__init__(parent)
         self._project_dir = project_dir
         self._metadata = metadata
+        self._placeholder_values = dict(placeholder_values or {})
+        self._placeholder_requirements: Dict[str, bool] = {}
         self._group: Optional[BulkAnalysisGroup] = None
         self.setWindowTitle("New Bulk Analysis")
         self.setModal(True)
@@ -128,6 +136,7 @@ class BulkAnalysisGroupDialog(QDialog):
             "document_analysis_system_prompt.md",
             DEFAULT_SYSTEM_PROMPT,
         )
+        self.system_prompt_edit.editingFinished.connect(self._refresh_placeholder_requirements)
 
         self.user_prompt_edit = QLineEdit()
         self.user_prompt_edit.setToolTip(
@@ -141,6 +150,18 @@ class BulkAnalysisGroupDialog(QDialog):
             "document_bulk_analysis_prompt.md",
             DEFAULT_USER_PROMPT,
         )
+        self.user_prompt_edit.editingFinished.connect(self._refresh_placeholder_requirements)
+
+        self._placeholder_table = QTableWidget(0, 2)
+        self._placeholder_table.setHorizontalHeaderLabels(["Placeholder", "Required"])
+        self._placeholder_table.verticalHeader().setVisible(False)
+        header = self._placeholder_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self._placeholder_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self._placeholder_table.setSelectionMode(QAbstractItemView.NoSelection)
+        self._placeholder_table.setFocusPolicy(Qt.NoFocus)
+        form.addRow("Placeholder Requirements", self._placeholder_table)
 
         self.preview_prompt_button = QPushButton("Preview Prompt")
         self.preview_prompt_button.clicked.connect(self._preview_prompt)
@@ -177,6 +198,7 @@ class BulkAnalysisGroupDialog(QDialog):
         form.addRow("Reasoning", self.reasoning_checkbox)
 
         layout.addLayout(form)
+        self._refresh_placeholder_requirements()
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self._handle_accept)
@@ -239,6 +261,7 @@ class BulkAnalysisGroupDialog(QDialog):
         )
         if file_path:
             line_edit.setText(self._normalise_path(Path(file_path)))
+            self._refresh_placeholder_requirements()
 
     def _initialise_prompt_path(self, line_edit: QLineEdit, filename: str, fallback: str) -> None:
         path: Optional[Path] = None
@@ -259,6 +282,76 @@ class BulkAnalysisGroupDialog(QDialog):
 
         line_edit.setText(self._normalise_path(path))
 
+    def _refresh_placeholder_requirements(self) -> None:
+        system_text = self._read_prompt_template(self.system_prompt_edit.text().strip())
+        user_text = self._read_prompt_template(self.user_prompt_edit.text().strip())
+        placeholders = sorted(find_placeholders(system_text) | find_placeholders(user_text))
+
+        required_defaults: set[str] = set()
+        optional_defaults: set[str] = set()
+
+        system_spec = get_prompt_spec("document_analysis_system_prompt")
+        if system_spec:
+            required_defaults.update(system_spec.required)
+            optional_defaults.update(system_spec.optional)
+
+        user_spec = get_prompt_spec("document_bulk_analysis_prompt")
+        if user_spec:
+            required_defaults.update(user_spec.required)
+            optional_defaults.update(user_spec.optional)
+
+        if self.operation_combo.currentData() == "per_document":
+            required_defaults.add("document_content")
+
+        # Preserve existing choices where possible
+        previous = dict(self._placeholder_requirements)
+        self._placeholder_requirements = {}
+
+        self._placeholder_table.blockSignals(True)
+        self._placeholder_table.setRowCount(len(placeholders))
+        for row, name in enumerate(placeholders):
+            item = QTableWidgetItem(name)
+            item.setFlags(Qt.ItemIsEnabled)
+            self._placeholder_table.setItem(row, 0, item)
+            checkbox = QCheckBox()
+            checkbox.setTristate(False)
+            checkbox.setChecked(previous.get(name, name in required_defaults))
+            checkbox.stateChanged.connect(lambda state, key=name: self._on_placeholder_requirement_changed(key, state == Qt.Checked))
+            container = QWidget()
+            layout = QHBoxLayout(container)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setAlignment(Qt.AlignCenter)
+            layout.addWidget(checkbox)
+            self._placeholder_table.setCellWidget(row, 1, container)
+            self._placeholder_requirements[name] = checkbox.isChecked()
+        self._placeholder_table.blockSignals(False)
+
+    def _on_placeholder_requirement_changed(self, key: str, required: bool) -> None:
+        self._placeholder_requirements[key] = required
+
+    def _read_prompt_template(self, path_str: str) -> str:
+        path_str = (path_str or "").strip()
+        if not path_str:
+            return ""
+        path = Path(path_str).expanduser()
+        candidates: List[Path] = []
+        if path.is_absolute():
+            candidates.append(path)
+        else:
+            if self._project_dir:
+                candidates.append((self._project_dir / path).resolve())
+            candidates.append((get_custom_dir() / path).resolve())
+            candidates.append((get_bundled_dir() / path).resolve())
+            resource_root = app_resource_root()
+            candidates.append((resource_root / path).resolve())
+        for candidate in candidates:
+            try:
+                if candidate.exists():
+                    return candidate.read_text(encoding="utf-8")
+            except Exception:
+                continue
+        return ""
+
     def _on_operation_changed(self) -> None:
         combined = self.operation_combo.currentData() == "combined"
         self.map_tree_group.setVisible(combined)
@@ -269,6 +362,7 @@ class BulkAnalysisGroupDialog(QDialog):
         # Show Extra Files only for Combined
         self.manual_files_label.setVisible(combined)
         self.manual_files_edit.setVisible(combined)
+        self._refresh_placeholder_requirements()
 
     def _on_map_tree_item_changed(self, item: QTreeWidgetItem, column: int) -> None:
         # Mirror tri-state behavior used in the converted-docs tree
@@ -384,6 +478,7 @@ class BulkAnalysisGroupDialog(QDialog):
             group.combine_output_template = templ
             group.use_reasoning = self.reasoning_checkbox.isChecked()
             group.model_context_window = custom_window
+            group.placeholder_requirements = dict(self._placeholder_requirements)
             return group
 
         group = BulkAnalysisGroup.create(
@@ -397,6 +492,7 @@ class BulkAnalysisGroupDialog(QDialog):
             user_prompt_path=user_prompt,
         )
         group.model_context_window = custom_window
+        group.placeholder_requirements = dict(self._placeholder_requirements)
         return group
 
     def _preview_prompt(self) -> None:
@@ -404,7 +500,12 @@ class BulkAnalysisGroupDialog(QDialog):
         if group is None:
             return
         try:
-            preview = generate_prompt_preview(self._project_dir, group, metadata=self._metadata)
+            preview = generate_prompt_preview(
+                self._project_dir,
+                group,
+                metadata=self._metadata,
+                placeholder_values=self._placeholder_values,
+            )
         except PromptPreviewError as exc:
             QMessageBox.warning(self, "Prompt Preview", str(exc))
             return
@@ -413,7 +514,8 @@ class BulkAnalysisGroupDialog(QDialog):
             return
 
         dialog = PromptPreviewDialog(self)
-        dialog.set_prompts(preview.system_prompt, preview.user_prompt)
+        required_keys = {key for key, is_required in self._placeholder_requirements.items() if is_required}
+        dialog.set_preview(preview, required=required_keys)
         dialog.exec()
 
     # ------------------------------------------------------------------
