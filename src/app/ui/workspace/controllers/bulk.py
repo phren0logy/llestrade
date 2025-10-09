@@ -377,6 +377,11 @@ class BulkAnalysisController:
             (manager.settings or {}).get("llm_model", ""),
         )
 
+        self._running_groups.add(gid)
+        self._progress_map[gid] = (0, len(files))
+        self._failures[gid] = []
+        self._cancelling_groups.discard(gid)
+
         started = self._service.run_map(
             project_dir=manager.project_dir,
             group=group,
@@ -395,6 +400,9 @@ class BulkAnalysisController:
             ),
         )
         if not started:
+            self._running_groups.discard(gid)
+            self._progress_map.pop(gid, None)
+            self._failures.pop(gid, None)
             QMessageBox.information(
                 self._workspace,
                 "Already Running",
@@ -402,10 +410,6 @@ class BulkAnalysisController:
             )
             return
 
-        self._running_groups.add(gid)
-        self._progress_map[gid] = (0, len(files))
-        self._failures[gid] = []
-        self._cancelling_groups.discard(gid)
         mode_label = "all documents" if force_rerun else "pending documents"
         self._handle_log(gid, f"Starting bulk analysis for '{group.name}' ({len(files)} {mode_label}).")
         self._on_refresh_groups()
@@ -441,6 +445,11 @@ class BulkAnalysisController:
             if confirm != QMessageBox.Yes:
                 return
 
+        self._running_groups.add(gid)
+        self._progress_map[gid] = (0, 1)
+        self._failures[gid] = []
+        self._cancelling_groups.discard(gid)
+
         started = self._service.run_combined(
             project_dir=manager.project_dir,
             group=group,
@@ -457,6 +466,9 @@ class BulkAnalysisController:
             ),
         )
         if not started:
+            self._running_groups.discard(gid)
+            self._progress_map.pop(gid, None)
+            self._failures.pop(gid, None)
             QMessageBox.information(
                 self._workspace,
                 "Already Running",
@@ -464,10 +476,6 @@ class BulkAnalysisController:
             )
             return
 
-        self._running_groups.add(gid)
-        self._progress_map[gid] = (0, 1)
-        self._failures[gid] = []
-        self._cancelling_groups.discard(gid)
         mode_label = "force" if force_rerun else "standard"
         self._handle_log(gid, f"Starting combined operation for '{group.name}' ({mode_label}).")
         self._on_refresh_groups()
