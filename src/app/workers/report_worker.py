@@ -144,6 +144,8 @@ class ReportWorker(DashboardWorker):
             manifest_path = report_dir / f"{base_name}.manifest.json"
             inputs_path = report_dir / f"{base_name}-inputs.md"
 
+            placeholder_map = self._placeholder_map()
+
             transcript_note = " and transcript" if self._transcript_path else ""
             self.log_message.emit(
                 f"Preparing report run with {len(self._inputs)} input(s){transcript_note}."
@@ -190,6 +192,14 @@ class ReportWorker(DashboardWorker):
                 raise RuntimeError(
                     "Refinement system prompt cannot be empty. Update the selected file."
                 )
+            generation_system_prompt = format_prompt(
+                generation_system_prompt,
+                placeholder_map,
+            )
+            refinement_system_prompt = format_prompt(
+                refinement_system_prompt,
+                placeholder_map,
+            )
 
             sections = load_template_sections(self._template_path)
             if not sections:
@@ -243,6 +253,7 @@ class ReportWorker(DashboardWorker):
                 extra={
                     "document_type": "report-draft",
                     "section_count": len(section_outputs),
+                    "placeholders": dict(placeholder_map),
                 },
             )
             draft_content_prepared = apply_frontmatter(draft_body, draft_payload, merge_existing=True)
@@ -279,6 +290,7 @@ class ReportWorker(DashboardWorker):
                     "document_type": "report-refined",
                     "section_count": len(section_outputs),
                     "refinement_tokens": self._refine_usage,
+                    "placeholders": dict(placeholder_map),
                 },
             )
             refined_content_prepared = apply_frontmatter(refined_content, refined_payload, merge_existing=True)

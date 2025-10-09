@@ -200,14 +200,21 @@ def combine_chunk_summaries(
     )
     if placeholder_values:
         context.update({k: v for k, v in placeholder_values.items() if v is not None})
-    prompt = format_prompt(
-        (
-            "Create a unified bulk analysis by combining these partial results of document: {document_name}\n\n"
-            "## Partial Results:\n{chunk_summaries}\n\n"
-            "Please create a single, coherent deliverable that captures all key information from the document."
-        ),
-        context,
+    base_template = (
+        "Create a unified bulk analysis by combining these partial results of document: {document_name}\n\n"
+        "## Partial Results:\n{chunk_summaries}\n\n"
+        "Please create a single, coherent deliverable that captures all key information from the document."
     )
+    if placeholder_values:
+        visible_keys = [key for key, value in placeholder_values.items() if value]
+        if visible_keys:
+            summary_lines = "\n".join(f"- {key}: {{{key}}}" for key in sorted(set(visible_keys)))
+            base_template += (
+                "\n\n### Placeholder Context\n"
+                "The following project placeholders are provided for additional context:\n"
+                f"{summary_lines}"
+            )
+    prompt = format_prompt(base_template, context)
     return prompt, context
 
 def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:

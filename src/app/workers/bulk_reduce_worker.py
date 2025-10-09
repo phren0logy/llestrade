@@ -193,6 +193,33 @@ class BulkReduceWorker(DashboardWorker):
         placeholders.update(system_values)
         return placeholders
 
+    def _resolve_source_context(
+        self,
+        *,
+        relative_hint: Optional[str],
+        path_hint: Optional[str],
+        fallback_relative: str,
+    ) -> SourceFileContext:
+        rel_raw = (relative_hint or "").strip()
+        path_raw = (path_hint or "").strip()
+
+        absolute: Path
+        if path_raw:
+            candidate = Path(path_raw).expanduser()
+            if not candidate.is_absolute():
+                candidate = (self._project_dir / candidate).resolve()
+            absolute = candidate
+        else:
+            absolute = (self._project_dir / fallback_relative).resolve()
+
+        if not rel_raw:
+            try:
+                rel_raw = absolute.relative_to(self._project_dir).as_posix()
+            except Exception:
+                rel_raw = absolute.name
+
+        return SourceFileContext(absolute_path=absolute, relative_path=rel_raw)
+
     def _extract_source_contexts(self, path: Path) -> List[SourceFileContext]:
         try:
             raw = path.read_text(encoding="utf-8")
@@ -202,26 +229,25 @@ class BulkReduceWorker(DashboardWorker):
             metadata = {}
 
         contexts: List[SourceFileContext] = []
+        try:
+            fallback_relative = path.relative_to(self._project_dir).as_posix()
+        except Exception:
+            fallback_relative = path.name
         sources = metadata.get("sources")
+        if not sources and isinstance(metadata.get("metadata"), dict):
+            sources = metadata["metadata"].get("sources")
         if isinstance(sources, list):
             for entry in sources:
                 if not isinstance(entry, dict):
                     continue
-                rel = entry.get("relative") or entry.get("path")
-                if not isinstance(rel, str) or not rel.strip():
-                    continue
-                rel_path = rel.strip()
-                abs_candidate = entry.get("path") if isinstance(entry.get("path"), str) else None
-                if isinstance(abs_candidate, str) and abs_candidate.strip():
-                    candidate = Path(abs_candidate).expanduser()
-                    if not candidate.is_absolute():
-                        candidate = (self._project_dir / candidate).resolve()
-                    absolute = candidate
-                else:
-                    absolute = (self._project_dir / rel_path).resolve()
-                contexts.append(SourceFileContext(absolute_path=absolute, relative_path=rel_path))
+                context = self._resolve_source_context(
+                    relative_hint=entry.get("relative") if isinstance(entry.get("relative"), str) else None,
+                    path_hint=entry.get("path") if isinstance(entry.get("path"), str) else None,
+                    fallback_relative=fallback_relative,
+                )
+                contexts.append(context)
         if not contexts:
-            rel_path = path.relative_to(self._project_dir).as_posix()
+            rel_path = fallback_relative
             contexts.append(SourceFileContext(absolute_path=path.resolve(), relative_path=rel_path))
         unique: Dict[str, SourceFileContext] = {}
         for ctx in contexts:

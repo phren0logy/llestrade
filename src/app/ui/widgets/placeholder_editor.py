@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
     QComboBox,
     QFileDialog,
+    QHeaderView,
 )
 
 from src.app.core.placeholders import (
@@ -76,7 +77,7 @@ class PlaceholderEditorWidget(QWidget):
         self._table.setHorizontalHeaderLabels(["Key", "Value"])
         header = self._table.horizontalHeader()
         header.setStretchLastSection(True)
-        header.setSectionResizeMode(0, header.ResizeToContents)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         self._table.verticalHeader().setVisible(False)
         self._table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self._table.setSelectionMode(QAbstractItemView.SingleSelection)

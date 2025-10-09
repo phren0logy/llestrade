@@ -984,8 +984,7 @@ class ProjectManager(QObject):
         system = system_placeholder_map(
             project_name=self.metadata.case_name if self.metadata else self.project_name,
         )
-        for key, value in system.items():
-            values.setdefault(key, value)
+        values.update(system)
         return values
     
     # Cost tracking

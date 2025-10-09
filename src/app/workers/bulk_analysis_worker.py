@@ -202,22 +202,45 @@ class BulkAnalysisWorker(DashboardWorker):
         placeholders.update(system_values)
         return placeholders
 
+    def _resolve_source_context(
+        self,
+        *,
+        relative_hint: Optional[str],
+        path_hint: Optional[str],
+        fallback_relative: str,
+    ) -> SourceFileContext:
+        rel_raw = (relative_hint or "").strip()
+        path_raw = (path_hint or "").strip()
+
+        absolute: Path
+        if path_raw:
+            candidate = Path(path_raw).expanduser()
+            if not candidate.is_absolute():
+                candidate = (self._project_dir / candidate).resolve()
+            absolute = candidate
+        else:
+            absolute = (self._project_dir / fallback_relative).resolve()
+
+        if not rel_raw:
+            try:
+                rel_raw = absolute.relative_to(self._project_dir).as_posix()
+            except Exception:
+                rel_raw = absolute.name
+
+        return SourceFileContext(absolute_path=absolute, relative_path=rel_raw)
+
     def _extract_source_context(self, metadata: Dict[str, object], document: BulkAnalysisDocument) -> SourceFileContext:
         sources = metadata.get("sources")
+        if not sources and isinstance(metadata.get("metadata"), dict):
+            sources = metadata["metadata"].get("sources")
         if isinstance(sources, list) and sources:
             entry = sources[0] or {}
-            rel = entry.get("relative") if isinstance(entry, dict) else None
-            path_value = entry.get("path") if isinstance(entry, dict) else None
-            rel_path = str(rel).strip() if rel else document.relative_path
-            absolute: Path
-            if isinstance(path_value, str) and path_value.strip():
-                candidate = Path(path_value).expanduser()
-                if not candidate.is_absolute():
-                    candidate = (self._project_dir / candidate).resolve()
-                absolute = candidate
-            else:
-                absolute = (self._project_dir / rel_path).resolve()
-            return SourceFileContext(absolute_path=absolute, relative_path=rel_path)
+            if isinstance(entry, dict):
+                return self._resolve_source_context(
+                    relative_hint=entry.get("relative"),
+                    path_hint=entry.get("path"),
+                    fallback_relative=document.relative_path,
+                )
 
         rel_path = document.relative_path
         absolute = (self._project_dir / rel_path).resolve()
