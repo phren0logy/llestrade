@@ -93,6 +93,25 @@ def test_scan_updates_when_new_files_added(project_root: Path):
     assert snapshot.missing["highlights_missing"] == []
 
 
+def test_scan_normalises_summary_bulk_outputs(project_root: Path) -> None:
+    write_file(
+        project_root / "converted_documents",
+        "case/doc1.md",
+        "---\nsource_format: pdf\n---\ncontent",
+    )
+    write_file(
+        project_root / "bulk_analysis",
+        "summary/case/doc1_analysis.md",
+    )
+
+    tracker = FileTracker(project_root)
+    snapshot = tracker.scan()
+
+    assert snapshot.bulk_analysis_count == 1
+    assert snapshot.missing["bulk_analysis_missing"] == []
+    assert snapshot.counts["bulk_analysis"] == 1
+
+
 def test_load_returns_none_when_no_snapshot(project_root: Path):
     tracker = FileTracker(project_root)
     assert tracker.load() is None

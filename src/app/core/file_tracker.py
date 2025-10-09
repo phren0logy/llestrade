@@ -224,6 +224,8 @@ class FileTracker:
         highlights_files = self._gather_files("highlights")
         highlights_normalized = self._normalize_highlight_files(highlights_files)
 
+        normalized_bulk_for_docs = self._normalize_bulk_outputs(bulk_analysis, imported)
+
         # Determine which converted files originated from PDFs (eligible for highlights)
         imported_pdf: set[str] = set()
         for rel in imported:
@@ -237,7 +239,7 @@ class FileTracker:
         counts = {
             "imported": len(imported),
             "imported_pdf": len(imported_pdf),
-            "bulk_analysis": len(bulk_analysis),
+            "bulk_analysis": len(normalized_bulk_for_docs),
             "highlights": len(highlights_normalized),
         }
 
@@ -249,7 +251,7 @@ class FileTracker:
         }
 
         missing = {
-            "bulk_analysis_missing": sorted(imported - bulk_analysis),
+            "bulk_analysis_missing": sorted(imported - normalized_bulk_for_docs),
             # Only PDFs are eligible for highlights; compute missing accordingly
             "highlights_missing": sorted(imported_pdf - highlights_normalized),
         }
@@ -310,6 +312,33 @@ class FileTracker:
             normalized_entry = _normalize_highlight_entry(path)
             if normalized_entry:
                 normalized.add(normalized_entry)
+        return normalized
+
+    def _normalize_bulk_outputs(self, files: set[str], converted: set[str]) -> set[str]:
+        """Map bulk-analysis artefacts back to converted document paths."""
+
+        if not files:
+            return set()
+
+        normalized: set[str] = set()
+        for path in files:
+            # Direct matches (legacy layout) pass straight through.
+            if path in converted:
+                normalized.add(path)
+                continue
+            parsed = _parse_bulk_output_entry(path)
+            if not parsed:
+                continue
+            slug, resolved = parsed
+
+            candidates = [resolved]
+            if slug and not resolved.startswith(slug + "/"):
+                candidates.append(f"{slug}/{resolved}")
+
+            for candidate in candidates:
+                if candidate in converted:
+                    normalized.add(candidate)
+                    break
         return normalized
 
     def _write_snapshot(self, snapshot: FileTrackerSnapshot) -> None:
