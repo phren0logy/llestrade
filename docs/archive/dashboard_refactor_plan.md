@@ -36,15 +36,15 @@ Move the active dashboard UI code out of `src/new/` into a clean top-level packa
 ### 4. Resource & configuration cleanup
 - [x] Evaluate `templates/` and `prompt_templates/` – move dashboard-specific resources under `src/app/resources/`.
 - [x] Ensure runtime artefacts (`var/app_settings.json`, `var/logs/`, `var/test_output/`) live under `var/` with gitignored contents.
-- [ ] Document the new layout in README and any developer onboarding docs.
+- [x] Document the new layout in README and any developer onboarding docs.
 
 ### 5. Tooling and documentation updates
-- [ ] Update scripts (`scripts/update_imports.py`, etc.) to search/replace `src.new` → `src.app`.
-- [ ] Review logging configuration (`src/config/logging_config.py`) and observability code for references to the old package path.
-- [ ] Update docs (e.g., `docs/work_plan.md`, runbooks) to reference `src/app` instead of `src/new`.
+- [x] Update scripts (`scripts/update_imports.py`, etc.) to search/replace `src.new` → `src.app`.
+- [x] Review logging configuration (`src/config/logging_config.py`) and observability code for references to the old package path.
+- [x] Update docs (e.g., `docs/work_plan.md`, runbooks) to reference `src/app` instead of `src/new`.
 
 ### 6. Verification
-- [ ] Run targeted pytest suites (`tests/app/...`) to confirm imports are correct.
+- [x] Run targeted pytest suites (`tests/app/...`) to confirm imports are correct.
 - [ ] Launch the application via `uv run main.py` to ensure the dashboard starts without import errors.
 - [ ] Check packaging/build scripts if any (PyInstaller, etc.) to ensure resource paths are still valid.
 

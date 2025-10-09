@@ -4,6 +4,8 @@
 
 This document unifies the simplified workflow design and implementation plan for migrating the Forensic Report Drafter from its current tab-based architecture to a streamlined, stage-based workflow. The new design addresses memory management issues, improves stability, and provides a more intuitive user experience while maintaining full compatibility with the existing application during the transition.
 
+> _Historical note_: This plan references the interim `src/new/` package that existed during the migration. The current codebase has since settled under `src/app/`; paths in this document should be interpreted accordingly.
+
 ### Key Goals
 - Zero disruption to current users
 - Reduce memory footprint from 500MB+ to under 200MB

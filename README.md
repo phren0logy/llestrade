@@ -127,13 +127,17 @@ llestrade/
 ├── main.py                    # Application entry point (launches src.app)
 ├── src/
 │   ├── app/
-│   │   ├── __init__.py      # Re-exports ProjectManager, SecureSettings, etc.
-│   │   ├── core/            # Dashboard-specific domain logic
+│   │   ├── __init__.py        # Re-exports project entry points (run, ProjectManager, etc.)
+│   │   ├── core/              # Dashboard domain logic (project manager, file tracker, metrics)
 │   │   ├── ui/
-│   │   │   ├── dialogs/
-│   │   │   ├── stages/
-│   │   │   └── widgets/
-│   │   ├── workers/         # QRunnable-based background jobs
+│   │   │   ├── dialogs/       # Qt dialogs
+│   │   │   ├── stages/        # Top-level Qt widgets (main window, workspace shell)
+│   │   │   ├── workspace/     # Decomposed workspace tabs
+│   │   │   │   ├── controllers/
+│   │   │   │   ├── services/
+│   │   │   │   ├── bulk_tab.py / highlights_tab.py / reports_tab.py
+│   │   │   └── widgets/       # Shared UI components
+│   │   ├── workers/           # QRunnable-based background jobs
 │   │   └── resources/
 │   │       ├── prompts/
 │   │       └── templates/

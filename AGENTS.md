@@ -1,7 +1,8 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`main.py` launches the dashboard UI bundled under `src/app/` (core logic, Qt stages, workers, and bundled resources). Shared helpers stay in `src/config/`, `src/core/`, and `src/common/llm/`; prompts and report templates live in `src/app/resources/`, with scripts under `scripts/`, tests in `tests/`, and artefacts in `var/test_output/` and `var/logs/`.
+`main.py` launches the dashboard UI in `src/app/`. The package is organised as:
+`src/app/core/` (project/session domain logic), `src/app/ui/stages/` (top-level Qt widgets), `src/app/ui/workspace/` (tab widgets plus `controllers/` + `services/` for tab orchestration), `src/app/workers/` (QRunnable jobs), and `src/app/resources/` (prompts/templates). Shared helpers remain in `src/config/`, `src/core/`, and `src/common/llm/`; scripts live in `scripts/`, tests in `tests/`, and artefacts in `var/test_output/` and `var/logs/`.
 
 ## Build, Run, and Development Commands
 Install dependencies with `uv sync`; this repo targets Python 3.12+. Launch the dashboard via `uv run main.py` (or `uv run -m src.app`). `./run_debug.sh` or `DEBUG=true uv run main.py` surface instrumentation; `uv run scripts/setup_env.py` verifies credentials.

@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import atexit
 import inspect
+import shutil
 import sys
 from pathlib import Path
 
-from PyInstaller.building.build_main import Analysis, COLLECT, EXE, PYZ
+from PyInstaller.building.build_main import Analysis, BUNDLE, COLLECT, EXE, PYZ
+from PyInstaller.config import CONF
 from PyInstaller.utils.hooks import collect_submodules
 from PySide6.QtCore import QLibraryInfo
 
@@ -17,6 +20,7 @@ spec_path = Path(inspect.getframeinfo(inspect.currentframe()).filename).resolve(
 project_root = spec_path.parents[1]
 src_dir = project_root / "src"
 resources_dir = src_dir / "app" / "resources"
+icons_dir = project_root / "assets" / "icons"
 
 dist_dir = project_root / "dist" / sys.platform
 work_dir = project_root / "build" / sys.platform / "build_dashboard"
@@ -24,8 +28,20 @@ work_dir = project_root / "build" / sys.platform / "build_dashboard"
 dist_dir.mkdir(parents=True, exist_ok=True)
 work_dir.mkdir(parents=True, exist_ok=True)
 
+CONF["distpath"] = str(dist_dir)
+CONF["workpath"] = str(work_dir)
+
 distpath = str(dist_dir)
 workpath = str(work_dir)
+
+if sys.platform == "darwin":
+    icon_path = icons_dir / "llestrade.icns"
+    if not icon_path.exists():
+        raise FileNotFoundError(
+            f"Expected macOS icon at {icon_path}. Generate it via packaging/macos/build_iconset.sh."
+        )
+else:
+    icon_path = None
 
 
 def collect_tree(root: Path, prefix: str) -> list[tuple[str, str]]:
@@ -103,8 +119,9 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon=str(icon_path) if icon_path else None,
 )
-coll = COLLECT(
+collect_target = COLLECT(
     exe,
     a.binaries,
     a.zipfiles,
@@ -114,3 +131,23 @@ coll = COLLECT(
     upx_exclude=[],
     name="llestrade",
 )
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        collect_target,
+        name="Llestrade.app",
+        icon=str(icon_path),
+        bundle_identifier="com.llestrade.dashboard",
+        info_plist={
+            "CFBundleDisplayName": "Llestrade",
+            "CFBundleName": "Llestrade",
+            "CFBundleIdentifier": "com.llestrade.dashboard",
+            "NSHighResolutionCapable": True,
+        },
+    )
+    def _remove_onedir():
+        leftover_dir = Path(collect_target.name)
+        if leftover_dir.exists():
+            shutil.rmtree(leftover_dir)
+
+    atexit.register(_remove_onedir)

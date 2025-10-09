@@ -35,4 +35,7 @@ debug_summarization_*.log
 .crush/
 .uv_cache/
 .uv-cache/
+.pyinstaller/
 
+# Packaging artifacts
+assets/icons/*.iconset/
