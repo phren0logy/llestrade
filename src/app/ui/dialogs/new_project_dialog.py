@@ -1,16 +1,13 @@
 """Dialog for creating a new project with source/output configuration."""
 
 from __future__ import annotations
-
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QDialog,
     QDialogButtonBox,
@@ -18,15 +15,12 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
     QPlainTextEdit,
     QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
     QTreeWidget,
     QTreeWidgetItem,
     QVBoxLayout,
@@ -35,23 +29,13 @@ from PySide6.QtWidgets import (
 
 from src.app.core.project_manager import _ensure_unique_dir, _sanitize_project_folder
 from src.app.core.conversion_helpers import registry, ConversionHelper
-from src.app.core.placeholders import (
-    PlaceholderEntry,
-    PlaceholderSetDescriptor,
-    PlaceholderSetRegistry,
-    ProjectPlaceholders,
-    parse_placeholder_file,
-)
-from src.app.core.placeholders.parser import PlaceholderParseError
-
-
+from src.app.core.placeholders import ProjectPlaceholders
+from src.app.core.placeholders.system import SYSTEM_PLACEHOLDERS
+from src.app.ui.widgets.placeholder_editor import PlaceholderEditorConfig, PlaceholderEditorWidget
 
 
 def _available_helpers() -> List[ConversionHelper]:
     return registry().list_helpers()
-
-
-PLACEHOLDER_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 @dataclass(frozen=True)
@@ -89,29 +73,9 @@ class NewProjectDialog(QDialog):
         self._output_line = QLineEdit()
         self._output_line.setReadOnly(True)
 
-        self._placeholder_registry = PlaceholderSetRegistry()
-        self._placeholder_entries: List[PlaceholderEntry] = []
-        self._placeholder_combo = QComboBox()
-        self._placeholder_table = QTableWidget(0, 2)
-        self._placeholder_table.setHorizontalHeaderLabels(["Key", "Value"])
-        self._placeholder_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self._placeholder_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self._placeholder_table.verticalHeader().setVisible(False)
-        self._placeholder_table.setSelectionBehavior(QAbstractItemView.SelectRows)
-        self._placeholder_table.setSelectionMode(QAbstractItemView.SingleSelection)
-        self._placeholder_table.setEditTriggers(QAbstractItemView.AllEditTriggers)
-        self._placeholder_table.cellChanged.connect(self._on_placeholder_cell_changed)
-        self._placeholder_add_btn = QPushButton("Add Placeholder")
-        self._placeholder_remove_btn = QPushButton("Remove Selected")
-        self._placeholder_info_label = QLabel("No placeholders selected.")
-        self._placeholder_info_label.setStyleSheet("color: #666;")
-        self._placeholder_source_hint = QLabel("")
-        self._placeholder_source_hint.setStyleSheet("color: #666; font-size: 11px;")
-        self._placeholder_source_hint.hide()
-        self._placeholder_combo.currentIndexChanged.connect(self._on_placeholder_set_changed)
-        self._placeholder_add_btn.clicked.connect(self._add_placeholder_row)
-        self._placeholder_remove_btn.clicked.connect(self._remove_selected_placeholder)
-        self._current_placeholder_set: Optional[str] = None
+        placeholder_config = PlaceholderEditorConfig(allow_export=False, system_keys=SYSTEM_PLACEHOLDERS)
+        self._placeholder_editor = PlaceholderEditorWidget(config=placeholder_config)
+        self._placeholder_editor.set_placeholders(ProjectPlaceholders())
 
         self._folder_preview_label = QLabel("Select an output location to preview the project folder.")
         self._folder_preview_label.setWordWrap(True)
@@ -148,10 +112,10 @@ class NewProjectDialog(QDialog):
         self._current_warnings: List[str] = []
 
         self._build_ui()
-        self._populate_placeholder_sets()
-        self._refresh_placeholder_table()
         self._init_helper_controls()
         self._project_name_edit.textChanged.connect(self._update_folder_preview)
+        self._project_name_edit.textChanged.connect(self._on_project_name_changed)
+        self._on_project_name_changed(self._project_name_edit.text())
 
         self._result: Optional[NewProjectConfig] = None
 
@@ -171,33 +135,7 @@ class NewProjectDialog(QDialog):
         form.addRow("Subject DOB:", self._dob_edit)
         form.addRow("Case info:", self._case_info_edit)
 
-        placeholder_container = QWidget()
-        placeholder_layout = QVBoxLayout(placeholder_container)
-        placeholder_layout.setContentsMargins(0, 0, 0, 0)
-        placeholder_layout.setSpacing(6)
-
-        placeholder_source_row = QHBoxLayout()
-        placeholder_source_row.setContentsMargins(0, 0, 0, 0)
-        placeholder_source_row.setSpacing(6)
-        placeholder_source_row.addWidget(self._placeholder_combo, stretch=1)
-        placeholder_browse_btn = QPushButton("Browse…")
-        placeholder_browse_btn.clicked.connect(self._browse_placeholder_file)
-        placeholder_source_row.addWidget(placeholder_browse_btn)
-        placeholder_layout.addLayout(placeholder_source_row)
-        placeholder_layout.addWidget(self._placeholder_source_hint)
-
-        placeholder_layout.addWidget(self._placeholder_table, stretch=1)
-
-        placeholder_controls = QHBoxLayout()
-        placeholder_controls.setContentsMargins(0, 0, 0, 0)
-        placeholder_controls.setSpacing(6)
-        placeholder_controls.addWidget(self._placeholder_add_btn)
-        placeholder_controls.addWidget(self._placeholder_remove_btn)
-        placeholder_controls.addStretch()
-        placeholder_layout.addLayout(placeholder_controls)
-        placeholder_layout.addWidget(self._placeholder_info_label)
-
-        form.addRow("Placeholders:", placeholder_container)
+        form.addRow("Placeholders:", self._placeholder_editor)
 
         source_row = QHBoxLayout()
         source_row.addWidget(self._source_line)
@@ -404,190 +342,6 @@ class NewProjectDialog(QDialog):
             self._status_label.clear()
             self._status_label.hide()
 
-    # ------------------------------------------------------------------
-    # Placeholder set management
-    # ------------------------------------------------------------------
-    def _populate_placeholder_sets(self) -> None:
-        self._placeholder_combo.blockSignals(True)
-        self._placeholder_combo.clear()
-        self._placeholder_combo.addItem("No placeholder set", None)
-        try:
-            self._placeholder_registry.refresh()
-            descriptors = self._placeholder_registry.all_sets()
-        except Exception:
-            descriptors = []
-
-        for descriptor in descriptors:
-            prefix = "Custom" if descriptor.origin == "custom" else "Bundled"
-            label = f"{prefix}: {descriptor.name}"
-            self._placeholder_combo.addItem(label, descriptor)
-
-        self._placeholder_combo.addItem("Browse…", "__browse__")
-        self._placeholder_combo.setCurrentIndex(0)
-        self._placeholder_combo.blockSignals(False)
-        self._set_placeholder_source_hint(None)
-
-    def _set_placeholder_source_hint(self, text: Optional[str]) -> None:
-        if text:
-            self._placeholder_source_hint.setText(text)
-            self._placeholder_source_hint.show()
-        else:
-            self._placeholder_source_hint.clear()
-            self._placeholder_source_hint.hide()
-
-    def _on_placeholder_set_changed(self, index: int) -> None:
-        data = self._placeholder_combo.itemData(index)
-        if data == "__browse__":
-            self._placeholder_combo.blockSignals(True)
-            self._placeholder_combo.setCurrentIndex(0)
-            self._placeholder_combo.blockSignals(False)
-            self._browse_placeholder_file()
-            return
-
-        if not data:
-            self._set_placeholder_source_hint(None)
-            return
-
-        descriptor: PlaceholderSetDescriptor = data
-        self._apply_placeholder_keys(descriptor.keys)
-        origin = "Custom" if descriptor.origin == "custom" else "Bundled"
-        self._current_placeholder_set = descriptor.name
-        self._set_placeholder_source_hint(f"Loaded from {origin.lower()} placeholder set '{descriptor.name}'.")
-
-    def _apply_placeholder_keys(self, keys: Sequence[str]) -> None:
-        existing_map = {entry.key: entry for entry in self._placeholder_entries}
-        new_entries: List[PlaceholderEntry] = []
-        seen: set[str] = set()
-        for key in keys:
-            existing = existing_map.get(key)
-            if existing:
-                new_entries.append(PlaceholderEntry(key=existing.key, value=existing.value, read_only=existing.read_only))
-            else:
-                new_entries.append(PlaceholderEntry(key=key, value=""))
-            seen.add(key)
-
-        for entry in self._placeholder_entries:
-            if entry.key not in seen:
-                new_entries.append(PlaceholderEntry(key=entry.key, value=entry.value, read_only=entry.read_only))
-
-        self._placeholder_entries = new_entries
-        self._refresh_placeholder_table()
-
-    def _refresh_placeholder_table(self, *, select_row: Optional[int] = None, edit_key: bool = False) -> None:
-        self._placeholder_table.blockSignals(True)
-        self._placeholder_table.setRowCount(len(self._placeholder_entries))
-        for row, entry in enumerate(self._placeholder_entries):
-            key_item = QTableWidgetItem(entry.key)
-            value_item = QTableWidgetItem(entry.value)
-            if entry.read_only:
-                key_item.setFlags(key_item.flags() & ~Qt.ItemIsEditable)
-                value_item.setFlags(value_item.flags() & ~Qt.ItemIsEditable)
-                key_item.setForeground(QColor(120, 120, 120))
-                value_item.setForeground(QColor(120, 120, 120))
-            self._placeholder_table.setItem(row, 0, key_item)
-            self._placeholder_table.setItem(row, 1, value_item)
-        self._placeholder_table.blockSignals(False)
-        self._update_placeholder_summary()
-
-        if select_row is not None and 0 <= select_row < self._placeholder_table.rowCount():
-            self._placeholder_table.selectRow(select_row)
-            if edit_key:
-                self._placeholder_table.editItem(self._placeholder_table.item(select_row, 0))
-            else:
-                self._placeholder_table.editItem(self._placeholder_table.item(select_row, 1))
-
-    def _update_placeholder_summary(self) -> None:
-        total = len(self._placeholder_entries)
-        if not total:
-            self._placeholder_info_label.setText("No custom placeholders configured.")
-        else:
-            self._placeholder_info_label.setText(f"{total} placeholder{'s' if total != 1 else ''} configured.")
-
-    def _on_placeholder_cell_changed(self, row: int, column: int) -> None:
-        if not (0 <= row < len(self._placeholder_entries)):
-            return
-        item = self._placeholder_table.item(row, column)
-        if not item:
-            return
-        entry = self._placeholder_entries[row]
-        if column == 0:
-            entry.key = item.text().strip()
-        else:
-            entry.value = item.text()
-        self._update_placeholder_summary()
-
-    def _add_placeholder_row(self) -> None:
-        entry = PlaceholderEntry(key="", value="")
-        self._placeholder_entries.append(entry)
-        self._refresh_placeholder_table(select_row=len(self._placeholder_entries) - 1, edit_key=True)
-
-    def _remove_selected_placeholder(self) -> None:
-        selected_rows = self._placeholder_table.selectionModel().selectedRows()
-        if not selected_rows:
-            return
-        row = selected_rows[0].row()
-        entry = self._placeholder_entries[row]
-        if entry.read_only:
-            QMessageBox.information(
-                self,
-                "Cannot Remove Placeholder",
-                "System placeholders cannot be removed.",
-            )
-            return
-        del self._placeholder_entries[row]
-        self._refresh_placeholder_table()
-
-    def _browse_placeholder_file(self) -> None:
-        start_dir = str(self._source_root) if self._source_root else str(Path.home())
-        path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Placeholder List",
-            start_dir,
-            "Markdown Files (*.md)",
-        )
-        if not path:
-            return
-        try:
-            parsed = parse_placeholder_file(Path(path))
-        except PlaceholderParseError as exc:
-            QMessageBox.warning(self, "Invalid Placeholder File", str(exc))
-            return
-        self._apply_placeholder_keys(parsed.keys)
-        self._set_placeholder_source_hint(f"Loaded from file: {Path(path).name}")
-        self._current_placeholder_set = Path(path).name
-
-    def _validate_placeholder_entries(self) -> bool:
-        seen: set[str] = set()
-        for row, entry in enumerate(self._placeholder_entries):
-            key = entry.key.strip()
-            if not key:
-                QMessageBox.warning(self, "Placeholder Key Required", "All placeholders must have a key (snake_case).")
-                self._placeholder_table.selectRow(row)
-                self._placeholder_table.editItem(self._placeholder_table.item(row, 0))
-                return False
-            if not PLACEHOLDER_KEY_RE.fullmatch(key):
-                QMessageBox.warning(
-                    self,
-                    "Invalid Placeholder Key",
-                    f"Placeholder '{key}' must be snake_case (letters, numbers, underscores).",
-                )
-                self._placeholder_table.selectRow(row)
-                self._placeholder_table.editItem(self._placeholder_table.item(row, 0))
-                return False
-            if key in seen:
-                QMessageBox.warning(self, "Duplicate Placeholder Key", f"Placeholder '{key}' is duplicated. Keys must be unique.")
-                self._placeholder_table.selectRow(row)
-                return False
-            entry.key = key
-            seen.add(key)
-        return True
-
-    def _collect_project_placeholders(self) -> ProjectPlaceholders:
-        placeholders = ProjectPlaceholders()
-        for entry in self._placeholder_entries:
-            placeholders.set_value(entry.key, entry.value, read_only=entry.read_only)
-        return placeholders
-
     def _init_helper_controls(self) -> None:
         self._helper_combo.blockSignals(True)
         self._helper_combo.clear()
@@ -675,6 +429,9 @@ class NewProjectDialog(QDialog):
                 f"Project folder will be created at '{candidate_display}'."
             )
 
+    def _on_project_name_changed(self, text: str) -> None:
+        self._placeholder_editor.set_system_value("project_name", text.strip())
+
     def _on_accept(self) -> None:
         name = self._project_name_edit.text().strip()
         if not name:
@@ -690,7 +447,7 @@ class NewProjectDialog(QDialog):
             QMessageBox.warning(self, "No Folders Selected", "Select at least one folder to include.")
             return
 
-        if not self._validate_placeholder_entries():
+        if not self._placeholder_editor.validate(parent=self):
             return
 
         config = NewProjectConfig(
@@ -703,7 +460,7 @@ class NewProjectDialog(QDialog):
             output_base=self._output_base,
             conversion_helper=self._current_helper_key(),
             conversion_options=self._current_helper_options(),
-            placeholders=self._collect_project_placeholders(),
+            placeholders=self._placeholder_editor.placeholders(),
         )
         self._result = config
         self.accept()

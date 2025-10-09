@@ -33,7 +33,7 @@ from src.app.core.feature_flags import FeatureFlags
 from src.app.core.file_tracker import WorkspaceMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
-from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
+from src.app.ui.dialogs.project_settings_dialog import ProjectSettingsDialog
 from src.app.ui.dialogs.bulk_analysis_group_dialog import BulkAnalysisGroupDialog
 from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
 from src.app.ui.workspace import BulkAnalysisTab, DocumentsTab, HighlightsTab, ReportsTab
@@ -282,14 +282,9 @@ class ProjectWorkspace(QWidget):
         if not self._project_manager:
             return
 
-        dialog = ProjectMetadataDialog(self._project_manager.metadata, self)
-        if dialog.exec() != QDialog.Accepted:
-            return
-
-        updated = dialog.result_metadata()
-        self._project_manager.update_metadata(metadata=updated)
-        self._project_manager.save_project()
-        self._update_metadata_label()
+        dialog = ProjectSettingsDialog(self._project_manager, self)
+        if dialog.exec() == QDialog.Accepted:
+            self._update_metadata_label()
 
     def begin_initial_conversion(self) -> None:
         """Trigger an initial scan/conversion after project creation."""
