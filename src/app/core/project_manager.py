@@ -977,7 +977,7 @@ class ProjectManager(QObject):
     def project_placeholder_values(self) -> Dict[str, str]:
         """Return user-defined placeholder key/value pairs."""
 
-        return self.placeholders.as_mapping()
+        return self.placeholders.as_mapping(include_read_only=False)
 
     def placeholder_mapping(self) -> Dict[str, str]:
         values = self.placeholders.as_mapping()

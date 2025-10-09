@@ -94,8 +94,8 @@
      - `{reduce_source_count}`: integer count of files combined.
    - Include `{source_pdf_*}` placeholders only if a single document is selected; otherwise leave blank.
 4. **Tests**
-   - Unit tests for analyzer (single prompt, combined prompts).
-   - Tests for map/reduce placeholder map assembly ensuring all keys populate correctly.
+   - Unit tests for the analyzer and preview helpers (`tests/app/core/test_placeholders_analyzer.py`).
+   - Coverage for map/reduce placeholder assembly (`tests/app/core/test_bulk_analysis_runner.py`, `tests/app/core/test_project_placeholder_mapping.py`).
 5. **Required vs optional classification**
    - During prompt selection, present a control (e.g., checkbox or dropdown) to mark each used placeholder as required or optional; default to `required` for keys declared by the prompt author via metadata (future enhancement) or previously saved user preference.
    - Enforce that `{document_contents}` is required for map jobs (cannot be unchecked); warn if a prompt omits it.
@@ -132,8 +132,8 @@
    - Modify workspace controllers to request the merged placeholder map from `ProjectSession` at execution time.
    - Ensure timestamp placeholder resolves per run.
 2. **Worker integration**
-   - Centralise placeholder substitution in workers (reports, highlights, bulk) to consume the map before handing prompts to LLM providers.
-   - Confirm bulk workers receive file-specific metadata; reduce workers receive aggregated placeholders.
+   - Centralise placeholder substitution in workers (reports, highlights, bulk) to consume the map before handing prompts to LLM providers. ✔️ `BulkAnalysisWorker`, `BulkReduceWorker`, and `ReportWorker` now consume project/system placeholders.
+   - Confirm bulk workers receive file-specific metadata; reduce workers receive aggregated placeholders. ✔️ Implemented via YAML front-matter parsing and `system_placeholder_map`.
 3. **Bulk action reconfiguration**
    - When a user launches an existing bulk action (from the bulk tab table or history), route them back to the original configuration screen with all settings prefilled (prompt selection, placeholder requirements, file/folder selection).
    - Allow users to modify the target files/folders (including newly added directories) before resuming; persist the changes to the bulk group definition.
@@ -144,7 +144,7 @@
    - Extend logging to record which prompts/placeholder sets are used (no values logged).
    - Optional: add Phoenix spans around placeholder assembly for debugging.
 5. **Tests**
-   - Integration-style tests for workers ensuring placeholders substitute correctly and aggregated placeholders appear in reduce outputs.
+   - Add integration-style worker tests (still outstanding) covering placeholder substitution end-to-end.
 
 ## Phase 8 – Cleanup & Documentation
 1. **Remove obsolete code**
@@ -153,8 +153,8 @@
    - Update user docs/work_plan to describe placeholder sets, editing workflow, and prompt previews.
    - Add developer notes on the placeholder registry and system keys.
 3. **QA Checklist**
-   - Manual verification: create project with bundled placeholders, run map/reduce jobs, inspect previews and outputs.
-   - Bulk run verifying aggregated placeholders render links to original PDFs.
+   - Manual verification: create project with bundled placeholders, run map/reduce jobs, inspect previews and outputs. (pending)
+   - Bulk run verifying aggregated placeholders render links to original PDFs. (pending)
 
 ## Open Questions / Follow-ups
 - Decide on default bundled placeholder sets and their contents.

@@ -492,6 +492,7 @@ _The wizard-style UI with linear stages has been replaced by the dashboard appro
 - [ ] Add automatic hand-off from conversion completion to bulk-analysis job scheduling where configured
 - [x] Build out the Bulk Analysis tab actions (folder gating, prompt pickers, run + delete flows)
 - [x] Enhance Welcome Stage with per-project stats/open-folder action; UI polish for legacy cleanup remains
+- [x] Wire project placeholders end-to-end: editor, preview highlighting, bulk/report validation, and worker substitution
 
 ## Proposed Additions (For Review Later)
 
