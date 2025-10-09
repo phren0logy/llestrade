@@ -18,5 +18,9 @@
 
 ## Build Next Steps
 1. Use the PyInstaller spec at `scripts/build_dashboard.spec`, which now stages Qt plugins/resources automatically and writes to `dist/<platform>/`.
-2. Run the platform wrapper (`scripts/build_macos.sh`, `scripts/build_linux.sh`, or `scripts/build_windows.ps1`) on the corresponding OS; each invokes `uv run pyinstaller --clean --noconfirm ...`.
+2. On each platform, prefer the packaging helper under `packaging/<platform>/`:
+   - macOS: `./packaging/macos/build_app.sh [--skip-icon] [--fresh-dist]`
+   - Windows: `.\packaging\windows\build_app.ps1 [-FreshDist]`
+   - Linux: `./packaging/linux/build_app.sh [--fresh-dist]`
+   These wrappers standardise cache locations, support clean rebuilds, and call `uv run pyinstaller --clean --noconfirm scripts/build_dashboard.spec` under the hood. The legacy entrypoints in `scripts/` continue to exist for quick invocations.
 3. Extend CI to execute the bundling pipeline per platform and attach artifacts (macOS `.app`/bundle, Windows `.exe`, Linux AppDir/AppImage or tarball).

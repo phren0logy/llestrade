@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import shutil
 from datetime import datetime
@@ -237,15 +236,6 @@ class WelcomeStage(QWidget):
         open_btn.clicked.connect(self._open_project_dialog)
         layout.addWidget(open_btn)
 
-        purge_btn = QPushButton("🗑 Remove Legacy Projects")
-        purge_btn.setMinimumHeight(40)
-        purge_btn.setStyleSheet(
-            "QPushButton { border: 1px solid #d32f2f; color: #d32f2f; border-radius: 4px; }"
-            "QPushButton:hover { background-color: #ffebee; }"
-        )
-        purge_btn.clicked.connect(self._remove_legacy_projects)
-        layout.addWidget(purge_btn)
-
         return group
 
     # ------------------------------------------------------------------
@@ -411,69 +401,6 @@ class WelcomeStage(QWidget):
     def showEvent(self, event: QShowEvent) -> None:  # pragma: no cover - Qt lifecycle
         super().showEvent(event)
         self._populate_recent_projects()
-
-    def _remove_legacy_projects(self) -> None:
-        recent = self.settings.get_recent_projects()
-        if not recent:
-            QMessageBox.information(self, "No Projects", "No recent projects found.")
-            return
-
-        legacy_entries: List[tuple[Path, Path, str]] = []
-        for info in recent:
-            project_path = Path(info.get("path", "")).expanduser()
-            if not project_path.exists():
-                continue
-            try:
-                data = json.loads(project_path.read_text())
-            except Exception:
-                continue
-            version = str(data.get("version", "1.0"))
-            if version != ProjectManager.VERSION:
-                legacy_entries.append((project_path, project_path.parent, info.get("name", project_path.stem)))
-
-        if not legacy_entries:
-            QMessageBox.information(
-                self,
-                "Nothing to Remove",
-                "No legacy projects were detected."
-            )
-            return
-
-        entries_text = "\n".join(f"• {directory}" for _, directory, _ in legacy_entries)
-        reply = QMessageBox.question(
-            self,
-            "Remove Legacy Projects",
-            "The following legacy projects will be permanently deleted:\n\n"
-            f"{entries_text}\n\nThis action cannot be undone. Continue?",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
-            return
-
-        errors: List[str] = []
-        for project_file, project_dir, name in legacy_entries:
-            try:
-                if project_dir.exists():
-                    shutil.rmtree(project_dir)
-                self.settings.remove_recent_project(project_file.as_posix())
-            except Exception as exc:
-                errors.append(f"{name}: {exc}")
-
-        self._populate_recent_projects()
-
-        if errors:
-            QMessageBox.warning(
-                self,
-                "Removal Issues",
-                "Some projects could not be removed:\n\n" + "\n".join(errors),
-            )
-        else:
-            QMessageBox.information(
-                self,
-                "Legacy Projects Removed",
-                "All legacy projects were removed successfully.",
-            )
 
     def _update_api_status(self) -> None:
         while self._api_layout.count() > 1:
