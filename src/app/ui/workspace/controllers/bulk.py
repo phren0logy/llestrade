@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, TYPE_CHECKING
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QTextCursor, QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QMessageBox,
@@ -199,8 +199,37 @@ class BulkAnalysisController:
         status_item.setTextAlignment(Qt.AlignCenter)
         table.setItem(row, 3, status_item)
 
+        analysis, missing_required, missing_optional = self._analyse_placeholders(group)
+        placeholder_item = QTableWidgetItem("—")
+        placeholder_item.setTextAlignment(Qt.AlignCenter)
+        if analysis:
+            tooltip_lines: List[str] = []
+            if analysis.used:
+                tooltip_lines.append("Used placeholders: " + ", ".join(sorted(analysis.used)))
+            unused = analysis.unused - analysis.used
+            if unused:
+                tooltip_lines.append("Unused placeholders: " + ", ".join(sorted(unused)))
+            if missing_required:
+                placeholder_item.setText(f"Missing required ({len(missing_required)})")
+                placeholder_item.setForeground(QColor(178, 34, 34))
+                tooltip_lines.append(
+                    "Missing required: " + ", ".join(sorted(f"{{{key}}}" for key in missing_required))
+                )
+            elif missing_optional:
+                placeholder_item.setText(f"Missing optional ({len(missing_optional)})")
+                placeholder_item.setForeground(QColor(184, 134, 11))
+                tooltip_lines.append(
+                    "Missing optional: " + ", ".join(sorted(f"{{{key}}}" for key in missing_optional))
+                )
+            else:
+                placeholder_item.setText("OK")
+                placeholder_item.setForeground(QColor(27, 94, 32))
+            if tooltip_lines:
+                placeholder_item.setToolTip("\n".join(tooltip_lines))
+        table.setItem(row, 4, placeholder_item)
+
         action_widget = self._build_action_widget(group, metrics)
-        table.setCellWidget(row, 4, action_widget)
+        table.setCellWidget(row, 5, action_widget)
 
         tooltip_lines: List[str] = []
         if description:
@@ -332,7 +361,7 @@ class BulkAnalysisController:
         except Exception:
             return None, set(), set()
 
-        values = manager.project_placeholder_values()
+        values = manager.placeholder_mapping()
 
         required: set[str] = set()
         optional: set[str] = set()
