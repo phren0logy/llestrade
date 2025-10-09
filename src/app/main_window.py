@@ -279,6 +279,7 @@ class SimplifiedMainWindow(QMainWindow):
                 case_description=config.case_description,
             )
             project_manager.create_project(config.output_base, metadata)
+            project_manager.set_placeholders(config.placeholders)
             project_manager.update_conversion_helper(
                 config.conversion_helper,
                 **config.conversion_options,
@@ -298,6 +299,8 @@ class SimplifiedMainWindow(QMainWindow):
             )
         except Exception as exc:  # pragma: no cover - defensive
             self.logger.exception("Failed to persist source configuration", exc_info=exc)
+
+        project_manager.save_project()
 
         self._activate_workspace(project_manager)
 

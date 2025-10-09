@@ -20,6 +20,7 @@ if TYPE_CHECKING:
 
 from .secure_settings import SecureSettings
 from .file_tracker import DashboardMetrics, WorkspaceMetrics, build_workspace_metrics
+from .placeholders import PlaceholderEntry, ProjectPlaceholders, SYSTEM_PLACEHOLDERS
 
 
 @dataclass
@@ -383,6 +384,8 @@ class ProjectManager(QObject):
         self.dashboard_metrics: DashboardMetrics = DashboardMetrics.empty()
         self.workspace_metrics: Optional[WorkspaceMetrics] = None
         self.version_warning: Optional[str] = None
+        self.placeholders = ProjectPlaceholders()
+        self._ensure_system_placeholders()
         
         # Auto-save timer
         self._auto_save_timer = QTimer()
@@ -440,6 +443,8 @@ class ProjectManager(QObject):
         self.report_state = ReportState()
         self.report_state = ReportState()
         self.highlight_state = HighlightState()
+        self.placeholders = ProjectPlaceholders()
+        self._ensure_system_placeholders(metadata.case_name)
         
         # Save initial project file
         self.save_project()
@@ -497,6 +502,9 @@ class ProjectManager(QObject):
             self.highlight_state = HighlightState.from_dict(data.get("highlights", {}))
             self.report_state = ReportState.from_dict(data.get("reports", {}))
             self.workspace_metrics = None
+            placeholder_payload = data.get("placeholders", []) or []
+            self.placeholders = ProjectPlaceholders.from_list(placeholder_payload)
+            self._ensure_system_placeholders(self.metadata.case_name if self.metadata else None)
 
             # Update recent projects
             settings = SecureSettings()
@@ -547,6 +555,7 @@ class ProjectManager(QObject):
                 "dashboard_metrics": self.dashboard_metrics.to_dict() if self.dashboard_metrics else None,
                 "highlights": self.highlight_state.to_dict(),
                 "reports": self.report_state.to_dict(),
+                "placeholders": self.placeholders.to_list(),
             }
             
             # Write to temporary file first
@@ -627,6 +636,37 @@ class ProjectManager(QObject):
             if self.save_project():
                 self.auto_saved.emit()
                 self.logger.debug("Auto-saved project")
+
+    # ------------------------------------------------------------------
+    # Placeholder helpers
+    # ------------------------------------------------------------------
+    def _ensure_system_placeholders(self, project_name: Optional[str] = None) -> None:
+        """Guarantee system placeholders exist and reflect current metadata."""
+
+        if project_name is None and self.metadata:
+            project_name = self.metadata.case_name
+
+        if not hasattr(self, "placeholders") or self.placeholders is None:
+            self.placeholders = ProjectPlaceholders()
+
+        seen_keys: set[str] = set()
+        unique_entries: List[PlaceholderEntry] = []
+        for entry in self.placeholders.entries:
+            if entry.key in seen_keys:
+                continue
+            seen_keys.add(entry.key)
+            unique_entries.append(entry)
+        if len(unique_entries) != len(self.placeholders.entries):
+            self.placeholders.entries = unique_entries
+
+        self.placeholders.ensure_keys(sorted(SYSTEM_PLACEHOLDERS), read_only=True)
+
+        for entry in self.placeholders.entries:
+            if entry.key == "project_name":
+                entry.value = (project_name or "").strip()
+                entry.read_only = True
+            elif entry.key in SYSTEM_PLACEHOLDERS:
+                entry.read_only = True
 
     # ------------------------------------------------------------------
     # Dashboard helpers
@@ -899,7 +939,40 @@ class ProjectManager(QObject):
             for key, value in kwargs.items():
                 if hasattr(self.metadata, key):
                     setattr(self.metadata, key, value)
+        self._ensure_system_placeholders(self.metadata.case_name if self.metadata else None)
         self.mark_modified()
+
+    # Placeholder management
+    def set_placeholders(self, placeholders: ProjectPlaceholders) -> None:
+        """Replace project placeholders with the provided collection."""
+
+        self.placeholders = ProjectPlaceholders.from_list(placeholders.to_list())
+        self._ensure_system_placeholders(self.metadata.case_name if self.metadata else None)
+        self.mark_modified()
+
+    def update_placeholder_value(self, key: str, value: str) -> None:
+        """Update or create a placeholder value."""
+
+        if not self.placeholders:
+            self.placeholders = ProjectPlaceholders()
+        read_only = key in SYSTEM_PLACEHOLDERS
+        self.placeholders.set_value(key, value, read_only=read_only)
+        self._ensure_system_placeholders(self.metadata.case_name if self.metadata else None)
+        self.mark_modified()
+
+    def remove_placeholder(self, key: str) -> None:
+        """Remove a placeholder entry when user deletes it."""
+
+        if key in SYSTEM_PLACEHOLDERS:
+            return  # system placeholders cannot be removed
+        self.placeholders.remove(key)
+        self.mark_modified()
+
+    def placeholder_entries(self) -> List[PlaceholderEntry]:
+        return [
+            PlaceholderEntry(key=entry.key, value=entry.value, read_only=entry.read_only)
+            for entry in self.placeholders.entries
+        ]
     
     # Cost tracking
     def add_cost(self, amount: float, provider: str, stage: str):
@@ -1127,6 +1200,7 @@ class ProjectManager(QObject):
             'dashboard_metrics': self.dashboard_metrics.to_dict() if self.dashboard_metrics else None,
             'highlights': self.highlight_state.to_dict(),
             'reports': self.report_state.to_dict(),
+            'placeholders': self.placeholders.to_list(),
         }
     
     @property

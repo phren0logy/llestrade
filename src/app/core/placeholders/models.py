@@ -52,7 +52,8 @@ class ProjectPlaceholders:
         entry = self._find_entry(key)
         if entry:
             entry.value = value
-            entry.read_only = read_only
+            if read_only:
+                entry.read_only = True
             return
         self.entries.append(PlaceholderEntry(key=key, value=value, read_only=read_only))
 
