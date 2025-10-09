@@ -136,9 +136,8 @@
 - Optionally emit a Phoenix trace for each migration run.
 
 ## Testing & Release Checklist
-- [ ] Run `uv run pytest tests/` after each phase before merging.
-- [ ] Maintain a manual smoke checklist (new project, conversion, highlights, bulk map+reduce, report).
-- [ ] Capture Phoenix trace screenshots for documentation after instrumentation updates.
-- [ ] Validate linting/formatting and update `docs/work_plan.md` progress.
-- [ ] Communicate breaking change impact to stakeholders and schedule migration script execution.
-
+- [x] Run `uv run pytest tests/` after each phase before merging.
+- [x] Maintain a manual smoke checklist (new project, conversion, highlights, bulk map+reduce, report).
+- [x] Capture Phoenix trace screenshots for documentation after instrumentation updates.
+- [x] Validate linting/formatting and update `docs/work_plan.md` progress.
+- [x] Communicate breaking change impact to stakeholders and schedule migration script execution.
