@@ -110,7 +110,7 @@ def test_bulk_worker_force_rerun_reprocesses(tmp_path: Path, qtbot, monkeypatch:
         lambda self, *_: object(),
     )
 
-    def fake_process(self, *_):
+    def fake_process(self, *_args, **_kwargs):
         call_count["value"] += 1
         return "summary", {"chunk_count": 1, "chunking": False, "token_count": 10, "max_tokens": 4000}
 
@@ -122,6 +122,8 @@ def test_bulk_worker_force_rerun_reprocesses(tmp_path: Path, qtbot, monkeypatch:
         files=["folder/doc.md"],
         metadata=metadata,
         force_rerun=False,
+        placeholder_values={},
+        project_name="Case",
     )
     worker._run()
     assert call_count["value"] == 1
@@ -132,6 +134,8 @@ def test_bulk_worker_force_rerun_reprocesses(tmp_path: Path, qtbot, monkeypatch:
         files=["folder/doc.md"],
         metadata=metadata,
         force_rerun=False,
+        placeholder_values={},
+        project_name="Case",
     )
     worker_skip._run()
     assert call_count["value"] == 1, "expected skip when inputs unchanged"
@@ -142,6 +146,73 @@ def test_bulk_worker_force_rerun_reprocesses(tmp_path: Path, qtbot, monkeypatch:
         files=["folder/doc.md"],
         metadata=metadata,
         force_rerun=True,
+        placeholder_values={},
+        project_name="Case",
     )
     worker_force._run()
     assert call_count["value"] == 2, "force re-run should process again"
+
+
+def test_bulk_worker_applies_placeholder_values(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    project_dir = tmp_path
+    converted = project_dir / "converted_documents"
+    converted.mkdir(parents=True, exist_ok=True)
+    pdf_path = project_dir / "sources" / "doc.pdf"
+    pdf_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf_path.write_text("pdf bytes", encoding="utf-8")
+
+    import frontmatter
+
+    source_path = converted / "doc.md"
+    post = frontmatter.Post("Body text", metadata={"sources": [{"path": str(pdf_path)}]})
+    source_path.write_text(frontmatter.dumps(post), encoding="utf-8")
+
+    output_path = project_dir / "bulk_analysis" / "group" / "doc.md"
+    metadata = ProjectMetadata(case_name="Case Name")
+    group = BulkAnalysisGroup.create("Group", files=["doc.md"])
+
+    worker = BulkAnalysisWorker(
+        project_dir=project_dir,
+        group=group,
+        files=["doc.md"],
+        metadata=metadata,
+        force_rerun=True,
+        placeholder_values={"client_name": "ACME"},
+        project_name="Project XYZ",
+    )
+
+    bundle = worker_module.PromptBundle(
+        system_template="System for {project_name}",
+        user_template="Summary of {source_pdf_filename} for {client_name}",
+    )
+
+    provider_config = ProviderConfig(provider_id="anthropic", model="model")
+    captured: dict[str, list[str]] = {"system": [], "user": []}
+
+    def fake_invoke(self, provider, config, prompt, system_prompt):  # noqa: ANN001
+        captured["system"].append(system_prompt)
+        captured["user"].append(prompt)
+        return "summary"
+
+    monkeypatch.setattr(BulkAnalysisWorker, "_invoke_provider", fake_invoke)
+    document = worker_module.BulkAnalysisDocument(
+        source_path=source_path,
+        relative_path="doc.md",
+        output_path=output_path,
+    )
+    global_placeholders = worker._build_placeholder_map()
+    system_prompt = worker_module.render_system_prompt(
+        bundle, metadata, placeholder_values=global_placeholders
+    )
+    worker._process_document(
+        provider=object(),
+        provider_config=provider_config,
+        bundle=bundle,
+        system_prompt=system_prompt,
+        document=document,
+        global_placeholders=global_placeholders,
+    )
+
+    assert captured["system"][0] == "System for Project XYZ"
+    assert "doc.pdf" in captured["user"][0]
+    assert "ACME" in captured["user"][0]

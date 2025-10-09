@@ -41,9 +41,12 @@ class _StubProvider(BaseLLMProvider):
         super().__init__(timeout=0, max_retries=0, default_system_prompt="stub", debug=False)
         self.set_initialized(True)
         self._call_index = 0
+        self.system_prompts: list[str] = []
 
     def generate(self, prompt: str, model: str | None = None, max_tokens: int = 32000, temperature: float = 0.1, system_prompt: str | None = None) -> dict:  # noqa: ARG002
         self._call_index += 1
+        if system_prompt:
+            self.system_prompts.append(system_prompt)
         lower_prompt = (prompt or "").lower()
         if "refine" in lower_prompt or "<draft>" in lower_prompt:
             content = "Refined content"
@@ -137,12 +140,15 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     system_prompt_dir = project_dir / "system_prompts"
     system_prompt_dir.mkdir(parents=True, exist_ok=True)
     generation_system_prompt_path = system_prompt_dir / "generation.md"
-    _write_system_prompt(generation_system_prompt_path, "You are helping draft a report section.")
+    _write_system_prompt(generation_system_prompt_path, "You are helping draft a report section for {client_name}.")
     refinement_system_prompt_path = system_prompt_dir / "refinement.md"
-    _write_system_prompt(refinement_system_prompt_path, "You are refining a report.")
+    _write_system_prompt(refinement_system_prompt_path, "You are refining a report for {client_name}.")
 
-    monkeypatch.setattr(report_worker, "create_provider", lambda **_: _StubProvider())
+    stub_provider = _StubProvider()
+    monkeypatch.setattr(report_worker, "create_provider", lambda **_: stub_provider)
     monkeypatch.setattr(report_worker, "SecureSettings", lambda: _StubSettings())
+
+    placeholder_values = {"client_name": "ACME Inc"}
 
     worker = ReportWorker(
         project_dir=project_dir,
@@ -158,6 +164,8 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
         generation_system_prompt_path=generation_system_prompt_path,
         refinement_system_prompt_path=refinement_system_prompt_path,
         metadata=ProjectMetadata(case_name="Case"),
+        placeholder_values=placeholder_values,
+        project_name="Case",
     )
 
     finished_results: list[dict] = []
@@ -182,7 +190,9 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert manifest_path.exists()
     assert inputs_path.exists()
 
-    assert "Section output" in draft_path.read_text(encoding="utf-8")
+    draft_text = draft_path.read_text(encoding="utf-8")
+    assert "Section output" in draft_text
+    assert "ACME Inc" in draft_text
     assert "Refined content" in refined_path.read_text(encoding="utf-8")
     assert "Reasoning trace" in reasoning_path.read_text(encoding="utf-8")
     assert result["generation_user_prompt"].endswith("generation_user_prompt.md")
@@ -199,6 +209,7 @@ def test_report_worker_generates_outputs(tmp_path: Path, qt_app: QApplication, m
     assert manifest["refinement_user_prompt"].endswith("refinement_user_prompt.md")
     assert manifest["generation_system_prompt"].endswith("generation.md")
     assert manifest["refinement_system_prompt"].endswith("refinement.md")
+    assert any("ACME Inc" in prompt for prompt in stub_provider.system_prompts)
 
 
 def test_report_worker_requires_generation_placeholders(

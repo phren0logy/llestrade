@@ -24,3 +24,8 @@
    - Linux: `./packaging/linux/build_app.sh [--fresh-dist]`
    These wrappers standardise cache locations, support clean rebuilds, and call `uv run pyinstaller --clean --noconfirm scripts/build_dashboard.spec` under the hood. The legacy entrypoints in `scripts/` continue to exist for quick invocations.
 3. Extend CI to execute the bundling pipeline per platform and attach artifacts (macOS `.app`/bundle, Windows `.exe`, Linux AppDir/AppImage or tarball).
+
+## Prompt & Placeholder Packaging
+
+- Placeholder lists ship from `src/app/resources/placeholder_sets/`. The placeholder editor reconciles bundled copies with the user’s custom directory; include new sets here so they are available out of the box.
+- Bulk/report workers rely on YAML front matter (injected during conversion) to recover PDF provenance; QA should confirm converted markdown inside packaged builds still includes `sources` metadata so placeholders like `{source_pdf_relative_path}` resolve.

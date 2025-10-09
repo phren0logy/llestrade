@@ -99,13 +99,14 @@ This will:
    - Use the PDF Processing tab to convert PDF reports to markdown
    - Select input PDFs and choose an output directory
 
-2. **Document Analysis**
+2. **Project Placeholders & Document Analysis**
 
+   - The new project wizard lets you pick or author placeholder lists (e.g., client name, case number). These values surface on the Bulk Analysis and Reports tabs and are substituted into prompts at runtime.
    - In the Analysis tab, select folders containing markdown documents
-   - Enter subject information (name, DOB, case details)
+   - Enter subject information / adjust placeholders in Project Settings as needed
    - Click "Run Pending" to create per-document bulk analysis outputs
    - Use "Run Combined" to merge bulk analysis outputs
-   - Generate an integrated analysis of all documents
+   - Placeholder status chips help you spot missing values before running jobs
 
 3. **Refinement**
 
@@ -207,6 +208,7 @@ Notes:
 
 - Highlights are extracted only for PDFs. If a PDF has no highlights, a placeholder `.highlights.md` file is created with a processed timestamp.
 - Dashboard highlight counts use a PDF-only denominator (e.g., `Highlights: X of Y` where `Y` is the number of PDF-converted documents), so DOCX and other non-PDF sources are excluded from the “pending highlights” count.
+- Bulk analysis and report prompts now substitute project placeholders (client, case, project name) along with per-document metadata. Ensure required placeholders are filled in Project Settings before running jobs.
 
 ## YAML Front Matter
 
@@ -256,6 +258,12 @@ Prompt templates use `{placeholder}` tokens that the workers populate at runtime
 | Report instructions           | `prompts/report_generation_instructions.md`  | `{template_section}`, `{transcript}`                           | None                                                                                                  |
 | Report generation (system)    | `prompts/report_generation_system_prompt.md` | None                                                           | None                                                                                                  |
 | Report refinement (system)    | `prompts/report_refinement_system_prompt.md` | None                                                           | None                                                                                                  |
+
+Bulk and report workers automatically inject additional runtime placeholders:
+
+- `{source_pdf_filename}`, `{source_pdf_relative_path}`, `{source_pdf_absolute_path}` for each document derived from a PDF
+- Combined runs expose `{reduce_source_list}`, `{reduce_source_table}`, `{reduce_source_count}` summarising aggregated inputs
+- `{project_name}` and `{timestamp}` resolve at execution time
 
 When building custom prompts, include every required placeholder shown above. Optional placeholders are always supplied (with an empty string if the value is unavailable), so they can be added or removed without breaking validation. If you introduce a new prompt template, add its specification to the registry so documentation and tooltips stay aligned.
 
