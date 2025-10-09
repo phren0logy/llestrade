@@ -7,7 +7,7 @@ import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Optional, List, Sequence, Set, Tuple
+from typing import Optional, List, Sequence, Set
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
 from shiboken6 import isValid
@@ -33,7 +33,6 @@ from src.app.core.feature_flags import FeatureFlags
 from src.app.core.file_tracker import WorkspaceMetrics
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
-from src.app.core.bulk_paths import iter_map_outputs
 from src.app.ui.dialogs.project_metadata_dialog import ProjectMetadataDialog
 from src.app.ui.dialogs.bulk_analysis_group_dialog import BulkAnalysisGroupDialog
 from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
@@ -49,14 +48,12 @@ from src.app.ui.workspace.qt_flags import (
     ITEM_IS_TRISTATE,
     ITEM_IS_USER_CHECKABLE,
 )
-from src.app.ui.workspace.services import HighlightsService, ReportsService
-from src.app.workers import (
-    BulkAnalysisWorker,
-    BulkReduceWorker,
-    ConversionWorker,
-    WorkerCoordinator,
-    get_worker_pool,
+from src.app.ui.workspace.services import (
+    BulkAnalysisService,
+    HighlightsService,
+    ReportsService,
 )
+from src.app.workers import ConversionWorker, WorkerCoordinator, get_worker_pool
 from src.app.workers.highlight_worker import HighlightExtractionSummary
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 
@@ -88,10 +85,6 @@ class ProjectWorkspace(QWidget):
         self._inflight_sources: set[Path] = set()
         self._conversion_running = False
         self._conversion_total = 0
-        self._running_groups: set[str] = set()
-        self._bulk_progress: Dict[str, tuple[int, int]] = {}
-        self._bulk_failures: Dict[str, List[str]] = {}
-        self._cancelling_groups: set[str] = set()
         self._bulk_analysis_tab: BulkAnalysisTab | None = None
         self._bulk_controller: BulkAnalysisController | None = None
         self._missing_bulk_label: QLabel | None = None
@@ -102,6 +95,7 @@ class ProjectWorkspace(QWidget):
         self._reports_controller: ReportsController | None = None
 
         self._documents_controller: DocumentsController | None = None
+        self._bulk_service = BulkAnalysisService(self._workers)
         self._highlight_service = HighlightsService(self._workers)
         self._reports_service = ReportsService(self._workers)
         self._build_ui()
@@ -187,11 +181,12 @@ class ProjectWorkspace(QWidget):
         self._bulk_analysis_tab = tab
         self._bulk_controller = BulkAnalysisController(
             tab,
+            workspace=self,
+            service=self._bulk_service,
             on_create_group=self._show_create_group_dialog,
             on_refresh_requested=self.refresh,
-            on_start_group_run=lambda group, force: self._start_group_run(group, force_rerun=force),
-            on_start_combined_run=lambda group, force: self._start_combined_run(group, force_rerun=force),
-            on_cancel_group_run=self._cancel_group_run,
+            on_refresh_groups=self._refresh_bulk_analysis_groups,
+            on_refresh_metrics=self._refresh_file_tracker,
             on_open_group_folder=self._open_group_folder,
             on_show_prompt_preview=self._show_group_prompt_preview,
             on_open_latest_combined=self._open_latest_combined,
@@ -210,7 +205,6 @@ class ProjectWorkspace(QWidget):
             self._highlights_controller.set_conversion_running(self._conversion_running)
         if self._reports_controller:
             self._reports_controller.set_project(project_manager)
-        self._running_groups.clear()
         self._workers.clear()
         self._workspace_metrics = None
         project_dir = project_manager.project_dir
@@ -242,9 +236,6 @@ class ProjectWorkspace(QWidget):
         """Cancel background work before disposing of the workspace."""
 
         self._workers.clear()
-        self._running_groups.clear()
-        self._bulk_progress.clear()
-        self._bulk_failures.clear()
         self._documents_controller.shutdown()
         if self._bulk_controller:
             self._bulk_controller.set_project(None)
@@ -265,10 +256,7 @@ class ProjectWorkspace(QWidget):
         self._refresh_reports_view()
         self._refresh_highlights_view()
         if self._feature_flags.bulk_analysis_groups_enabled:
-            self._prune_running_groups()
             self._refresh_bulk_analysis_groups()
-        else:
-            self._running_groups.clear()
         self._update_metadata_label()
 
     def _update_metadata_label(self) -> None:
@@ -735,9 +723,6 @@ class ProjectWorkspace(QWidget):
         self._bulk_controller.refresh(
             groups=groups,
             workspace_metrics=self._workspace_metrics,
-            running_groups=self._running_groups,
-            progress_map=self._bulk_progress,
-            cancelling_groups=self._cancelling_groups,
         )
 
     def _show_create_group_dialog(self) -> None:
@@ -779,7 +764,8 @@ class ProjectWorkspace(QWidget):
             if not self._project_manager.delete_bulk_analysis_group(group.group_id):
                 QMessageBox.warning(self, "Delete Failed", "Could not delete the bulk analysis group.")
             else:
-                self._cancel_group_run(group)
+                if self._bulk_controller:
+                    self._bulk_controller.cancel_run(group)
                 self.refresh()
 
     def _open_group_folder(self, group: BulkAnalysisGroup) -> None:
@@ -838,234 +824,6 @@ class ProjectWorkspace(QWidget):
             QMessageBox.information(self, "No Outputs", "No combined outputs found for this operation.")
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(latest)))
-
-    def _start_group_run(self, group: BulkAnalysisGroup, *, force_rerun: bool = False) -> None:
-        if not self._feature_flags.bulk_analysis_groups_enabled:
-            return
-        if group.group_id in self._running_groups:
-            QMessageBox.information(
-                self,
-                "Already Running",
-                f"Bulk analysis for '{group.name}' is already in progress.",
-            )
-            return
-
-        if not self._workspace_metrics and self._project_manager:
-            try:
-                self._workspace_metrics = self._project_manager.get_workspace_metrics()
-            except Exception:
-                self._workspace_metrics = None
-
-        group_metrics = None
-        if self._workspace_metrics:
-            group_metrics = self._workspace_metrics.groups.get(group.group_id)
-
-        if not group_metrics:
-            QMessageBox.warning(
-                self,
-                "Bulk Analysis",
-                "Project metrics are unavailable. Re-scan sources before running bulk analysis.",
-            )
-            return
-
-        files: List[str] = []
-        if force_rerun:
-            converted = list(group_metrics.converted_files)
-            if not converted:
-                QMessageBox.warning(
-                    self,
-                    "No Converted Documents",
-                    "This group does not have any converted documents yet. Run conversion first.",
-                )
-                return
-            files = converted
-        else:
-            pending = list(group_metrics.pending_files)
-            if pending:
-                files = pending
-            else:
-                QMessageBox.information(
-                    self,
-                    "Up to Date",
-                    "All documents already have bulk analysis results. Use 'Run All' to re-process everything.",
-                )
-                return
-
-        if not self._project_manager or not self._project_manager.project_dir:
-            QMessageBox.warning(self, "Missing Project", "The project directory is not available.")
-            return
-
-        provider_default = (
-            (self._project_manager.settings or {}).get("llm_provider", ""),
-            (self._project_manager.settings or {}).get("llm_model", ""),
-        )
-        worker = BulkAnalysisWorker(
-            project_dir=self._project_manager.project_dir,
-            group=group,
-            files=files,
-            metadata=self._project_manager.metadata,
-            default_provider=provider_default,
-            force_rerun=force_rerun,
-        )
-        worker.progress.connect(
-            lambda done, total, path, gid=group.group_id: self._on_bulk_progress(gid, done, total, path)
-        )
-        worker.file_failed.connect(lambda rel, err, gid=group.group_id: self._on_bulk_failed(gid, rel, err))
-        worker.finished.connect(
-            lambda success, failed, w=worker, gid=group.group_id: self._on_bulk_finished(gid, w, success, failed)
-        )
-        worker.log_message.connect(lambda message, gid=group.group_id: self._on_bulk_log(gid, message))
-
-        key = self._bulk_key(group.group_id)
-        self._running_groups.add(group.group_id)
-        self._bulk_progress[group.group_id] = (0, len(files))
-        self._bulk_failures[group.group_id] = []
-        self._cancelling_groups.discard(group.group_id)
-        self._on_bulk_log(
-            group.group_id,
-            f"Starting bulk analysis for '{group.name}' ({len(files)} {'all documents' if force_rerun else 'pending documents'}).",
-        )
-        self._refresh_bulk_analysis_groups()
-        self._workers.start(key, worker)
-
-    def _start_combined_run(self, group: BulkAnalysisGroup, *, force_rerun: bool = False) -> None:
-        if not self._feature_flags.bulk_analysis_groups_enabled:
-            return
-        if group.group_id in self._running_groups:
-            QMessageBox.information(self, "Already Running", f"Combined operation for '{group.name}' is already in progress.")
-            return
-        if not self._project_manager or not self._project_manager.project_dir:
-            QMessageBox.warning(self, "Missing Project", "The project directory is not available.")
-            return
-        if force_rerun:
-            confirm = QMessageBox.question(
-                self,
-                "Force Combined Re-run",
-                (
-                    "This will recompute the combined analysis and overwrite the latest output.\n\n"
-                    "Do you want to proceed?"
-                ),
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if confirm != QMessageBox.Yes:
-                return
-
-        worker = BulkReduceWorker(
-            project_dir=self._project_manager.project_dir,
-            group=group,
-            metadata=self._project_manager.metadata,
-            force_rerun=force_rerun,
-        )
-        gid = group.group_id
-        key = f"combine:{gid}"
-        self._running_groups.add(gid)
-        self._bulk_progress[gid] = (0, 1)
-        self._bulk_failures[gid] = []
-        self._cancelling_groups.discard(gid)
-        mode_label = "force" if force_rerun else "standard"
-        self._on_bulk_log(gid, f"Starting combined operation for '{group.name}' ({mode_label}).")
-        worker.progress.connect(lambda done, total, msg, g=gid: self._on_bulk_progress(g, done, total, msg))
-        worker.file_failed.connect(lambda rel, err, g=gid: self._on_bulk_failed(g, rel, err))
-        worker.log_message.connect(lambda message, g=gid: self._on_bulk_log(g, message))
-        worker.finished.connect(lambda success, failed, w=worker, g=gid: self._on_bulk_finished(g, w, success, failed))
-        self._workers.start(key, worker)
-
-    def _cancel_group_run(self, group: BulkAnalysisGroup) -> None:
-        if not self._feature_flags.bulk_analysis_groups_enabled:
-            return
-        key = self._bulk_key(group.group_id)
-        worker = self._workers.get(key)
-        if worker:
-            worker.cancel()
-            self._cancelling_groups.add(group.group_id)
-            if self._bulk_controller:
-                self._bulk_controller.set_info_message("Cancelling bulk analysis…")
-        else:
-            self._bulk_progress.pop(group.group_id, None)
-            self._bulk_failures.pop(group.group_id, None)
-            self._cancelling_groups.discard(group.group_id)
-            if self._bulk_controller:
-                self._bulk_controller.set_info_message("Bulk analysis cancelled.")
-        self._refresh_bulk_analysis_groups()
-
-    def _on_bulk_progress(self, group_id: str, completed: int, total: int, relative_path: str) -> None:
-        if group_id in self._cancelling_groups:
-            return
-        self._bulk_progress[group_id] = (completed, total)
-        if self._bulk_controller:
-            self._bulk_controller.set_progress_message(completed, total, relative_path)
-        self._refresh_bulk_analysis_groups()
-
-    def _on_bulk_failed(self, group_id: str, relative_path: str, error: str) -> None:
-        LOGGER.error("Bulk analysis failed for %s: %s", relative_path, error)
-        self._bulk_failures.setdefault(group_id, []).append(f"{relative_path}: {error}")
-
-    def _on_bulk_log(self, group_id: str, message: str) -> None:  # noqa: ARG002 - future use
-        LOGGER.info("[BulkAnalysis][%s] %s", group_id, message)
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted = f"[{timestamp}] {message}"
-        if self._bulk_controller:
-            self._bulk_controller.append_log_message(formatted)
-            self._bulk_controller.set_info_message(message)
-
-    def _on_bulk_finished(self, group_id: str, worker, successes: int, failures: int) -> None:
-        key = self._bulk_key(group_id)
-        stored = self._workers.pop(key)
-        self._running_groups.discard(group_id)
-        # Delete the specific worker instance and any different stored worker safely
-        if worker and isValid(worker):
-            worker.deleteLater()
-        if stored and stored is not worker and isValid(stored):
-            stored.deleteLater()
-        self._bulk_progress.pop(group_id, None)
-        errors = self._bulk_failures.pop(group_id, [])
-        was_cancelled = group_id in self._cancelling_groups
-        if was_cancelled:
-            self._cancelling_groups.discard(group_id)
-
-        if was_cancelled:
-            completion_message = "Bulk analysis cancelled."
-        elif failures:
-            completion_message = f"Bulk analysis completed with {failures} error(s)."
-        else:
-            completion_message = "Bulk analysis completed."
-        self._on_bulk_log(group_id, completion_message)
-
-        if errors:
-            QMessageBox.warning(
-                self,
-                "Bulk Analysis Issues",
-                "Some documents failed during bulk analysis:\n" + "\n".join(errors),
-            )
-
-        self._refresh_file_tracker()
-        self._refresh_bulk_analysis_groups()
-
-    def _prune_running_groups(self, valid_ids: Optional[set[str]] = None) -> None:
-        if not self._feature_flags.bulk_analysis_groups_enabled:
-            return
-        if valid_ids is None:
-            valid_ids = set()
-            if self._project_manager:
-                try:
-                    valid_ids = {
-                        group.group_id for group in self._project_manager.list_bulk_analysis_groups()
-                    }
-                except Exception:
-                    valid_ids = set()
-        stale = [gid for gid in list(self._running_groups) if gid not in valid_ids]
-        for gid in stale:
-            key = self._bulk_key(gid)
-            worker = self._workers.pop(key)
-            if worker:
-                worker.cancel()
-                if isValid(worker):
-                    worker.deleteLater()
-            self._running_groups.discard(gid)
-            self._bulk_progress.pop(gid, None)
-            self._bulk_failures.pop(gid, None)
-            self._cancelling_groups.discard(gid)
 
     # ------------------------------------------------------------------
     # Worker coordination helpers

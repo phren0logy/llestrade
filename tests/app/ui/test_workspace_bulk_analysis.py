@@ -106,14 +106,19 @@ def test_workspace_run_executes_worker_and_updates_ui(tmp_path: Path, qt_app: QA
     action_widget = table.cellWidget(0, 4)
     run_button = _find_button(action_widget, "Run Pending")
     run_button.click()
-    QCoreApplication.processEvents()
+    for _ in range(10):
+        QCoreApplication.processEvents()
+        if not controller.is_running(group.group_id):
+            break
+    else:
+        pytest.fail("Bulk analysis run did not complete")
 
     expected_output = manager.project_dir / "bulk_analysis" / group.slug / "folder" / "record_analysis.md"
     assert expected_output.exists()
     assert "Summary output" in expected_output.read_text(encoding="utf-8")
 
-    assert group.group_id not in workspace._running_groups
-    assert group.group_id not in workspace._bulk_progress
+    assert controller.progress_for(group.group_id) is None
+    assert controller.progress_for(group.group_id) is None
     assert run_button.isEnabled()
 
     status_item = table.item(0, 3)
@@ -162,7 +167,7 @@ def test_workspace_cancel_updates_status_and_cleans_state(tmp_path: Path, qt_app
 
     pool = _CaptureThreadPool()
     monkeypatch.setattr(project_workspace, "get_worker_pool", lambda: pool)
-    monkeypatch.setattr(project_workspace, "BulkAnalysisWorker", _StubBulkAnalysisWorker)
+    monkeypatch.setattr("src.app.ui.workspace.services.bulk.BulkAnalysisWorker", _StubBulkAnalysisWorker)
 
     workspace = ProjectWorkspace()
     workspace.set_project(manager)
@@ -184,22 +189,32 @@ def test_workspace_cancel_updates_status_and_cleans_state(tmp_path: Path, qt_app
     worker = pool.last_worker
     assert isinstance(worker, _StubBulkAnalysisWorker)
 
-    assert group.group_id in workspace._running_groups
-    assert workspace._bulk_progress.get(group.group_id) == (0, 1)
+    assert controller.is_running(group.group_id)
+    assert controller.progress_for(group.group_id) == (0, 1)
 
     cancel_button.click()
-    QCoreApplication.processEvents()
+    for _ in range(10):
+        QCoreApplication.processEvents()
+        if controller.is_cancelling(group.group_id):
+            break
+    else:
+        pytest.fail("Cancellation did not register")
 
     assert worker.cancel_called is True
-    assert group.group_id in workspace._cancelling_groups
+    assert controller.is_cancelling(group.group_id)
 
     # Simulate the worker completing after cancellation.
     worker.finished.emit(0, 0)
-    QCoreApplication.processEvents()
+    for _ in range(10):
+        QCoreApplication.processEvents()
+        if not controller.is_running(group.group_id):
+            break
+    else:
+        pytest.fail("Bulk analysis worker did not finish after cancellation")
 
-    assert group.group_id not in workspace._running_groups
-    assert group.group_id not in workspace._cancelling_groups
-    assert workspace._bulk_progress.get(group.group_id) is None
+    assert not controller.is_running(group.group_id)
+    assert not controller.is_cancelling(group.group_id)
+    assert controller.progress_for(group.group_id) is None
 
     refreshed_widget = table.cellWidget(0, 4)
     refreshed_run = _find_button(refreshed_widget, "Run Pending")
