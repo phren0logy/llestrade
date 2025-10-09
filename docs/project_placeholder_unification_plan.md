@@ -96,6 +96,14 @@
 4. **Tests**
    - Unit tests for analyzer (single prompt, combined prompts).
    - Tests for map/reduce placeholder map assembly ensuring all keys populate correctly.
+5. **Required vs optional classification**
+   - During prompt selection, present a control (e.g., checkbox or dropdown) to mark each used placeholder as required or optional; default to `required` for keys declared by the prompt author via metadata (future enhancement) or previously saved user preference.
+   - Enforce that `{document_contents}` is required for map jobs (cannot be unchecked); warn if a prompt omits it.
+   - Persist placeholder requirement choices alongside project prompt configuration for re-use.
+   - Validation rules:
+     - Missing values for required placeholders trigger blocking warnings (user must override to proceed).
+     - Missing optional placeholders continue to show non-blocking warnings.
+   - Extend analyzer outputs to include `required_missing` vs `optional_missing` sets.
 
 ## Phase 6 – Prompt Selection & Preview UI
 1. **UI layout**
@@ -115,6 +123,7 @@
    - On job kickoff, if analyzer reports missing values, show a non-blocking warning dialog summarising missing keys with options:
      - “Edit placeholders” (opens project settings).
      - “Proceed anyway”.
+   - Distinguish required vs optional placeholders in the dialog; required defaults to “Proceed anyway” being disabled until the user ticks an “Override” confirmation.
 4. **Tests**
    - pytest-qt tests verifying toggles, highlighting logic (inspect generated HTML), warning dialog behaviour.
 
@@ -125,10 +134,16 @@
 2. **Worker integration**
    - Centralise placeholder substitution in workers (reports, highlights, bulk) to consume the map before handing prompts to LLM providers.
    - Confirm bulk workers receive file-specific metadata; reduce workers receive aggregated placeholders.
-3. **Telemetry**
+3. **Bulk action reconfiguration**
+   - When a user launches an existing bulk action (from the bulk tab table or history), route them back to the original configuration screen with all settings prefilled (prompt selection, placeholder requirements, file/folder selection).
+   - Allow users to modify the target files/folders (including newly added directories) before resuming; persist the changes to the bulk group definition.
+   - After saving modifications, display a confirmation dialog summarising the differences (added/removed sources, prompt changes) and warn that prior outputs may be stale; require explicit confirmation before overwriting the stored configuration.
+   - Update bulk metadata timestamps/status so dashboards reflect the change.
+   - Tests: pytest-qt coverage ensuring the configuration dialog loads with previous selections, supports edits, persists updates, and emits the warning.
+4. **Telemetry**
    - Extend logging to record which prompts/placeholder sets are used (no values logged).
    - Optional: add Phoenix spans around placeholder assembly for debugging.
-4. **Tests**
+5. **Tests**
    - Integration-style tests for workers ensuring placeholders substitute correctly and aggregated placeholders appear in reduce outputs.
 
 ## Phase 8 – Cleanup & Documentation
@@ -145,4 +160,4 @@
 - Decide on default bundled placeholder sets and their contents.
 - Confirm formatting for `{reduce_source_table}` (column headers, alignment) before implementation.
 - Consider future enhancements (e.g., placeholder value templates, autofill suggestions).
-
+- Post-implementation, review all placeholders marked as required; if they represent static project attributes, ensure they surface in the project setup step rather than solely in prompt selection. (Dynamic placeholders such as `{document_contents}` remain excluded from project setup.)

@@ -23,6 +23,11 @@ from src.config.prompt_store import (
     sync_bundled_prompts,
     sync_bundled_templates,
 )
+from src.config.placeholder_store import (
+    get_placeholder_bundled_dir,
+    get_placeholder_custom_dir,
+    sync_bundled_placeholder_sets,
+)
 
 
 class SettingsDialog(QDialog):
@@ -59,8 +64,8 @@ class SettingsDialog(QDialog):
         self.tab_widget.addTab(api_tab, "API Keys")
 
         # Prompts tab
-        resources_tab = self._create_prompts_templates_tab()
-        self.tab_widget.addTab(resources_tab, "Prompts & Templates")
+        resources_tab = self._create_resources_tab()
+        self.tab_widget.addTab(resources_tab, "Prompts, Templates & Placeholders")
         
         layout.addWidget(self.tab_widget)
         
@@ -74,8 +79,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(buttons)
         
         
-    def _create_prompts_templates_tab(self) -> QWidget:
-        """Create the Prompts & Templates tab for managing shared resources."""
+    def _create_resources_tab(self) -> QWidget:
+        """Create the resource management tab for prompts, templates, and placeholder sets."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
@@ -150,6 +155,37 @@ class SettingsDialog(QDialog):
 
         layout.addWidget(template_paths_group)
 
+        # Placeholder folders
+        placeholder_paths_group = QGroupBox("Placeholder Set Folders")
+        placeholder_paths_form = QFormLayout(placeholder_paths_group)
+
+        placeholder_custom_dir = str(get_placeholder_custom_dir())
+        placeholder_bundled_dir = str(get_placeholder_bundled_dir())
+
+        placeholder_custom_row = QHBoxLayout()
+        placeholder_custom_edit = QLineEdit(placeholder_custom_dir)
+        placeholder_custom_edit.setReadOnly(True)
+        placeholder_open_custom_btn = QPushButton("Open Folder…")
+        placeholder_open_custom_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(placeholder_custom_dir))
+        )
+        placeholder_custom_row.addWidget(placeholder_custom_edit)
+        placeholder_custom_row.addWidget(placeholder_open_custom_btn)
+        placeholder_paths_form.addRow("Custom placeholder sets:", placeholder_custom_row)
+
+        placeholder_bundled_row = QHBoxLayout()
+        placeholder_bundled_edit = QLineEdit(placeholder_bundled_dir)
+        placeholder_bundled_edit.setReadOnly(True)
+        placeholder_open_bundled_btn = QPushButton("Open Folder…")
+        placeholder_open_bundled_btn.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(placeholder_bundled_dir))
+        )
+        placeholder_bundled_row.addWidget(placeholder_bundled_edit)
+        placeholder_bundled_row.addWidget(placeholder_open_bundled_btn)
+        placeholder_paths_form.addRow("Bundled placeholder sets:", placeholder_bundled_row)
+
+        layout.addWidget(placeholder_paths_group)
+
         # Prompt sync controls
         prompt_sync_group = QGroupBox("Update Bundled Prompts")
         prompt_sync_layout = QVBoxLayout(prompt_sync_group)
@@ -181,6 +217,22 @@ class SettingsDialog(QDialog):
         self.template_sync_result_label.setStyleSheet("color: #666;")
         template_sync_layout.addWidget(self.template_sync_result_label)
         layout.addWidget(template_sync_group)
+
+        # Placeholder sync controls
+        placeholder_sync_group = QGroupBox("Update Bundled Placeholder Sets")
+        placeholder_sync_layout = QVBoxLayout(placeholder_sync_group)
+        placeholder_sync_row = QHBoxLayout()
+        placeholder_sync_btn = QPushButton("Sync (non-destructive)")
+        placeholder_sync_btn.clicked.connect(self._sync_placeholder_sets)
+        placeholder_sync_force_btn = QPushButton("Force Update (overwrite bundled)")
+        placeholder_sync_force_btn.clicked.connect(lambda: self._sync_placeholder_sets(force=True))
+        placeholder_sync_row.addWidget(placeholder_sync_btn)
+        placeholder_sync_row.addWidget(placeholder_sync_force_btn)
+        placeholder_sync_layout.addLayout(placeholder_sync_row)
+        self.placeholder_sync_result_label = QLabel("")
+        self.placeholder_sync_result_label.setStyleSheet("color: #666;")
+        placeholder_sync_layout.addWidget(self.placeholder_sync_result_label)
+        layout.addWidget(placeholder_sync_group)
 
         layout.addStretch()
         return widget
@@ -218,6 +270,23 @@ class SettingsDialog(QDialog):
         except Exception as exc:
             self.template_sync_result_label.setText(f"Sync failed: {exc}")
             self.logger.exception("Template sync failed")
+
+    def _sync_placeholder_sets(self, force: bool = False) -> None:
+        """Run the bundled placeholder set sync and display a summary."""
+        try:
+            result = sync_bundled_placeholder_sets(force=force)
+            copied = len(result.get("copied", []))
+            updated = len(result.get("updated", []))
+            skipped = len(result.get("skipped", []))
+            same = len(result.get("same", []))
+            summary = (
+                f"Copied: {copied}  •  Updated: {updated}  •  Skipped: {skipped}  •  Unchanged: {same}"
+            )
+            self.placeholder_sync_result_label.setText(summary)
+            self.logger.info("Placeholder sync completed: %s", summary)
+        except Exception as exc:
+            self.placeholder_sync_result_label.setText(f"Sync failed: {exc}")
+            self.logger.exception("Placeholder sync failed")
 
     def _create_defaults_tab(self) -> QWidget:
         """Create the defaults tab."""

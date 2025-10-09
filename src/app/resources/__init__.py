@@ -16,4 +16,9 @@ def templates_dir() -> Path:
     return Path(resources.files(__name__).joinpath("templates"))
 
 
-__all__ = ["prompts_dir", "templates_dir"]
+def placeholder_sets_dir() -> Path:
+    """Return the filesystem path to bundled placeholder set markdown files."""
+    return Path(resources.files(__name__).joinpath("placeholder_sets"))
+
+
+__all__ = ["prompts_dir", "templates_dir", "placeholder_sets_dir"]
