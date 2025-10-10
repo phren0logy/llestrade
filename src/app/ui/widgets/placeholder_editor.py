@@ -34,6 +34,7 @@ from src.app.core.placeholders import (
 )
 from src.app.core.placeholders.parser import PlaceholderParseError
 from src.app.core.placeholders.system import SYSTEM_PLACEHOLDERS
+from src.config.placeholder_store import get_placeholder_custom_dir
 
 
 PLACEHOLDER_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -351,8 +352,36 @@ class PlaceholderEditorWidget(QWidget):
             QMessageBox.warning(self, "Invalid Placeholder File", str(exc))
             return
         self._apply_placeholder_keys(parsed.keys)
-        self._set_hint.setText(f"Loaded from file: {path.name}")
-        self._set_hint.show()
+
+        dest_dir = get_placeholder_custom_dir()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / path.name
+        try:
+            if path.resolve() != dest_path.resolve():
+                dest_path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        except OSError as exc:
+            QMessageBox.warning(
+                self,
+                "Import Failed",
+                f"Could not copy placeholder file:\n\n{exc}",
+            )
+            return
+
+        self.refresh_sets(select_default=False)
+
+        target_name = dest_path.stem
+        for index in range(self._set_combo.count()):
+            descriptor = self._set_combo.itemData(index)
+            if (
+                isinstance(descriptor, PlaceholderSetDescriptor)
+                and descriptor.origin == "custom"
+                and descriptor.name == target_name
+            ):
+                self._set_combo.setCurrentIndex(index)
+                break
+        else:
+            self._set_hint.setText(f"Loaded from file: {path.name}")
+            self._set_hint.show()
 
     def _export_to_file(self) -> None:
         path_str, _ = QFileDialog.getSaveFileName(

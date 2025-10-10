@@ -8,7 +8,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import frontmatter
 
@@ -51,6 +51,14 @@ LOGGER = logging.getLogger(__name__)
 
 _MANIFEST_VERSION = 1
 
+_DYNAMIC_REDUCE_KEYS: frozenset[str] = frozenset(
+    {
+        "document_content",
+        "chunk_index",
+        "chunk_total",
+    }
+)
+
 
 def _manifest_path(project_dir: Path, group: BulkAnalysisGroup) -> Path:
     slug = getattr(group, "slug", None) or group.folder_name
@@ -73,6 +81,7 @@ def _load_manifest(path: Path) -> Dict[str, object]:
     return {
         "version": data.get("version", _MANIFEST_VERSION),
         "signature": data.get("signature"),
+        "placeholders": data.get("placeholders"),
     }
 
 
@@ -80,6 +89,7 @@ def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
     payload = {
         "version": _MANIFEST_VERSION,
         "signature": manifest.get("signature"),
+        "placeholders": manifest.get("placeholders"),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -193,6 +203,45 @@ class BulkReduceWorker(DashboardWorker):
         placeholders.update(system_values)
         return placeholders
 
+    def _enforce_placeholder_requirements(
+        self,
+        placeholders: Mapping[str, str],
+        *,
+        context: str,
+        dynamic_keys: Iterable[str],
+    ) -> None:
+        requirements = getattr(self._group, "placeholder_requirements", None) or {}
+        if not requirements:
+            return
+
+        missing_required: list[str] = []
+        missing_optional: list[str] = []
+        dynamic = set(dynamic_keys)
+
+        for key, required in requirements.items():
+            if key in dynamic:
+                continue
+            value = (placeholders.get(key) or "").strip()
+            if value:
+                continue
+            if required:
+                missing_required.append(key)
+            else:
+                missing_optional.append(key)
+
+        if missing_optional:
+            self.log_message.emit(
+                f"{context}: optional placeholders without values: "
+                + ", ".join(f"{{{name}}}" for name in sorted(missing_optional))
+            )
+
+        if missing_required:
+            formatted = ", ".join(f"{{{name}}}" for name in sorted(missing_required))
+            raise RuntimeError(f"{context}: required placeholders missing values: {formatted}")
+
+    def _serialise_placeholders(self, placeholders: Mapping[str, str]) -> Dict[str, str]:
+        return {key: placeholders.get(key, "") for key in sorted(placeholders)}
+
     def _resolve_source_context(
         self,
         *,
@@ -273,6 +322,13 @@ class BulkReduceWorker(DashboardWorker):
             aggregate_contexts = list(aggregate_contexts_map.values())
 
             placeholders_global = self._build_placeholder_map(reduce_sources=aggregate_contexts)
+
+            self._enforce_placeholder_requirements(
+                placeholders_global,
+                context=f"combined analysis '{self._group.name}'",
+                dynamic_keys=_DYNAMIC_REDUCE_KEYS,
+            )
+
             system_prompt = render_system_prompt(
                 bundle,
                 self._metadata,
@@ -399,13 +455,14 @@ class BulkReduceWorker(DashboardWorker):
                 provider_cfg=provider_cfg,
                 prompt_hash=prompt_hash,
                 run_details=run_details,
+                placeholders=placeholders_global,
                 created_at=written_at,
             )
             updated = apply_frontmatter(result, metadata, merge_existing=True)
             output_path.write_text(updated, encoding="utf-8")
-            run_manifest = self._build_run_manifest(inputs, provider_cfg)
+            run_manifest = self._build_run_manifest(inputs, provider_cfg, placeholders_global)
             run_manifest_path.write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
-            state_manifest = self._build_state_manifest(current_signature)
+            state_manifest = self._build_state_manifest(current_signature, placeholders_global)
             _save_manifest(state_manifest_path, state_manifest)
 
             self.progress.emit(1, 1, "Completed")
@@ -430,6 +487,7 @@ class BulkReduceWorker(DashboardWorker):
         provider_cfg: ProviderConfig,
         prompt_hash: str,
         run_details: Dict[str, object],
+        placeholders: Mapping[str, str],
         created_at: datetime,
     ) -> Dict[str, object]:
         project_path = infer_project_path(output_path)
@@ -445,6 +503,7 @@ class BulkReduceWorker(DashboardWorker):
             "input_count": len(inputs),
         }
         extra.update(run_details)
+        extra["placeholders"] = self._serialise_placeholders(placeholders)
         return build_document_metadata(
             project_path=project_path,
             generator="bulk_reduce_worker",
@@ -667,16 +726,26 @@ class BulkReduceWorker(DashboardWorker):
         out_manifest = out_md.with_suffix(".manifest.json")
         return out_md, out_manifest
 
-    def _build_state_manifest(self, signature: dict[str, object]) -> dict:
+    def _build_state_manifest(
+        self,
+        signature: dict[str, object],
+        placeholders: Mapping[str, str],
+    ) -> dict:
         return {
             "version": _MANIFEST_VERSION,
             "group_id": self._group.group_id,
             "group_slug": getattr(self._group, "slug", None) or self._group.folder_name,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "signature": signature,
+            "placeholders": self._serialise_placeholders(placeholders),
         }
 
-    def _build_run_manifest(self, inputs: Sequence[tuple[str, Path, str]], provider_cfg: ProviderConfig) -> dict:
+    def _build_run_manifest(
+        self,
+        inputs: Sequence[tuple[str, Path, str]],
+        provider_cfg: ProviderConfig,
+        placeholders: Mapping[str, str],
+    ) -> dict:
         manifest_inputs = []
         for kind, path, rel in inputs:
             try:
@@ -697,4 +766,5 @@ class BulkReduceWorker(DashboardWorker):
             "temperature": provider_cfg.temperature,
             "system_prompt_path": self._group.system_prompt_path,
             "user_prompt_path": self._group.user_prompt_path,
+            "placeholders": self._serialise_placeholders(placeholders),
         }

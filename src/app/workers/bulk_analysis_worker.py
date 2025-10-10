@@ -7,7 +7,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import frontmatter
 
@@ -52,6 +52,32 @@ class ProviderConfig:
 
 _MANIFEST_VERSION = 1
 _MTIME_TOLERANCE = 1e-6
+
+_DYNAMIC_GLOBAL_KEYS: frozenset[str] = frozenset(
+    {
+        "document_content",
+        "source_pdf_filename",
+        "source_pdf_relative_path",
+        "source_pdf_absolute_path",
+        "source_pdf_absolute_url",
+        "reduce_source_list",
+        "reduce_source_table",
+        "reduce_source_count",
+        "chunk_index",
+        "chunk_total",
+    }
+)
+
+_DYNAMIC_DOCUMENT_KEYS: frozenset[str] = frozenset(
+    {
+        "document_content",
+        "chunk_index",
+        "chunk_total",
+        "reduce_source_list",
+        "reduce_source_table",
+        "reduce_source_count",
+    }
+)
 
 
 def _manifest_path(project_dir: Path, group: BulkAnalysisGroup) -> Path:
@@ -279,6 +305,13 @@ class BulkAnalysisWorker(DashboardWorker):
             provider_config = self._resolve_provider()
             bundle = load_prompts(self._project_dir, self._group, self._metadata)
             global_placeholders = self._build_placeholder_map()
+
+            self._enforce_placeholder_requirements(
+                global_placeholders,
+                context="bulk analysis",
+                dynamic_keys=_DYNAMIC_GLOBAL_KEYS,
+            )
+
             system_prompt = render_system_prompt(
                 bundle,
                 self._metadata,
@@ -327,7 +360,7 @@ class BulkAnalysisWorker(DashboardWorker):
                     continue
 
                 try:
-                    summary, run_details = self._process_document(
+                    summary, run_details, doc_placeholders = self._process_document(
                         provider,
                         provider_config,
                         bundle,
@@ -365,6 +398,7 @@ class BulkAnalysisWorker(DashboardWorker):
                             "source_mtime": round(source_mtime, 6),
                             "prompt_hash": prompt_hash,
                             "ran_at": ran_timestamp,
+                            "placeholders": self._serialise_placeholders(doc_placeholders),
                         }
 
                 progress_count = successes + failures + skipped
@@ -410,13 +444,18 @@ class BulkAnalysisWorker(DashboardWorker):
         system_prompt: str,
         document: BulkAnalysisDocument,
         global_placeholders: Dict[str, str],
-    ) -> tuple[str, Dict[str, object]]:
+    ) -> tuple[str, Dict[str, object], Dict[str, str]]:
         if self.is_cancelled():
             raise BulkAnalysisCancelled
 
         body, metadata, source_context = self._load_document(document)
-        doc_placeholders = dict(global_placeholders)
-        doc_placeholders.update(self._build_placeholder_map(source=source_context))
+        doc_placeholders = self._build_document_placeholders(global_placeholders, source_context)
+
+        self._enforce_placeholder_requirements(
+            doc_placeholders,
+            context=f"bulk analysis document '{document.relative_path}'",
+            dynamic_keys=_DYNAMIC_DOCUMENT_KEYS,
+        )
 
         override_window = getattr(self._group, "model_context_window", None)
         if isinstance(override_window, int) and override_window > 0:
@@ -464,7 +503,8 @@ class BulkAnalysisWorker(DashboardWorker):
                 placeholder_values=doc_placeholders,
             )
             run_details["chunk_count"] = 1
-            return self._invoke_provider(provider, provider_config, prompt, system_prompt), run_details
+            result = self._invoke_provider(provider, provider_config, prompt, system_prompt)
+            return result, run_details, doc_placeholders
 
         chunks = generate_chunks(body, max_tokens)
         if not chunks:
@@ -477,7 +517,8 @@ class BulkAnalysisWorker(DashboardWorker):
             )
             run_details["chunk_count"] = 1
             run_details["chunking"] = False
-            return self._invoke_provider(provider, provider_config, prompt, system_prompt), run_details
+            result = self._invoke_provider(provider, provider_config, prompt, system_prompt)
+            return result, run_details, doc_placeholders
 
         chunk_summaries: List[str] = []
         total_chunks = len(chunks)
@@ -508,7 +549,8 @@ class BulkAnalysisWorker(DashboardWorker):
             metadata=self._metadata,
             placeholder_values=doc_placeholders,
         )
-        return self._invoke_provider(provider, provider_config, combine_prompt, system_prompt), run_details
+        result = self._invoke_provider(provider, provider_config, combine_prompt, system_prompt)
+        return result, run_details, doc_placeholders
 
     def _invoke_provider(
         self,
@@ -605,6 +647,58 @@ class BulkAnalysisWorker(DashboardWorker):
             prompts=prompts,
             extra=extra,
         )
+
+    def _build_document_placeholders(
+        self,
+        base: Mapping[str, str],
+        source_context: SourceFileContext | None,
+    ) -> Dict[str, str]:
+        doc_placeholders = dict(base)
+        doc_placeholders.update(
+            self._build_placeholder_map(
+                source=source_context,
+            )
+        )
+        return doc_placeholders
+
+    def _enforce_placeholder_requirements(
+        self,
+        placeholders: Mapping[str, str],
+        *,
+        context: str,
+        dynamic_keys: Iterable[str],
+    ) -> None:
+        requirements = getattr(self._group, "placeholder_requirements", None) or {}
+        if not requirements:
+            return
+
+        missing_required: list[str] = []
+        missing_optional: list[str] = []
+        dynamic = set(dynamic_keys)
+
+        for key, required in requirements.items():
+            if key in dynamic:
+                continue
+            value = (placeholders.get(key) or "").strip()
+            if value:
+                continue
+            if required:
+                missing_required.append(key)
+            else:
+                missing_optional.append(key)
+
+        if missing_optional:
+            self.log_message.emit(
+                f"{context}: optional placeholders without values: "
+                + ", ".join(f"{{{name}}}" for name in sorted(missing_optional))
+            )
+
+        if missing_required:
+            formatted = ", ".join(f"{{{name}}}" for name in sorted(missing_required))
+            raise RuntimeError(f"{context}: required placeholders missing values: {formatted}")
+
+    def _serialise_placeholders(self, placeholders: Mapping[str, str]) -> Dict[str, str]:
+        return {key: placeholders.get(key, "") for key in sorted(placeholders)}
 
     def _prompt_references(self) -> List[PromptReference]:
         references: List[PromptReference] = []

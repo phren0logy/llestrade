@@ -2,13 +2,11 @@
 
 This document describes how placeholders work across the Llestrade dashboard. Use it as the canonical guide when updating prompts, building new workspace flows, or diagnosing preview and validation issues.
 
-
 ## Why placeholders matter
 
 - They let every project capture client- and matter-specific details once and reuse them everywhere the UI formats prompts.
 - They provide per-run context (for example, the original PDF’s filename) so bulk and report jobs can keep traceability back to the source material.
 - They power the prompt preview experience: the analyser highlights missing substitutions, flags required keys, and drives the warning dialogs shown before long-running jobs.
-
 
 ## Placeholder flavors
 
@@ -23,17 +21,17 @@ This document describes how placeholders work across the Llestrade dashboard. Us
 
 Generated automatically by `src/app/core/placeholders/system.py` and merged into the project map everywhere prompts are rendered.
 
-| Key | Populated with | Notes |
-| --- | --- | --- |
-| `project_name` | Current project/case name | Always read-only |
-| `timestamp` | ISO-8601 UTC timestamp captured when a run starts | Changes per job |
-| `source_pdf_filename` | Name of the PDF tied to the current markdown document | Set per document during bulk map runs |
-| `source_pdf_relative_path` | Project-relative path to that PDF | Requires the conversion metadata to contain `sources` |
-| `source_pdf_absolute_path` | Absolute path to the PDF | Useful for linking back to the original evidence |
-| `source_pdf_absolute_url` | URL-encoded absolute path | Safe to embed in `x-callback-url` flows (spaces become `%20`, slashes remain `/`) |
-| `reduce_source_list` | Markdown bullet list of inputs used in a combined run | Only populated for combined/bulk-reduce jobs |
-| `reduce_source_table` | Markdown table (filename, relative path, absolute path) | Lets prompts reference structured lists |
-| `reduce_source_count` | Stringified count of combined inputs | |
+| Key                        | Populated with                                          | Notes                                                                             |
+| -------------------------- | ------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `project_name`             | Current project/case name                               | Always read-only                                                                  |
+| `timestamp`                | ISO-8601 UTC timestamp captured when a run starts       | Changes per job                                                                   |
+| `source_pdf_filename`      | Name of the PDF tied to the current markdown document   | Set per document during bulk map runs                                             |
+| `source_pdf_relative_path` | Project-relative path to that PDF                       | Requires the conversion metadata to contain `sources`                             |
+| `source_pdf_absolute_path` | Absolute path to the PDF                                | Useful for linking back to the original evidence                                  |
+| `source_pdf_absolute_url`  | URL-encoded absolute path                               | Safe to embed in `x-callback-url` flows (spaces become `%20`, slashes remain `/`) |
+| `reduce_source_list`       | Markdown bullet list of inputs used in a combined run   | Only populated for combined/bulk-reduce jobs                                      |
+| `reduce_source_table`      | Markdown table (filename, relative path, absolute path) | Lets prompts reference structured lists                                           |
+| `reduce_source_count`      | Stringified count of combined inputs                    |                                                                                   |
 
 System keys are injected in three layers:
 
@@ -42,7 +40,6 @@ System keys are injected in three layers:
 3. `BulkReduceWorker` adds combined-input summaries; `ReportWorker` keeps the run timestamp and project metadata.
 
 Dynamic placeholders such as `{document_content}` are not stored on the project. Workers supply them at runtime when formatting prompts or when the preview dialog truncates converted content.
-
 
 ## Placeholder sets and storage locations
 
@@ -56,15 +53,15 @@ Placeholder lists are managed just like prompts and templates:
 Example `matter_defaults.md`:
 
 ```markdown
-# Keys used for Jones v WA
+# Keys used for Doe v State
+
 - client_name
 - opposing_counsel
 - incident_summary
-- document_contents  <!-- keep for map runs -->
+- document_contents <!-- keep for map runs -->
 ```
 
 The UI surfaces the registry anywhere a placeholder set picker appears. Creating or importing new files writes to the `custom` directory so they can be checked into source control or shared between team members if desired.
-
 
 ## Editing placeholders in the UI
 
@@ -85,7 +82,6 @@ Validation rules baked into the editor:
 - Values are plain text. No substitution is performed until a worker renders a prompt.
 - Duplicate keys are de-duplicated automatically.
 
-
 ## Prompt previews and analysis
 
 The preview dialog (`PromptPreviewDialog`) is shared by bulk groups, report flows, and any future workspace panels. It provides:
@@ -101,7 +97,6 @@ The analyser behind the dialog (`PlaceholderAnalysis`) also powers:
 - Pre-run warnings when required values are missing.
 - The requirements matrix inside the bulk-group editor.
 
-
 ## Placeholder requirements and validation
 
 Bulk analysis groups track a `placeholder_requirements` map. The dialog automatically scans the selected system/user prompts and presents a checklist of discovered placeholders:
@@ -115,7 +110,6 @@ The controller enforces additional rules:
 - Per-document runs always require `document_content`; it’s injected automatically when previewing but still needs content present in the converted markdown.
 - Combined runs expose `reduce_source_*` placeholders as optional because they’re generated dynamically.
 - Before executing, the controller shows a confirmation dialog listing any missing required or optional values so users can cancel, edit placeholders, and retry.
-
 
 ## Runtime substitution by worker
 
@@ -139,7 +133,6 @@ The controller enforces additional rules:
 - Section prompts, the combined draft, and the refinement step all receive the same map.
 - Draft and refined outputs store the placeholder map in their front matter (`extra.placeholders`). This makes it easy to audit which values were active when the report was generated.
 
-
 ## Naming conventions and best practices
 
 - **Snake case only** – enforcement happens in the editor and parser.
@@ -149,17 +142,15 @@ The controller enforces additional rules:
 - **Document dynamic placeholders** (`document_content`, `source_pdf_absolute_url`, `reduce_source_list`, etc.) in prompts, but do not add them to the project list.
 - **Treat values as plain text** – workers don’t interpret Markdown or JSON structures unless a prompt explicitly does so.
 
-
 ## Frequently used keys and recommendations
 
-| Scenario | Recommended keys |
-| --- | --- |
-| Map (per-document) bulk runs | `document_content` (required), `client_name`, `case_number`, any investigation-specific tags |
-| Combined bulk runs | `reduce_source_list`, `reduce_source_table`, `reduce_source_count`, plus the same project-level metadata |
-| Reports | Project metadata (`client_name`, `case_name`, `matter_summary`), `transcript_notes`, `audience`, etc. These become available to both the generation and refinement prompts. |
+| Scenario                     | Recommended keys                                                                                                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Map (per-document) bulk runs | `document_content` (required), `client_name`, `case_number`, any investigation-specific tags                                                                                |
+| Combined bulk runs           | `reduce_source_list`, `reduce_source_table`, `reduce_source_count`, plus the same project-level metadata                                                                    |
+| Reports                      | Project metadata (`client_name`, `case_name`, `matter_summary`), `transcript_notes`, `audience`, etc. These become available to both the generation and refinement prompts. |
 
 Remember to review required keys at the end of each planning phase. If a placeholder must be filled for every project (for example, `client_name`), move it into the project creation checklist so new files are never missing critical context.
-
 
 ## Directory recap
 
@@ -174,7 +165,6 @@ Remember to review required keys at the end of each planning phase. If a placeho
 ```
 
 Placing a new Markdown file in either directory and refreshing the UI is all that’s required to surface a new placeholder set.
-
 
 ## Troubleshooting checklist
 
