@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 
 from src.app.core import ProjectManager, SecureSettings
 from src.app.core.file_tracker import DashboardMetrics, FileTracker
+from src.common.llm.providers import AnthropicBedrockProvider
 
 LOGGER = logging.getLogger(__name__)
 
@@ -411,12 +412,16 @@ class WelcomeStage(QWidget):
 
         providers = [
             ("anthropic", "Anthropic (Claude)", "🤖"),
+            ("anthropic_bedrock", "AWS Bedrock (Claude)", "🛡️"),
             ("gemini", "Google Gemini", "✨"),
             ("azure_openai", "Azure OpenAI", "☁️"),
         ]
         settings = SecureSettings()
         for provider_id, label, icon in providers:
-            available = settings.has_api_key(provider_id)
+            if provider_id == "anthropic_bedrock":
+                available = self._is_bedrock_available()
+            else:
+                available = settings.has_api_key(provider_id)
             row = QLabel(f"{icon} {label} — {'Configured' if available else 'Missing'}")
             color = "#4caf50" if available else "#f44336"
             row.setStyleSheet(f"color: {color};")
@@ -428,6 +433,14 @@ class WelcomeStage(QWidget):
     def cleanup(self) -> None:
         if self.api_timer.isActive():
             self.api_timer.stop()
+
+    def _is_bedrock_available(self) -> bool:
+        try:
+            provider = AnthropicBedrockProvider()
+            return provider.initialized
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.debug("Bedrock availability check failed: %s", exc)
+            return False
 
 
 __all__ = ["WelcomeStage"]

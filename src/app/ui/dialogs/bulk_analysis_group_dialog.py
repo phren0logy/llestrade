@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from src.config.app_config import get_available_providers_and_models
 from src.config.prompt_store import get_bundled_dir, get_custom_dir
 from src.config.paths import app_resource_root
 from src.app.core.bulk_paths import iter_map_outputs
@@ -42,6 +41,8 @@ from src.app.core.prompt_placeholders import get_prompt_spec
 from src.app.core.prompt_preview import generate_prompt_preview, PromptPreviewError
 from src.app.core.prompt_placeholders import placeholder_summary
 from .prompt_preview_dialog import PromptPreviewDialog
+from src.app.core.secure_settings import SecureSettings
+from src.common.llm.bedrock_catalog import DEFAULT_BEDROCK_MODELS, list_bedrock_models
 
 DEFAULT_SYSTEM_PROMPT = "prompts/document_analysis_system_prompt.md"
 DEFAULT_USER_PROMPT = "prompts/document_bulk_analysis_prompt.md"
@@ -237,6 +238,23 @@ class BulkAnalysisGroupDialog(QDialog):
             "Anthropic Claude (claude-opus-4-1-20250805)",
             ("anthropic", "claude-opus-4-1-20250805"),
         )
+
+        # Append AWS Bedrock Claude models discovered via AWS CLI credentials
+        bedrock_models = []
+        try:
+            settings = SecureSettings()
+            bedrock_settings = settings.get("aws_bedrock_settings", {}) or {}
+            bedrock_models = list_bedrock_models(
+                region=bedrock_settings.get("region"),
+                profile=bedrock_settings.get("profile"),
+            )
+        except Exception:
+            bedrock_models = list(DEFAULT_BEDROCK_MODELS)
+
+        for model in bedrock_models:
+            label = f"AWS Bedrock Claude ({model.name})"
+            combo.addItem(label, ("anthropic_bedrock", model.model_id))
+
         return combo
 
     def _on_model_changed(self) -> None:

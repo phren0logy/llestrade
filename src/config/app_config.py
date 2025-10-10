@@ -22,6 +22,11 @@ DEFAULT_SETTINGS = {
             "label": "Anthropic Claude",
             "default_model": "claude-sonnet-4-5-20250929"
         },
+        "anthropic_bedrock": {
+            "enabled": True,
+            "label": "AWS Bedrock (Claude)",
+            "default_model": "anthropic.claude-sonnet-4-5-20250929-v1:0"
+        },
         "gemini": {
             "enabled": True,
             "label": "Google Gemini",
@@ -196,6 +201,23 @@ def get_configured_llm_provider(
                 f"(either via override, SecureSettings, or in '{SETTINGS_FILE}' for provider '{provider_label}'). This is required."
             )
             return None
+    elif selected_provider_id == "anthropic_bedrock":
+        try:
+            from src.app.core import SecureSettings
+
+            secure_settings = SecureSettings()
+            bedrock_settings = secure_settings.get("aws_bedrock_settings", {}) or {}
+        except Exception as e:  # pragma: no cover - defensive fallback
+            logging.debug(f"Could not load SecureSettings for AWS Bedrock: {e}")
+            bedrock_settings = {}
+
+        factory_args["aws_region"] = bedrock_settings.get("region")
+        factory_args["aws_profile"] = bedrock_settings.get("profile")
+        effective_model_name = (
+            model_override
+            or bedrock_settings.get("preferred_model")
+            or specific_config.get("default_model")
+        )
     else:  # For Anthropic, Gemini, etc.
         effective_model_name = model_override if model_override else specific_config.get("default_model")
         if not effective_model_name:

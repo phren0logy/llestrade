@@ -45,6 +45,8 @@ from src.config.prompt_store import (
     get_repo_prompts_dir,
     get_template_custom_dir,
 )
+from src.app.core.secure_settings import SecureSettings
+from src.common.llm.bedrock_catalog import DEFAULT_BEDROCK_MODELS, list_bedrock_models
 
 
 @dataclass(slots=True)
@@ -232,6 +234,21 @@ class ReportsController:
             "Anthropic Claude (claude-opus-4-1-20250805)",
             ("anthropic", "claude-opus-4-1-20250805"),
         )
+
+        try:
+            settings = SecureSettings()
+            bedrock_settings = settings.get("aws_bedrock_settings", {}) or {}
+            bedrock_models = list_bedrock_models(
+                region=bedrock_settings.get("region"),
+                profile=bedrock_settings.get("profile"),
+            )
+        except Exception:
+            bedrock_models = list(DEFAULT_BEDROCK_MODELS)
+
+        for model in bedrock_models:
+            label = f"AWS Bedrock Claude ({model.name})"
+            combo.addItem(label, ("anthropic_bedrock", model.model_id))
+
 
     def _initialise_prompt_tooltips(self) -> None:
         self._tab.generation_system_prompt_edit.setToolTip(

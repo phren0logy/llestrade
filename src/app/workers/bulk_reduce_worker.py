@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-import hashlib
+import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -679,6 +680,10 @@ class BulkReduceWorker(DashboardWorker):
             azure_settings = settings.get("azure_openai_settings", {}) or {}
             kwargs["azure_endpoint"] = azure_settings.get("endpoint")
             kwargs["api_version"] = azure_settings.get("api_version")
+        elif config.provider_id == "anthropic_bedrock":
+            bedrock_settings = settings.get("aws_bedrock_settings", {}) or {}
+            kwargs["aws_region"] = bedrock_settings.get("region") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+            kwargs["aws_profile"] = bedrock_settings.get("profile")
         provider = create_provider(**kwargs)
         if provider is None or not getattr(provider, "initialized", False):
             raise RuntimeError(

@@ -8,7 +8,12 @@ from typing import Dict, List, Optional, Any
 from PySide6.QtCore import QObject
 
 from .base import BaseLLMProvider
-from .providers import AnthropicProvider, GeminiProvider, AzureOpenAIProvider
+from .providers import (
+    AnthropicProvider,
+    AnthropicBedrockProvider,
+    GeminiProvider,
+    AzureOpenAIProvider,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +26,8 @@ def create_provider(
     api_key: Optional[str] = None,
     azure_endpoint: Optional[str] = None,
     api_version: Optional[str] = None,
+    aws_region: Optional[str] = None,
+    aws_profile: Optional[str] = None,
     debug: bool = False,
     parent: Optional[QObject] = None
 ) -> Optional[BaseLLMProvider]:
@@ -58,7 +65,21 @@ def create_provider(
         if anthropic.initialized:
             logger.info("Successfully auto-selected Anthropic provider")
             return anthropic
-        
+
+        logger.info("Anthropic cloud not available, trying Anthropic Bedrock provider...")
+        bedrock = AnthropicBedrockProvider(
+            timeout=timeout,
+            max_retries=max_retries,
+            default_system_prompt=default_system_prompt,
+            aws_region=aws_region,
+            aws_profile=aws_profile,
+            debug=debug,
+            parent=parent,
+        )
+        if bedrock.initialized:
+            logger.info("Successfully auto-selected Anthropic Bedrock provider")
+            return bedrock
+
         # Try Gemini
         logger.info("Anthropic not available, trying Gemini provider...")
         gemini = GeminiProvider(
@@ -103,6 +124,18 @@ def create_provider(
             debug=debug,
             parent=parent
         )
+
+    if provider == "anthropic_bedrock":
+        logger.info("Creating Anthropic Bedrock provider...")
+        return AnthropicBedrockProvider(
+            timeout=timeout,
+            max_retries=max_retries,
+            default_system_prompt=default_system_prompt,
+            aws_region=aws_region,
+            aws_profile=aws_profile,
+            debug=debug,
+            parent=parent,
+        )
     
     elif provider == "gemini":
         logger.info("Creating Gemini provider...")
@@ -141,7 +174,7 @@ def get_available_providers() -> List[Dict[str, Any]]:
         List of dicts with provider info including availability
     """
     providers = []
-    
+
     # Check Anthropic
     anthropic = AnthropicProvider()
     providers.append({
@@ -152,7 +185,19 @@ def get_available_providers() -> List[Dict[str, Any]]:
         "supports_pdf": True,
         "supports_thinking": True,
     })
-    
+
+    # Check Anthropic Bedrock
+    anthropic_bedrock = AnthropicBedrockProvider()
+    providers.append({
+        "id": "anthropic_bedrock",
+        "name": "AWS Bedrock (Claude)",
+        "available": anthropic_bedrock.initialized,
+        "default_model": anthropic_bedrock.default_model,
+        "supports_pdf": True,
+        "supports_thinking": True,
+        "models": [model.model_id for model in anthropic_bedrock.available_models],
+    })
+
     # Check Gemini
     gemini = GeminiProvider()
     providers.append({

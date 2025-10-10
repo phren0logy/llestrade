@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -15,6 +16,13 @@ from src.common.llm.tokens import TokenCounter
 from src.common.markdown import PromptReference, SourceReference, compute_file_checksum
 
 from .base import DashboardWorker
+
+# Mapping of Anthropic cloud model slugs to their AWS Bedrock equivalents.
+# Reference: https://docs.claude.com/en/api/claude-on-amazon-bedrock
+_BEDROCK_MODEL_ALIASES: Dict[str, str] = {
+    "claude-sonnet-4-5-20250929": "anthropic.claude-sonnet-4-5-20250929-v1:0",
+    "claude-opus-4-1-20250805": "anthropic.claude-opus-4-1-20250805-v1:0",
+}
 
 
 class ReportWorkerBase(DashboardWorker):
@@ -39,8 +47,9 @@ class ReportWorkerBase(DashboardWorker):
         self._project_dir = project_dir
         self._inputs = list(inputs)
         self._provider_id = provider_id
-        self._model = model
-        self._custom_model = custom_model.strip() if custom_model else None
+        self._model = self._resolve_model_alias(model)
+        raw_custom = custom_model.strip() if custom_model else None
+        self._custom_model = self._resolve_model_alias(raw_custom)
         self._context_window = context_window
         self._metadata = metadata
         self._max_report_tokens = max_report_tokens
@@ -172,12 +181,25 @@ class ReportWorkerBase(DashboardWorker):
             azure_settings = settings.get("azure_openai_settings", {}) or {}
             kwargs["azure_endpoint"] = azure_settings.get("endpoint")
             kwargs["api_version"] = azure_settings.get("api_version")
+        elif self._provider_id == "anthropic_bedrock":
+            bedrock_settings = settings.get("aws_bedrock_settings", {}) or {}
+            kwargs["aws_region"] = bedrock_settings.get("region") or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+            kwargs["aws_profile"] = bedrock_settings.get("profile")
         provider = create_provider(**kwargs)
         if provider is None or not getattr(provider, "initialized", False):
             raise RuntimeError(
                 f"Unable to initialise provider '{self._provider_id}'. Check API keys and configuration."
             )
         return provider
+
+    def _resolve_model_alias(self, model: Optional[str]) -> Optional[str]:
+        """Translate known cloud model slugs into Bedrock IDs when needed."""
+        if not model:
+            return None
+        if self._provider_id != "anthropic_bedrock":
+            return model
+        normalized = model.strip()
+        return _BEDROCK_MODEL_ALIASES.get(normalized, normalized)
 
 
 __all__ = ["ReportWorkerBase"]

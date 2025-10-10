@@ -20,6 +20,9 @@ MODEL_CONTEXT_WINDOWS = {
     "claude-sonnet-4-5-20250929": int(200_000 * 0.65),   # 130,000 tokens
     "claude-sonnet-4-20250514": int(200_000 * 0.65),     # 130,000 tokens
     "claude-opus-4-1-20250805": int(200_000 * 0.65),     # 130,000 tokens
+    "anthropic.claude-sonnet-4-5-20250929-v1:0": int(200_000 * 0.65),
+    "anthropic.claude-3-5-sonnet-20240620-v1:0": int(200_000 * 0.65),
+    "anthropic.claude-opus-4-1-20250805-v1:0": int(200_000 * 0.65),
     
     # Google Gemini
     "gemini-2.5-pro-preview-05-06": int(2_000_000 * 0.65),  # 1,300,000 tokens
@@ -106,7 +109,7 @@ class TokenCounter:
         # Provider-specific counting
         result = None
         
-        if provider == "anthropic":
+        if provider in {"anthropic", "anthropic_bedrock"}:
             result = TokenCounter._count_anthropic(text, messages)
         elif provider == "azure_openai":
             result = TokenCounter._count_openai(text, messages, model)

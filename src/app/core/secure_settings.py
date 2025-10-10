@@ -89,6 +89,11 @@ class SecureSettings(QObject):
             "version": "1.0",
             "llm_provider": "anthropic",
             "llm_model": "claude-sonnet-4-5-20250929",
+            "aws_bedrock_settings": {
+                "profile": None,
+                "region": None,
+                "preferred_model": None,
+            },
             "output_directory": str(Path.home() / "Documents" / "ForensicReports"),
             "auto_save_interval": 60,  # seconds
             "theme": "light",

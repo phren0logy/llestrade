@@ -52,6 +52,7 @@ Transform the current wizard-style UI into a dashboard-based workflow that suppo
   - [x] Record selected conversion helper and per-project conversion preferences
   - [x] Expose lightweight dashboard state (last opened tab, pending job descriptors) instead of `WorkflowState`
   - [x] Surface FileTracker statistics and bulk-analysis metadata for the workspace views
+- [x] Add AWS Bedrock support to the Anthropic provider stack (dual cloud/Bedrock options, shared factory wiring)
 - [x] Create bulk analysis group system (`src/app/core/bulk_analysis_groups.py`)
 - [x] Implement BulkAnalysisGroup dataclass
   - [x] Add config.json serialization for groups

@@ -1,11 +1,11 @@
 # Llestrade (formerly Forensic Psych Report Drafter)
 
-Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing forensic psychological reports using multiple LLM providers (Anthropic Claude, Google Gemini, Azure OpenAI).
+Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing forensic psychological reports using multiple LLM providers (Anthropic Claude, Anthropic Claude via AWS Bedrock, Google Gemini, Azure OpenAI).
 Note: The application was previously named “Forensic Psych Report Drafter.”
 
 ## Features
 
-- **Multiple LLM Providers**: Support for Anthropic Claude, Google Gemini, and Azure OpenAI GPT-4
+- **Multiple LLM Providers**: Support for Anthropic Claude (cloud & AWS Bedrock), Google Gemini, and Azure OpenAI GPT-4
 - **Document Processing**: Convert PDFs to markdown and analyze forensic psychological reports
 - **Smart Chunking**: Markdown-aware document chunking for large files
 - **Batch Processing**: Process multiple documents with progress tracking
@@ -281,6 +281,10 @@ The application stores settings in `var/app_settings.json` (created on first run
       "enabled": true,
       "default_model": "claude-3-sonnet-20240229"
     },
+    "anthropic_bedrock": {
+      "enabled": true,
+      "default_model": "anthropic.claude-sonnet-4-5-20250929-v1:0"
+    },
     "gemini": {
       "enabled": true,
       "default_model": "gemini-1.5-pro"
@@ -292,6 +296,10 @@ The application stores settings in `var/app_settings.json` (created on first run
   }
 }
 ```
+
+### AWS Bedrock Credentials
+
+Claude models delivered through AWS Bedrock rely on the AWS CLI credential chain. Run `aws configure` (for long-term access keys) or `aws configure sso` (for IAM Identity Center) so credentials are written to `~/.aws/credentials` and `~/.aws/config`. Llestrade reads those settings automatically; no AWS secrets are stored in the application. Optional overrides for profile, region, and the default Bedrock Claude model can be set under **Settings → Configure API Keys → AWS Bedrock (Claude)**.
 
 ### Debug Mode
 
