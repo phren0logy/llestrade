@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+from threading import Lock
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QObject
@@ -16,6 +17,41 @@ from ..bedrock_catalog import BedrockModel, DEFAULT_BEDROCK_MODELS, list_bedrock
 from ..tokens import TokenCounter
 
 logger = logging.getLogger(__name__)
+
+_ATTEMPT_LOCK = Lock()
+_MAX_INIT_ATTEMPTS = 3
+_INIT_ATTEMPTS = 0
+
+
+def _should_attempt_initialization() -> bool:
+    with _ATTEMPT_LOCK:
+        return _INIT_ATTEMPTS < _MAX_INIT_ATTEMPTS
+
+
+def _record_attempt(success: bool, message: Optional[str] = None) -> int:
+    """
+    Track credential check attempts and handle logging.
+
+    Returns the number of failed attempts recorded (0 on success).
+    """
+    global _INIT_ATTEMPTS
+    with _ATTEMPT_LOCK:
+        if success:
+            _INIT_ATTEMPTS = 0
+            return 0
+
+        _INIT_ATTEMPTS += 1
+        attempt = _INIT_ATTEMPTS
+
+    if message:
+        if attempt < _MAX_INIT_ATTEMPTS:
+            logger.warning(message)
+        elif attempt == _MAX_INIT_ATTEMPTS:
+            logger.warning(f"{message} Automatic retries will stop until restart or manual reset.")
+        else:
+            logger.debug(message)
+
+    return attempt
 
 
 class AnthropicBedrockProvider(BaseLLMProvider):
@@ -48,27 +84,32 @@ class AnthropicBedrockProvider(BaseLLMProvider):
         self.client = None
         self._aws_region = aws_region or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
         self._aws_profile = aws_profile
-        self._available_models: List[BedrockModel] = []
+        self._available_models: List[BedrockModel] = list(DEFAULT_BEDROCK_MODELS)
+
+        preferred_model_id = os.getenv("AWS_BEDROCK_DEFAULT_MODEL") or "anthropic.claude-sonnet-4-5-20250929-v1:0"
+        self._default_model_id = self._select_default_model(preferred_model_id)
+
+        if not _should_attempt_initialization():
+            logger.debug(
+                "Skipping Anthropic Bedrock initialization after %d failed attempts in this session",
+                _MAX_INIT_ATTEMPTS,
+            )
+            return
 
         self._load_model_catalog()
-        preferred_model_id = os.getenv("AWS_BEDROCK_DEFAULT_MODEL")
-        if not preferred_model_id:
-            preferred_model_id = "anthropic.claude-sonnet-4-5-20250929-v1:0"
-
-        if self._available_models:
-            if preferred_model_id:
-                for candidate in self._available_models:
-                    if candidate.model_id == preferred_model_id:
-                        self._default_model_id = candidate.model_id
-                        break
-                else:
-                    self._default_model_id = self._available_models[0].model_id
-            else:
-                self._default_model_id = self._available_models[0].model_id
-        else:
-            self._default_model_id = preferred_model_id or DEFAULT_BEDROCK_MODELS[0].model_id
+        self._default_model_id = self._select_default_model(preferred_model_id)
 
         self._init_client()
+
+    def _select_default_model(self, preferred_model_id: str) -> str:
+        """Choose the default model, preferring the configured identifier."""
+        if preferred_model_id:
+            for model in self._available_models:
+                if model.model_id == preferred_model_id:
+                    return model.model_id
+        if self._available_models:
+            return self._available_models[0].model_id
+        return preferred_model_id or DEFAULT_BEDROCK_MODELS[0].model_id
 
     def _load_model_catalog(self):
         """Load the list of available Anthropic models from Bedrock."""
@@ -107,10 +148,12 @@ class AnthropicBedrockProvider(BaseLLMProvider):
                     client_kwargs["session"] = session
                 except Exception as exc:
                     logger.error("Failed to create AWS session for profile '%s': %s", self._aws_profile, exc)
-                    self.emit_error(
+                    message = (
                         f"Unable to create AWS session for profile '{self._aws_profile}'. "
                         "Ensure it exists by running 'aws configure sso' or 'aws configure'."
                     )
+                    _record_attempt(False, message)
+                    self.emit_error(message)
                     return
 
             if self._aws_region:
@@ -157,11 +200,13 @@ class AnthropicBedrockProvider(BaseLLMProvider):
 
         if success:
             logger.info("Anthropic Bedrock client initialised successfully")
+            _record_attempt(True)
             self.set_initialized(True)
         else:
-            logger.warning(
-                "Could not verify AWS Bedrock credentials. Ensure `aws configure` has been run."
-            )
+            message = "Could not verify AWS Bedrock credentials. Ensure `aws configure` has been run."
+            attempts = _record_attempt(False, message)
+            if attempts <= _MAX_INIT_ATTEMPTS:
+                self.emit_error("Anthropic Bedrock not configured")
             self.client = None
             self.set_initialized(False)
 
@@ -179,6 +224,14 @@ class AnthropicBedrockProvider(BaseLLMProvider):
     def available_models(self) -> List[BedrockModel]:
         """Expose the cached list of available models."""
         return list(self._available_models)
+
+    @classmethod
+    def reset_backoff(cls):
+        """Allow callers to retry AWS credential checks after failures."""
+        global _INIT_ATTEMPTS
+        with _ATTEMPT_LOCK:
+            _INIT_ATTEMPTS = 0
+        logger.debug("AWS Bedrock credential check counter reset")
 
     def generate(
         self,

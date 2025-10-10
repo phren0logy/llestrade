@@ -16,6 +16,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 
 from src.common.llm.bedrock_catalog import DEFAULT_BEDROCK_MODELS, list_bedrock_models
+from src.common.llm.providers import AnthropicBedrockProvider
 
 
 class APIKeyDialog(QDialog):
@@ -178,6 +179,7 @@ class APIKeyDialog(QDialog):
 
     def _on_refresh_bedrock_clicked(self):
         """Refresh the AWS Bedrock model list using current profile/region overrides."""
+        AnthropicBedrockProvider.reset_backoff()
         self._refresh_bedrock_models(force=True)
 
     def _refresh_bedrock_models(
@@ -518,6 +520,7 @@ class APIKeyDialog(QDialog):
             "preferred_model": bedrock_model,
         }
         self.settings.set("aws_bedrock_settings", bedrock_settings)
+        AnthropicBedrockProvider.reset_backoff()
 
         # Save Phoenix settings
         phoenix_settings = {
