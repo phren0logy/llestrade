@@ -2,6 +2,12 @@
 
 from .bulk import BulkAnalysisService
 from .highlights import HighlightsService
-from .reports import ReportJobConfig, ReportsService
+from .reports import ReportDraftJobConfig, ReportRefinementJobConfig, ReportsService
 
-__all__ = ["BulkAnalysisService", "HighlightsService", "ReportJobConfig", "ReportsService"]
+__all__ = [
+    "BulkAnalysisService",
+    "HighlightsService",
+    "ReportDraftJobConfig",
+    "ReportRefinementJobConfig",
+    "ReportsService",
+]

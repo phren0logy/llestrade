@@ -191,11 +191,12 @@ class HighlightState:
 
 @dataclass
 class ReportHistoryEntry:
-    """Record of a generated report run."""
+    """Record of a draft or refinement run."""
 
+    run_type: str
     timestamp: str
     draft_path: str
-    refined_path: str
+    refined_path: Optional[str] = None
     reasoning_path: Optional[str] = None
     manifest_path: Optional[str] = None
     inputs_path: Optional[str] = None
@@ -215,17 +216,20 @@ class ReportHistoryEntry:
     refined_tokens: Optional[int] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        payload = asdict(self)
-        return payload
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ReportHistoryEntry":
         if not data:
             raise ValueError("ReportHistoryEntry data cannot be empty")
+        run_type = str(data.get("run_type") or "").strip() or (
+            "refinement" if data.get("refined_path") else "draft"
+        )
         return cls(
+            run_type=run_type,
             timestamp=str(data.get("timestamp")),
             draft_path=str(data.get("draft_path")),
-            refined_path=str(data.get("refined_path")),
+            refined_path=data.get("refined_path"),
             reasoning_path=data.get("reasoning_path"),
             manifest_path=data.get("manifest_path"),
             inputs_path=data.get("inputs_path"),
@@ -234,7 +238,8 @@ class ReportHistoryEntry:
             custom_model=data.get("custom_model"),
             context_window=(
                 int(data["context_window"])
-                if isinstance(data.get("context_window"), (int, float)) or str(data.get("context_window", "")).strip().isdigit()
+                if isinstance(data.get("context_window"), (int, float))
+                or str(data.get("context_window", "")).strip().isdigit()
                 else None
             ),
             inputs=list(data.get("inputs", [])),
@@ -275,6 +280,7 @@ class ReportState:
     last_refinement_user_prompt: Optional[str] = None
     last_generation_system_prompt: Optional[str] = None
     last_refinement_system_prompt: Optional[str] = None
+    last_refinement_draft: Optional[str] = None
     history: List[ReportHistoryEntry] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -290,6 +296,7 @@ class ReportState:
             "last_refinement_user_prompt": self.last_refinement_user_prompt,
             "last_generation_system_prompt": self.last_generation_system_prompt,
             "last_refinement_system_prompt": self.last_refinement_system_prompt,
+            "last_refinement_draft": self.last_refinement_draft,
             "history": [entry.to_dict() for entry in self.history],
         }
 
@@ -322,6 +329,7 @@ class ReportState:
             ),
             last_generation_system_prompt=data.get("last_generation_system_prompt"),
             last_refinement_system_prompt=data.get("last_refinement_system_prompt"),
+            last_refinement_draft=data.get("last_refinement_draft"),
             history=history,
         )
         return state
@@ -1106,6 +1114,7 @@ class ProjectManager(QObject):
         refinement_user_prompt: Optional[str],
         generation_system_prompt: Optional[str],
         refinement_system_prompt: Optional[str],
+        refinement_draft: Optional[str] = None,
     ) -> None:
         state = self.report_state
         state.last_selected_inputs = list(selected_inputs)
@@ -1119,9 +1128,54 @@ class ProjectManager(QObject):
         state.last_refinement_user_prompt = refinement_user_prompt
         state.last_generation_system_prompt = generation_system_prompt
         state.last_refinement_system_prompt = refinement_system_prompt
+        if refinement_draft is not None:
+            state.last_refinement_draft = refinement_draft
         self.mark_modified()
 
-    def record_report_run(
+    def record_report_draft_run(
+        self,
+        *,
+        timestamp: datetime,
+        draft_path: Path,
+        manifest_path: Optional[Path],
+        inputs_path: Optional[Path],
+        provider: str,
+        model: str,
+        custom_model: Optional[str],
+        context_window: Optional[int],
+        inputs: List[str],
+        template_path: Optional[str],
+        transcript_path: Optional[str],
+        generation_user_prompt: Optional[str],
+        generation_system_prompt: Optional[str],
+        draft_tokens: Optional[int] = None,
+    ) -> None:
+        entry = ReportHistoryEntry(
+            run_type="draft",
+            timestamp=timestamp.isoformat(),
+            draft_path=str(draft_path),
+            refined_path=None,
+            reasoning_path=None,
+            manifest_path=str(manifest_path) if manifest_path else None,
+            inputs_path=str(inputs_path) if inputs_path else None,
+            provider=provider,
+            model=model,
+            custom_model=custom_model,
+            context_window=context_window,
+            inputs=list(inputs),
+            template_path=str(template_path) if template_path else None,
+            transcript_path=str(transcript_path) if transcript_path else None,
+            generation_user_prompt=generation_user_prompt,
+            generation_system_prompt=generation_system_prompt,
+            draft_tokens=draft_tokens,
+        )
+        state = self.report_state
+        state.history.insert(0, entry)
+        if len(state.history) > 10:
+            state.history = state.history[:10]
+        self.mark_modified()
+
+    def record_report_refinement_run(
         self,
         *,
         timestamp: datetime,
@@ -1137,15 +1191,12 @@ class ProjectManager(QObject):
         inputs: List[str],
         template_path: Optional[str],
         transcript_path: Optional[str],
-        instructions: Optional[str],
-        generation_user_prompt: Optional[str],
         refinement_user_prompt: Optional[str],
-        generation_system_prompt: Optional[str],
         refinement_system_prompt: Optional[str],
-        draft_tokens: Optional[int] = None,
         refined_tokens: Optional[int] = None,
     ) -> None:
         entry = ReportHistoryEntry(
+            run_type="refinement",
             timestamp=timestamp.isoformat(),
             draft_path=str(draft_path),
             refined_path=str(refined_path),
@@ -1159,18 +1210,15 @@ class ProjectManager(QObject):
             inputs=list(inputs),
             template_path=str(template_path) if template_path else None,
             transcript_path=str(transcript_path) if transcript_path else None,
-            instructions=instructions,
-            generation_user_prompt=generation_user_prompt,
             refinement_user_prompt=refinement_user_prompt,
-            generation_system_prompt=generation_system_prompt,
             refinement_system_prompt=refinement_system_prompt,
-            draft_tokens=draft_tokens,
             refined_tokens=refined_tokens,
         )
         state = self.report_state
         state.history.insert(0, entry)
         if len(state.history) > 10:
             state.history = state.history[:10]
+        state.last_refinement_draft = str(draft_path)
         self.mark_modified()
     
     # File management

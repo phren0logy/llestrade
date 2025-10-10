@@ -33,7 +33,11 @@ from src.app.core.report_inputs import (
 )
 from src.app.ui.workspace.qt_flags import ITEM_IS_TRISTATE, ITEM_IS_USER_CHECKABLE
 from src.app.ui.workspace.reports_tab import ReportsTab
-from src.app.ui.workspace.services import ReportJobConfig, ReportsService
+from src.app.ui.workspace.services import (
+    ReportDraftJobConfig,
+    ReportRefinementJobConfig,
+    ReportsService,
+)
 from src.app.ui.dialogs.prompt_preview_dialog import PromptPreviewDialog
 from src.config.prompt_store import (
     get_bundled_dir,
@@ -70,6 +74,7 @@ class ReportsController:
         self._selected_inputs: set[str] = set()
         self._last_result: Optional[Dict[str, object]] = None
         self._report_running = False
+        self._active_run_kind: Optional[str] = None
 
         self._populate_model_options()
         self._connect_signals()
@@ -104,7 +109,12 @@ class ReportsController:
         self._tab.history_list.clear()
         self._tab.open_reports_button.setEnabled(False)
 
-    def _validate_placeholders_before_run(self) -> bool:
+    def _validate_placeholders_before_run(
+        self,
+        *,
+        include_generation: bool,
+        include_refinement: bool,
+    ) -> bool:
         manager = self._project_manager
         if not manager or not manager.project_dir:
             return False
@@ -149,10 +159,12 @@ class ReportsController:
         refinement_user = self._read_prompt_file(self._tab.refinement_user_prompt_edit.text())
         refinement_system = self._read_prompt_file(self._tab.refinement_system_prompt_edit.text())
 
-        _analyse(generation_user, "report_generation_user_prompt", is_system=False)
-        _analyse(generation_system, "report_generation_system_prompt", is_system=True)
-        _analyse(refinement_user, "refinement_prompt", is_system=False)
-        _analyse(refinement_system, "report_refinement_system_prompt", is_system=True)
+        if include_generation:
+            _analyse(generation_user, "report_generation_user_prompt", is_system=False)
+            _analyse(generation_system, "report_generation_system_prompt", is_system=True)
+        if include_refinement:
+            _analyse(refinement_user, "refinement_prompt", is_system=False)
+            _analyse(refinement_system, "report_refinement_system_prompt", is_system=True)
 
         if missing_required or missing_optional:
             messages: list[str] = []
@@ -195,7 +207,9 @@ class ReportsController:
         self._tab.refinement_user_prompt_preview.clicked.connect(self._preview_refinement_prompt)
         self._tab.refinement_system_prompt_browse.clicked.connect(self._browse_refinement_system_prompt)
         self._tab.refinement_system_prompt_preview.clicked.connect(self._preview_refinement_system_prompt)
-        self._tab.generate_button.clicked.connect(self._start_report_job)
+        self._tab.refine_draft_browse_button.clicked.connect(self._browse_refinement_draft)
+        self._tab.generate_draft_button.clicked.connect(self._start_draft_job)
+        self._tab.run_refinement_button.clicked.connect(self._start_refinement_job)
         self._tab.open_reports_button.clicked.connect(self._open_reports_folder)
         self._tab.inputs_tree.itemChanged.connect(self._on_report_input_changed)
         self._tab.history_list.itemSelectionChanged.connect(self._on_report_history_selected)
@@ -268,6 +282,8 @@ class ReportsController:
             self._tab.generation_system_prompt_edit.setText(state.last_generation_system_prompt)
         if state.last_refinement_system_prompt:
             self._tab.refinement_system_prompt_edit.setText(state.last_refinement_system_prompt)
+        if state.last_refinement_draft:
+            self._tab.refine_draft_edit.setText(state.last_refinement_draft)
 
         self._ensure_default_prompts()
 
@@ -278,12 +294,13 @@ class ReportsController:
         model: str,
         custom_model: Optional[str],
         context_window: Optional[int],
-        template_path: Path,
+        template_path: Optional[Path],
         transcript_path: Optional[Path],
-        generation_user_prompt: Path,
-        refinement_user_prompt: Path,
-        generation_system_prompt: Path,
-        refinement_system_prompt: Path,
+        generation_user_prompt: Optional[Path],
+        refinement_user_prompt: Optional[Path],
+        generation_system_prompt: Optional[Path],
+        refinement_system_prompt: Optional[Path],
+        refinement_draft: Optional[Path],
     ) -> None:
         manager = self._project_manager
         if not manager:
@@ -295,12 +312,13 @@ class ReportsController:
             model=model,
             custom_model=custom_model,
             context_window=context_window,
-            template_path=str(template_path),
+            template_path=str(template_path) if template_path else None,
             transcript_path=str(transcript_path) if transcript_path else None,
-            generation_user_prompt=str(generation_user_prompt),
-            refinement_user_prompt=str(refinement_user_prompt),
-            generation_system_prompt=str(generation_system_prompt),
-            refinement_system_prompt=str(refinement_system_prompt),
+            generation_user_prompt=str(generation_user_prompt) if generation_user_prompt else None,
+            refinement_user_prompt=str(refinement_user_prompt) if refinement_user_prompt else None,
+            generation_system_prompt=str(generation_system_prompt) if generation_system_prompt else None,
+            refinement_system_prompt=str(refinement_system_prompt) if refinement_system_prompt else None,
+            refinement_draft=str(refinement_draft) if refinement_draft else None,
         )
 
     # ------------------------------------------------------------------
@@ -420,19 +438,32 @@ class ReportsController:
         gen_system_ok = bool(self._tab.generation_system_prompt_edit.text().strip())
         ref_user_ok = bool(self._tab.refinement_user_prompt_edit.text().strip())
         ref_system_ok = bool(self._tab.refinement_system_prompt_edit.text().strip())
+        transcript_ok = bool(self._tab.transcript_edit.text().strip())
+        refinement_draft_candidate = self._tab.refine_draft_edit.text().strip()
+        refinement_draft_exists = bool(refinement_draft_candidate) and Path(refinement_draft_candidate).expanduser().is_file()
 
-        can_run = (
-            self._project_manager is not None
-            and not self._report_running
+        manager_loaded = self._project_manager is not None
+        idle = not self._report_running
+
+        can_run_draft = (
+            manager_loaded
+            and idle
             and template_ok
             and gen_user_ok
             and gen_system_ok
-            and ref_user_ok
-            and ref_system_ok
-            and (has_inputs or bool(self._tab.transcript_edit.text().strip()))
+            and (has_inputs or transcript_ok)
         )
 
-        self._tab.generate_button.setEnabled(can_run)
+        can_run_refine = (
+            manager_loaded
+            and idle
+            and ref_user_ok
+            and ref_system_ok
+            and refinement_draft_exists
+        )
+
+        self._tab.generate_draft_button.setEnabled(can_run_draft)
+        self._tab.run_refinement_button.setEnabled(can_run_refine)
 
     def _update_report_history_buttons(self) -> None:
         buttons = [
@@ -572,6 +603,21 @@ class ReportsController:
             self._tab.refinement_system_prompt_edit.setText(file_path)
         self._update_report_controls()
 
+    def _browse_refinement_draft(self) -> None:
+        initial = self._project_dir_or_home()
+        reports_dir = initial / "reports"
+        if reports_dir.exists():
+            initial = reports_dir
+        file_path, _ = QFileDialog.getOpenFileName(
+            self._workspace,
+            "Select Draft for Refinement",
+            str(initial),
+            "Draft Reports (*-draft.md);;Markdown Files (*.md);;All Files (*)",
+        )
+        if file_path:
+            self._tab.refine_draft_edit.setText(file_path)
+        self._update_report_controls()
+
     # ------------------------------------------------------------------
     # Prompt previews
     # ------------------------------------------------------------------
@@ -688,20 +734,21 @@ class ReportsController:
     # ------------------------------------------------------------------
     # Job orchestration
     # ------------------------------------------------------------------
-    def _start_report_job(self) -> None:
+    def _start_draft_job(self) -> None:
         if self._report_running:
             QMessageBox.information(
                 self._workspace,
                 "Report Generator",
-                "A report generation run is already in progress.",
+                "A report run is already in progress.",
             )
             return
+
         manager = self._project_manager
         if not manager or not manager.project_dir:
             QMessageBox.warning(self._workspace, "Report Generator", "No project is currently loaded.")
             return
 
-        if not self._validate_placeholders_before_run():
+        if not self._validate_placeholders_before_run(include_generation=True, include_refinement=False):
             return
 
         provider_id, model_id, custom_model, context_window = self._resolve_model_selection()
@@ -711,7 +758,7 @@ class ReportsController:
         template_path = self._validate_required_path(
             self._tab.template_edit.text(),
             "Report Generator",
-            "Select a report template before generating a report.",
+            "Select a report template before generating a draft.",
         )
         if template_path is None:
             return
@@ -719,7 +766,7 @@ class ReportsController:
         gen_user_path = self._validate_prompt_path(
             self._tab.generation_user_prompt_edit.text(),
             "Report Generator",
-            "Select a generation user prompt before generating a report.",
+            "Select a generation user prompt before generating a draft.",
             validator=validate_generation_prompt,
             reader=read_generation_prompt,
         )
@@ -729,27 +776,9 @@ class ReportsController:
         gen_system_path = self._validate_required_path(
             self._tab.generation_system_prompt_edit.text(),
             "Report Generator",
-            "Select a generation system prompt before generating a report.",
+            "Select a generation system prompt before generating a draft.",
         )
         if gen_system_path is None:
-            return
-
-        ref_user_path = self._validate_prompt_path(
-            self._tab.refinement_user_prompt_edit.text(),
-            "Report Generator",
-            "Select a refinement user prompt before generating a report.",
-            validator=validate_refinement_prompt,
-            reader=read_refinement_prompt,
-        )
-        if ref_user_path is None:
-            return
-
-        ref_system_path = self._validate_required_path(
-            self._tab.refinement_system_prompt_edit.text(),
-            "Report Generator",
-            "Select a refinement system prompt before generating a report.",
-        )
-        if ref_system_path is None:
             return
 
         transcript_path = self._optional_path(self._tab.transcript_edit.text())
@@ -766,7 +795,7 @@ class ReportsController:
             QMessageBox.warning(
                 self._workspace,
                 "Report Generator",
-                "Select at least one input or provide a transcript before generating a report.",
+                "Select at least one input or provide a transcript before generating a draft.",
             )
             return
 
@@ -781,12 +810,13 @@ class ReportsController:
             template_path=template_path,
             transcript_path=transcript_path,
             generation_user_prompt=gen_user_path,
-            refinement_user_prompt=ref_user_path,
+            refinement_user_prompt=self._optional_path(self._tab.refinement_user_prompt_edit.text()),
             generation_system_prompt=gen_system_path,
-            refinement_system_prompt=ref_system_path,
+            refinement_system_prompt=self._optional_path(self._tab.refinement_system_prompt_edit.text()),
+            refinement_draft=None,
         )
 
-        config = ReportJobConfig(
+        config = ReportDraftJobConfig(
             project_dir=project_dir,
             inputs=selected_pairs,
             provider_id=provider_id,
@@ -796,15 +826,13 @@ class ReportsController:
             template_path=template_path,
             transcript_path=transcript_path,
             generation_user_prompt_path=gen_user_path,
-            refinement_user_prompt_path=ref_user_path,
             generation_system_prompt_path=gen_system_path,
-            refinement_system_prompt_path=ref_system_path,
             metadata=metadata,
             placeholder_values=manager.project_placeholder_values(),
             project_name=manager.project_name,
         )
 
-        started = self._service.run(
+        started = self._service.run_draft(
             config,
             on_started=self._on_report_started,
             on_progress=self._on_report_progress,
@@ -816,8 +844,129 @@ class ReportsController:
             QMessageBox.information(
                 self._workspace,
                 "Report Generator",
-                "A report is already running. Please wait for it to finish.",
+                "A report run is already in progress. Please wait for it to finish.",
             )
+            return
+
+        self._active_run_kind = "draft"
+
+    def _start_refinement_job(self) -> None:
+        if self._report_running:
+            QMessageBox.information(
+                self._workspace,
+                "Report Generator",
+                "A report run is already in progress.",
+            )
+            return
+
+        manager = self._project_manager
+        if not manager or not manager.project_dir:
+            QMessageBox.warning(self._workspace, "Report Generator", "No project is currently loaded.")
+            return
+
+        if not self._validate_placeholders_before_run(include_generation=False, include_refinement=True):
+            return
+
+        provider_id, model_id, custom_model, context_window = self._resolve_model_selection()
+        if provider_id is None:
+            return
+
+        draft_path = self._validate_required_path(
+            self._tab.refine_draft_edit.text(),
+            "Report Generator",
+            "Select an existing draft before running refinement.",
+        )
+        if draft_path is None:
+            return
+
+        template_path = self._optional_path(self._tab.template_edit.text())
+        if template_path and not template_path.is_file():
+            QMessageBox.warning(
+                self._workspace,
+                "Report Generator",
+                f"The selected template does not exist:\n{template_path}",
+            )
+            return
+
+        ref_user_path = self._validate_prompt_path(
+            self._tab.refinement_user_prompt_edit.text(),
+            "Report Generator",
+            "Select a refinement user prompt before running refinement.",
+            validator=validate_refinement_prompt,
+            reader=read_refinement_prompt,
+        )
+        if ref_user_path is None:
+            return
+
+        ref_system_path = self._validate_required_path(
+            self._tab.refinement_system_prompt_edit.text(),
+            "Report Generator",
+            "Select a refinement system prompt before running refinement.",
+        )
+        if ref_system_path is None:
+            return
+
+        transcript_path = self._optional_path(self._tab.transcript_edit.text())
+        if transcript_path and not transcript_path.is_file():
+            QMessageBox.warning(
+                self._workspace,
+                "Report Generator",
+                f"The selected transcript does not exist:\n{transcript_path}",
+            )
+            return
+
+        selected_pairs = self._resolve_selected_inputs()
+        project_dir = Path(manager.project_dir)
+        metadata = manager.metadata or ProjectMetadata(case_name=manager.project_name or "")
+
+        self._save_preferences(
+            provider_id=provider_id,
+            model=model_id,
+            custom_model=custom_model,
+            context_window=context_window,
+            template_path=template_path,
+            transcript_path=transcript_path,
+            generation_user_prompt=self._optional_path(self._tab.generation_user_prompt_edit.text()),
+            refinement_user_prompt=ref_user_path,
+            generation_system_prompt=self._optional_path(self._tab.generation_system_prompt_edit.text()),
+            refinement_system_prompt=ref_system_path,
+            refinement_draft=draft_path,
+        )
+
+        config = ReportRefinementJobConfig(
+            project_dir=project_dir,
+            draft_path=draft_path,
+            inputs=selected_pairs,
+            provider_id=provider_id,
+            model=model_id,
+            custom_model=custom_model,
+            context_window=context_window,
+            template_path=template_path,
+            transcript_path=transcript_path,
+            refinement_user_prompt_path=ref_user_path,
+            refinement_system_prompt_path=ref_system_path,
+            metadata=metadata,
+            placeholder_values=manager.project_placeholder_values(),
+            project_name=manager.project_name,
+        )
+
+        started = self._service.run_refinement(
+            config,
+            on_started=self._on_report_started,
+            on_progress=self._on_report_progress,
+            on_log=self._append_report_log,
+            on_finished=self._on_report_finished,
+            on_failed=self._on_report_failed,
+        )
+        if not started:
+            QMessageBox.information(
+                self._workspace,
+                "Report Generator",
+                "A report run is already in progress. Please wait for it to finish.",
+            )
+            return
+
+        self._active_run_kind = "refinement"
 
     def _on_report_started(self) -> None:
         self._report_running = True
@@ -837,17 +986,20 @@ class ReportsController:
 
     def _on_report_finished(self, result: Dict[str, object]) -> None:
         self._report_running = False
+        run_type = self._active_run_kind or str(result.get("run_type") or "draft")
+        self._active_run_kind = None
         self._update_report_controls()
         self._tab.progress_bar.setValue(100)
-        self._append_report_log("Report generation completed successfully.")
+        self._append_report_log("Report run completed successfully.")
 
         self._last_result = result
-        self._persist_report_history(result)
+        self._persist_report_history(run_type, result)
         self._refresh_report_history()
         self._update_report_history_buttons()
 
     def _on_report_failed(self, message: str) -> None:
         self._report_running = False
+        self._active_run_kind = None
         self._update_report_controls()
         self._update_report_history_buttons()
         QMessageBox.critical(self._workspace, "Report Generator", message)
@@ -873,7 +1025,13 @@ class ReportsController:
             except Exception:
                 timestamp_display = entry.timestamp
             model_label = entry.custom_model or entry.model or ""
-            outputs_text = Path(entry.refined_path).name if entry.refined_path else Path(entry.draft_path).name
+            filename = (
+                Path(entry.refined_path).name
+                if entry.refined_path
+                else Path(entry.draft_path).name
+            )
+            run_label = (entry.run_type or "draft").replace("_", " ").title()
+            outputs_text = f"{run_label}: {filename}"
             item = QTreeWidgetItem([timestamp_display, model_label, outputs_text])
             item.setData(0, Qt.UserRole, index)
             history_list.addTopLevelItem(item)
@@ -884,7 +1042,7 @@ class ReportsController:
         history_list.blockSignals(False)
         self._update_report_history_buttons()
 
-    def _persist_report_history(self, result: Dict[str, object]) -> None:
+    def _persist_report_history(self, run_type: str, result: Dict[str, object]) -> None:
         manager = self._project_manager
         if not manager:
             return
@@ -895,14 +1053,19 @@ class ReportsController:
         except Exception:
             timestamp = datetime.now(timezone.utc)
 
-        draft_path = Path(str(result.get("draft_path"))) if result.get("draft_path") else None
-        refined_path = Path(str(result.get("refined_path"))) if result.get("refined_path") else None
-        reasoning_value = result.get("reasoning_path")
-        reasoning_path = Path(str(reasoning_value)) if reasoning_value else None
-        manifest_value = result.get("manifest_path")
-        manifest_path = Path(str(manifest_value)) if manifest_value else None
-        inputs_value = result.get("inputs_path")
-        inputs_path = Path(str(inputs_value)) if inputs_value else None
+        def _maybe_path(raw: object) -> Optional[Path]:
+            if not raw:
+                return None
+            try:
+                return Path(str(raw)).expanduser()
+            except Exception:
+                return None
+
+        draft_path = _maybe_path(result.get("draft_path"))
+        refined_path = _maybe_path(result.get("refined_path"))
+        reasoning_path = _maybe_path(result.get("reasoning_path"))
+        manifest_path = _maybe_path(result.get("manifest_path"))
+        inputs_path = _maybe_path(result.get("inputs_path"))
 
         provider = str(result.get("provider", "anthropic"))
         model = str(result.get("model", ""))
@@ -914,35 +1077,54 @@ class ReportsController:
             context_window_int = None
         inputs = list(result.get("inputs", []))
 
-        instructions_snapshot = str(result.get("instructions", ""))
-        generation_user_prompt = str(result.get("generation_user_prompt") or "").strip() or self._tab.generation_user_prompt_edit.text().strip()
-        refinement_user_prompt = str(result.get("refinement_user_prompt") or "").strip() or self._tab.refinement_user_prompt_edit.text().strip()
-        generation_system_prompt = str(result.get("generation_system_prompt") or "").strip() or self._tab.generation_system_prompt_edit.text().strip()
-        refinement_system_prompt = str(result.get("refinement_system_prompt") or "").strip() or self._tab.refinement_system_prompt_edit.text().strip()
+        template_value = str(result.get("template_path") or "").strip() or None
+        transcript_value = str(result.get("transcript_path") or "").strip() or None
 
-        template_value = self._tab.template_edit.text().strip() or None
-        transcript_value = self._tab.transcript_edit.text().strip() or None
+        generation_user_prompt = str(result.get("generation_user_prompt") or "").strip() or None
+        generation_system_prompt = str(result.get("generation_system_prompt") or "").strip() or None
+        refinement_user_prompt = str(result.get("refinement_user_prompt") or "").strip() or None
+        refinement_system_prompt = str(result.get("refinement_system_prompt") or "").strip() or None
 
-        manager.record_report_run(
-            timestamp=timestamp,
-            draft_path=draft_path,
-            refined_path=refined_path,
-            reasoning_path=reasoning_path,
-            manifest_path=manifest_path,
-            inputs_path=inputs_path,
-            provider=provider,
-            model=model,
-            custom_model=str(custom_model) if custom_model else None,
-            context_window=context_window_int,
-            inputs=inputs,
-            template_path=template_value,
-            transcript_path=transcript_value,
-            instructions=instructions_snapshot,
-            generation_user_prompt=generation_user_prompt or None,
-            refinement_user_prompt=refinement_user_prompt or None,
-            generation_system_prompt=generation_system_prompt or None,
-            refinement_system_prompt=refinement_system_prompt or None,
-        )
+        if run_type == "refinement" and refined_path is not None:
+            manager.record_report_refinement_run(
+                timestamp=timestamp,
+                draft_path=(draft_path or refined_path),
+                refined_path=refined_path,
+                reasoning_path=reasoning_path,
+                manifest_path=manifest_path,
+                inputs_path=inputs_path,
+                provider=provider,
+                model=model,
+                custom_model=str(custom_model) if custom_model else None,
+                context_window=context_window_int,
+                inputs=inputs,
+                template_path=template_value,
+                transcript_path=transcript_value,
+                refinement_user_prompt=refinement_user_prompt,
+                refinement_system_prompt=refinement_system_prompt,
+                refined_tokens=result.get("refinement_tokens"),
+            )
+        else:
+            if draft_path is None and result.get("draft_path"):
+                draft_path = Path(str(result["draft_path"])).expanduser()
+            if draft_path is None:
+                return
+            manager.record_report_draft_run(
+                timestamp=timestamp,
+                draft_path=draft_path,
+                manifest_path=manifest_path,
+                inputs_path=inputs_path,
+                provider=provider,
+                model=model,
+                custom_model=str(custom_model) if custom_model else None,
+                context_window=context_window_int,
+                inputs=inputs,
+                template_path=template_value,
+                transcript_path=transcript_value,
+                generation_user_prompt=generation_user_prompt,
+                generation_system_prompt=generation_system_prompt,
+                draft_tokens=result.get("draft_tokens"),
+            )
 
     def _open_report_history_file(self, kind: str) -> None:
         selection = self._current_history_selection()
@@ -1067,8 +1249,10 @@ class ReportsController:
         self._tab.history_list.clear()
         self._tab.log_text.clear()
         self._tab.progress_bar.setValue(0)
-        self._tab.generate_button.setEnabled(False)
+        self._tab.generate_draft_button.setEnabled(False)
+        self._tab.run_refinement_button.setEnabled(False)
         self._tab.open_reports_button.setEnabled(False)
+        self._tab.refine_draft_edit.clear()
 
     def _optional_path(self, value: str) -> Optional[Path]:
         value = value.strip()

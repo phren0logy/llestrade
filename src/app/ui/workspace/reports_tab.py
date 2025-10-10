@@ -64,7 +64,11 @@ class ReportsTab(QWidget):
         self.refinement_system_prompt_browse = QPushButton("Browse…")
         self.refinement_system_prompt_preview = QPushButton("Preview refinement system prompt")
 
-        self.generate_button = QPushButton("Generate & Refine Report")
+        self.refine_draft_edit = QLineEdit()
+        self.refine_draft_browse_button = QPushButton("Browse…")
+
+        self.generate_draft_button = QPushButton("Generate Draft")
+        self.run_refinement_button = QPushButton("Run Refinement")
         self.open_reports_button = QPushButton("Open Reports Folder")
 
         self.progress_bar = QProgressBar()
@@ -177,12 +181,21 @@ class ReportsTab(QWidget):
         config_layout.addLayout(refinement_system_row)
         config_layout.addWidget(self.refinement_system_prompt_preview)
 
+        refinement_draft_label = QLabel("Existing draft for refinement:")
+        config_layout.addWidget(refinement_draft_label)
+        refinement_draft_row = QHBoxLayout()
+        refinement_draft_row.setContentsMargins(0, 0, 0, 0)
+        refinement_draft_row.addWidget(self.refine_draft_edit)
+        refinement_draft_row.addWidget(self.refine_draft_browse_button)
+        config_layout.addLayout(refinement_draft_row)
+
         top_layout.addWidget(config_group, 1)
         layout.addLayout(top_layout)
 
         button_row = QHBoxLayout()
         button_row.setContentsMargins(0, 0, 0, 0)
-        button_row.addWidget(self.generate_button)
+        button_row.addWidget(self.generate_draft_button)
+        button_row.addWidget(self.run_refinement_button)
         button_row.addWidget(self.open_reports_button)
         button_row.addStretch()
         layout.addLayout(button_row)
