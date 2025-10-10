@@ -261,7 +261,7 @@ Prompt templates use `{placeholder}` tokens that the workers populate at runtime
 
 Bulk and report workers automatically inject additional runtime placeholders:
 
-- `{source_pdf_filename}`, `{source_pdf_relative_path}`, `{source_pdf_absolute_path}` for each document derived from a PDF
+- `{source_pdf_filename}`, `{source_pdf_relative_path}`, `{source_pdf_absolute_path}`, `{source_pdf_absolute_url}` for each document derived from a PDF
 - Combined runs expose `{reduce_source_list}`, `{reduce_source_table}`, `{reduce_source_count}` summarising aggregated inputs
 - `{project_name}` and `{timestamp}` resolve at execution time
 

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List, Mapping
+from urllib.parse import quote
 
 
 SYSTEM_PLACEHOLDERS = {
@@ -14,6 +15,7 @@ SYSTEM_PLACEHOLDERS = {
     "source_pdf_filename",
     "source_pdf_relative_path",
     "source_pdf_absolute_path",
+    "source_pdf_absolute_url",
     "reduce_source_list",
     "reduce_source_table",
     "reduce_source_count",
@@ -36,6 +38,7 @@ class SourceFileContext:
             "filename": self.filename,
             "relative_path": self.relative_path,
             "absolute_path": self.absolute_path.as_posix(),
+            "absolute_url": _encode_path(self.absolute_path),
         }
 
 
@@ -55,6 +58,7 @@ def system_placeholder_map(
         "source_pdf_filename": source.filename if source else "",
         "source_pdf_relative_path": source.relative_path if source else "",
         "source_pdf_absolute_path": source.absolute_path.as_posix() if source else "",
+        "source_pdf_absolute_url": _encode_path(source.absolute_path) if source else "",
     }
 
     reduce_values = _build_reduce_placeholders(reduce_sources)
@@ -91,6 +95,10 @@ def _build_reduce_placeholders(sources: List[SourceFileContext]) -> dict[str, st
         "reduce_source_table": table,
         "reduce_source_count": str(len(sources)),
     }
+
+
+def _encode_path(path: Path) -> str:
+    return quote(path.as_posix(), safe="/:")
 
 
 __all__ = ["SYSTEM_PLACEHOLDERS", "SourceFileContext", "system_placeholder_map"]

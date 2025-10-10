@@ -44,7 +44,7 @@
    - Define constants for:
      - `{project_name}`
      - `{timestamp}` (resolve at execution time; ISO 8601 with timezone)
-     - `{source_pdf_filename}`, `{source_pdf_relative_path}`, `{source_pdf_absolute_path}`
+     - `{source_pdf_filename}`, `{source_pdf_relative_path}`, `{source_pdf_absolute_path}`, `{source_pdf_absolute_url}`
      - Aggregated reduce placeholders (e.g., `{reduce_source_table}`, `{reduce_source_list}` – see Phase 5)
    - Ensure system keys are reserved (cannot be added/removed by users).
 4. **Tests**

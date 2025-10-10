@@ -397,6 +397,7 @@ class BulkAnalysisController:
             "source_pdf_filename",
             "source_pdf_relative_path",
             "source_pdf_absolute_path",
+            "source_pdf_absolute_url",
             "reduce_source_list",
             "reduce_source_table",
             "reduce_source_count",
