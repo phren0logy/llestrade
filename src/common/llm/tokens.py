@@ -22,6 +22,7 @@ MODEL_CONTEXT_WINDOWS = {
     "claude-opus-4-1-20250805": int(200_000 * 0.65),     # 130,000 tokens
     "anthropic.claude-sonnet-4-5-20250929-v1:0": int(200_000 * 0.65),
     "anthropic.claude-3-5-sonnet-20240620-v1:0": int(200_000 * 0.65),
+    "anthropic.claude-3-sonnet-20240229-v1:0": int(200_000 * 0.65),
     "anthropic.claude-opus-4-1-20250805-v1:0": int(200_000 * 0.65),
     
     # Google Gemini

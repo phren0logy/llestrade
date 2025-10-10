@@ -161,8 +161,7 @@ class APIKeyDialog(QDialog):
         bedrock_layout.addLayout(bedrock_form)
 
         help_text = QLabel(
-            '<a href="https://docs.aws.amazon.com/bedrock/latest/userguide/models-features.html">'
-            "View Bedrock model catalog →"</a>
+            '<a href="https://docs.aws.amazon.com/bedrock/latest/userguide/models-features.html">View Bedrock model catalog →</a>'
         )
         help_text.setOpenExternalLinks(True)
         help_text.setStyleSheet("color: #1976d2;")
