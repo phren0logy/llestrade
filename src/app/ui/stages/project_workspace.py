@@ -188,6 +188,7 @@ class ProjectWorkspace(QWidget):
             on_refresh_requested=self.refresh,
             on_refresh_groups=self._refresh_bulk_analysis_groups,
             on_refresh_metrics=self._refresh_file_tracker,
+            on_edit_group=self._show_edit_group_dialog,
             on_open_group_folder=self._open_group_folder,
             on_show_prompt_preview=self._show_group_prompt_preview,
             on_open_latest_combined=self._open_latest_combined,
@@ -772,6 +773,28 @@ class ProjectWorkspace(QWidget):
             groups=groups,
             workspace_metrics=self._workspace_metrics,
         )
+
+    def _show_edit_group_dialog(self, group: BulkAnalysisGroup) -> None:
+        if not self._feature_flags.bulk_analysis_groups_enabled:
+            return
+        manager = self._project_manager
+        if not manager or not manager.project_dir:
+            return
+        dialog = BulkAnalysisGroupDialog(
+            manager.project_dir,
+            self,
+            metadata=manager.metadata,
+            placeholder_values=manager.placeholder_mapping(),
+            existing_group=group,
+        )
+        if dialog.exec() == QDialog.Accepted:
+            try:
+                updated_group = dialog.build_group()
+                manager.save_bulk_analysis_group(updated_group)
+            except Exception as exc:
+                QMessageBox.critical(self, "Update Bulk Analysis Group Failed", str(exc))
+            else:
+                self.refresh()
 
     def _show_create_group_dialog(self) -> None:
         if not self._feature_flags.bulk_analysis_groups_enabled:

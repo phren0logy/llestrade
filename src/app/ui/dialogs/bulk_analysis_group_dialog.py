@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import Dict, Mapping, Optional, List
+from typing import Dict, Mapping, Optional, List, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -58,6 +59,7 @@ class BulkAnalysisGroupDialog(QDialog):
         *,
         metadata: Optional[ProjectMetadata] = None,
         placeholder_values: Optional[Mapping[str, str]] = None,
+        existing_group: Optional[BulkAnalysisGroup] = None,
     ) -> None:
         super().__init__(parent)
         self._project_dir = project_dir
@@ -65,11 +67,15 @@ class BulkAnalysisGroupDialog(QDialog):
         self._placeholder_values = dict(placeholder_values or {})
         self._placeholder_requirements: Dict[str, bool] = {}
         self._group: Optional[BulkAnalysisGroup] = None
-        self.setWindowTitle("New Bulk Analysis")
+        self._existing_group = existing_group
+        self._tree_nodes: Dict[Tuple[str, bool], QTreeWidgetItem] = {}
+        self._map_tree_nodes: Dict[Tuple[str, str], QTreeWidgetItem] = {}
+        self.setWindowTitle("Edit Bulk Analysis" if existing_group else "New Bulk Analysis")
         self.setModal(True)
         self._build_ui()
         self._populate_file_tree()
         self._populate_map_outputs_tree()
+        self._apply_initial_group_state()
 
     # ------------------------------------------------------------------
     # Public API
@@ -435,8 +441,10 @@ class BulkAnalysisGroupDialog(QDialog):
 
         directories = sorted({self._normalise_directory(path) for path in directories if path})
 
-        provider_id, model = self.model_combo.currentData()
-        if provider_id == "custom":
+        combo_data = self.model_combo.currentData()
+        provider_id, model = combo_data if combo_data else ("", "")
+        is_custom_selection = combo_data and combo_data[0] == "custom"
+        if is_custom_selection:
             provider_id = "anthropic"
             model = self.custom_model_edit.text().strip()
             if not model:
@@ -449,12 +457,16 @@ class BulkAnalysisGroupDialog(QDialog):
         description = self.description_edit.toPlainText().strip()
         system_prompt = self._normalise_text(self.system_prompt_edit.text().strip())
         user_prompt = self._normalise_text(self.user_prompt_edit.text().strip())
+        placeholder_settings = dict(self._placeholder_requirements)
 
-        op = self.operation_combo.currentData()
+        op = self.operation_combo.currentData() or "per_document"
+        combine_order = self.order_combo.currentData() or "path"
+        combine_template = self.output_template_edit.text().strip() or "combined_{timestamp}.md"
+
+        map_groups: list[str] = []
+        map_dirs: list[str] = []
+        map_files: list[str] = []
         if op == "combined":
-            map_groups: list[str] = []
-            map_dirs: list[str] = []
-            map_files: list[str] = []
             root = self.map_tree.invisibleRootItem()
             nodes = [root]
             while nodes:
@@ -475,43 +487,64 @@ class BulkAnalysisGroupDialog(QDialog):
                     elif kind == "map-file":
                         map_files.append(str(value))
 
-            group = BulkAnalysisGroup.create(
-                name=name,
-                description=description,
-                files=[],
-                directories=[],
-                provider_id=provider_id,
-                model=model,
-                system_prompt_path=system_prompt,
-                user_prompt_path=user_prompt,
-            )
-            group.operation = "combined"
-            group.combine_converted_files = files
-            group.combine_converted_directories = directories
-            group.combine_map_files = sorted(set(map_files))
-            group.combine_map_groups = sorted(set(map_groups))
-            group.combine_map_directories = sorted(set(map_dirs))
-            group.combine_order = self.order_combo.currentData() or "path"
-            templ = self.output_template_edit.text().strip() or "combined_{timestamp}.md"
-            group.combine_output_template = templ
-            group.use_reasoning = self.reasoning_checkbox.isChecked()
-            group.model_context_window = custom_window
-            group.placeholder_requirements = dict(self._placeholder_requirements)
-            return group
+        group_kwargs = {
+            "name": name,
+            "description": description,
+            "provider_id": provider_id,
+            "model": model,
+            "system_prompt_path": system_prompt,
+            "user_prompt_path": user_prompt,
+            "model_context_window": custom_window,
+            "placeholder_requirements": placeholder_settings,
+            "use_reasoning": self.reasoning_checkbox.isChecked(),
+        }
 
-        group = BulkAnalysisGroup.create(
+        if op == "combined":
+            group_kwargs.update(
+                {
+                    "operation": "combined",
+                    "files": [],
+                    "directories": [],
+                    "combine_converted_files": files,
+                    "combine_converted_directories": directories,
+                    "combine_map_files": sorted(set(map_files)),
+                    "combine_map_groups": sorted(set(map_groups)),
+                    "combine_map_directories": sorted(set(map_dirs)),
+                    "combine_order": combine_order,
+                    "combine_output_template": combine_template,
+                }
+            )
+        else:
+            group_kwargs.update(
+                {
+                    "operation": "per_document",
+                    "files": files,
+                    "directories": directories,
+                    "combine_converted_files": [],
+                    "combine_converted_directories": [],
+                    "combine_map_files": [],
+                    "combine_map_groups": [],
+                    "combine_map_directories": [],
+                }
+            )
+
+        existing = self._existing_group
+        if existing:
+            return replace(existing, **group_kwargs)
+
+        base_group = BulkAnalysisGroup.create(
             name=name,
             description=description,
-            files=files,
-            directories=directories,
+            files=group_kwargs.get("files", []),
+            directories=group_kwargs.get("directories", []),
             provider_id=provider_id,
             model=model,
             system_prompt_path=system_prompt,
             user_prompt_path=user_prompt,
         )
-        group.model_context_window = custom_window
-        group.placeholder_requirements = dict(self._placeholder_requirements)
-        return group
+        for key, value in group_kwargs.items():
+            setattr(base_group, key, value)
+        return base_group
 
     def _preview_prompt(self) -> None:
         group = self._build_group_instance()
@@ -586,6 +619,7 @@ class BulkAnalysisGroupDialog(QDialog):
 
     def _populate_map_outputs_tree(self) -> None:
         self.map_tree.clear()
+        self._map_tree_nodes = {}
         if not self._project_dir:
             info = QTreeWidgetItem(["No project directory available."])
             info.setFlags(Qt.NoItemFlags)
@@ -614,6 +648,7 @@ class BulkAnalysisGroupDialog(QDialog):
             group_item.setFlags(flags)
             group_item.setCheckState(0, Qt.Unchecked)
             self.map_tree.addTopLevelItem(group_item)
+            self._map_tree_nodes[("map-group", slug)] = group_item
 
             tree_nodes: dict[tuple[str, bool], QTreeWidgetItem] = {}
             for _, rel in sorted(outputs, key=lambda item: item[1]):
@@ -623,6 +658,133 @@ class BulkAnalysisGroupDialog(QDialog):
             info = QTreeWidgetItem(["No per-document outputs found."])
             info.setFlags(Qt.NoItemFlags)
             self.map_tree.addTopLevelItem(info)
+
+    def _apply_initial_group_state(self) -> None:
+        group = self._existing_group
+        if not group:
+            return
+
+        self.name_edit.setText(group.name)
+        self.description_edit.setPlainText(group.description or "")
+        self.system_prompt_edit.setText(self._normalise_text(group.system_prompt_path))
+        self.user_prompt_edit.setText(self._normalise_text(group.user_prompt_path))
+        self.reasoning_checkbox.setChecked(group.use_reasoning)
+        if group.combine_output_template:
+            self.output_template_edit.setText(group.combine_output_template)
+        current_order = group.combine_order or "path"
+        index = self.order_combo.findData(current_order)
+        if index != -1:
+            self.order_combo.setCurrentIndex(index)
+
+        self._placeholder_requirements = dict(group.placeholder_requirements or {})
+
+        # Ensure the operation UI matches the saved group without emitting intermediate signals.
+        operation = group.operation or "per_document"
+        self.operation_combo.blockSignals(True)
+        op_index = self.operation_combo.findData(operation)
+        if op_index == -1:
+            op_index = 0
+        self.operation_combo.setCurrentIndex(op_index)
+        self.operation_combo.blockSignals(False)
+        self._on_operation_changed()
+
+        self._apply_model_selection(group)
+
+        manual_entries = self._restore_file_tree_selection(group)
+        if operation == "combined":
+            manual_text = "\n".join(manual_entries)
+            self.manual_files_edit.setPlainText(manual_text)
+            self._restore_map_tree_selection(group)
+        else:
+            self.manual_files_edit.clear()
+
+        if group.model_context_window:
+            self.custom_context_spin.setValue(int(group.model_context_window))
+
+        self._refresh_placeholder_requirements()
+
+    def _apply_model_selection(self, group: BulkAnalysisGroup) -> None:
+        provider = group.provider_id or ""
+        model_id = group.model or ""
+
+        target_index = -1
+        for idx in range(self.model_combo.count()):
+            data = self.model_combo.itemData(idx)
+            if data == (provider, model_id):
+                target_index = idx
+                break
+
+        if provider == "anthropic_bedrock" and target_index == -1 and model_id:
+            label = f"AWS Bedrock Claude ({model_id})"
+            self.model_combo.addItem(label, (provider, model_id))
+            target_index = self.model_combo.count() - 1
+
+        if target_index == -1:
+            # Fallback to custom configuration.
+            target_index = 0
+
+        self.model_combo.blockSignals(True)
+        self.model_combo.setCurrentIndex(target_index)
+        self.model_combo.blockSignals(False)
+        self._on_model_changed()
+
+        current_data = self.model_combo.currentData()
+        if current_data and current_data[0] == "custom":
+            self.custom_model_edit.setText(model_id)
+        else:
+            self.custom_model_edit.clear()
+
+    def _restore_file_tree_selection(self, group: BulkAnalysisGroup) -> List[str]:
+        manual_entries: List[str] = []
+        seen_manual: set[str] = set()
+        files = group.combine_converted_files if group.operation == "combined" else group.files
+        directories = group.combine_converted_directories if group.operation == "combined" else group.directories
+
+        self._block_tree_signal = True
+        for directory in directories:
+            item = self._tree_nodes.get((directory, False))
+            if item:
+                item.setCheckState(0, Qt.Checked)
+                self._sync_parent_state(item.parent())
+        for file_path in files:
+            item = self._tree_nodes.get((file_path, True))
+            if item:
+                item.setCheckState(0, Qt.Checked)
+                self._sync_parent_state(item.parent())
+            else:
+                if file_path not in seen_manual:
+                    manual_entries.append(file_path)
+                    seen_manual.add(file_path)
+        self._block_tree_signal = False
+        return manual_entries
+
+    def _restore_map_tree_selection(self, group: BulkAnalysisGroup) -> None:
+        self.map_tree.blockSignals(True)
+
+        for slug in group.combine_map_groups:
+            item = self._map_tree_nodes.get(("map-group", slug))
+            if item:
+                self._set_map_item_state(item, Qt.Checked)
+
+        for directory in group.combine_map_directories:
+            item = self._map_tree_nodes.get(("map-dir", directory))
+            if item:
+                self._set_map_item_state(item, Qt.Checked)
+
+        for file_path in group.combine_map_files:
+            item = self._map_tree_nodes.get(("map-file", file_path))
+            if item:
+                item.setCheckState(0, Qt.Checked)
+                self._sync_parent_state(item.parent())
+
+        self.map_tree.blockSignals(False)
+
+    def _set_map_item_state(self, item: QTreeWidgetItem, state: Qt.CheckState) -> None:
+        item.setCheckState(0, state)
+        for index in range(item.childCount()):
+            child = item.child(index)
+            self._set_map_item_state(child, state)
+        self._sync_parent_state(item.parent())
 
     def _add_path_to_tree(self, relative_path: str) -> None:
         parts = relative_path.split("/")
@@ -668,9 +830,13 @@ class BulkAnalysisGroupDialog(QDialog):
                 continue
             item = QTreeWidgetItem(parent_item, [part])
             if is_file:
-                item.setData(0, Qt.UserRole, ("map-file", f"{slug}/{current_path}"))
+                value = f"{slug}/{current_path}"
+                item.setData(0, Qt.UserRole, ("map-file", value))
+                self._map_tree_nodes[("map-file", value)] = item
             else:
-                item.setData(0, Qt.UserRole, ("map-dir", f"{slug}/{current_path}"))
+                value = f"{slug}/{current_path}"
+                item.setData(0, Qt.UserRole, ("map-dir", value))
+                self._map_tree_nodes[("map-dir", value)] = item
             flags = item.flags() | Qt.ItemFlag.ItemIsUserCheckable
             if not is_file:
                 flags |= Qt.ItemFlag.ItemIsAutoTristate

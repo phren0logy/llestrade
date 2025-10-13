@@ -45,6 +45,7 @@ class BulkAnalysisController:
         on_refresh_requested: Callable[[], None],
         on_refresh_groups: Callable[[], None],
         on_refresh_metrics: Callable[[], None],
+        on_edit_group: Callable[[BulkAnalysisGroup], None],
         on_open_group_folder: Callable[[BulkAnalysisGroup], None],
         on_show_prompt_preview: Callable[[BulkAnalysisGroup], None],
         on_open_latest_combined: Callable[[BulkAnalysisGroup], None],
@@ -62,6 +63,7 @@ class BulkAnalysisController:
         self._on_refresh_requested = on_refresh_requested
         self._on_refresh_groups = on_refresh_groups
         self._on_refresh_metrics = on_refresh_metrics
+        self._on_edit_group = on_edit_group
         self._on_open_group_folder = on_open_group_folder
         self._on_show_prompt_preview = on_show_prompt_preview
         self._on_open_latest_combined = on_open_latest_combined
@@ -289,6 +291,7 @@ class BulkAnalysisController:
         layout.setSpacing(6)
 
         is_running = group.group_id in self._running_groups
+        is_cancelling = group.group_id in self._cancelling_groups
         op_type = getattr(metrics, "operation", "per_document") if metrics else group.operation or "per_document"
 
         if op_type == "combined":
@@ -321,6 +324,11 @@ class BulkAnalysisController:
         cancel_button.setEnabled(is_running)
         cancel_button.clicked.connect(lambda _, g=group: self.cancel_run(g))
         layout.addWidget(cancel_button)
+
+        edit_button = QPushButton("Edit…")
+        edit_button.setEnabled(not is_running and not is_cancelling)
+        edit_button.clicked.connect(lambda _, g=group: self._on_edit_group(g))
+        layout.addWidget(edit_button)
 
         open_button = QPushButton("Open Folder")
         open_button.clicked.connect(lambda _, g=group: self._on_open_group_folder(g))
