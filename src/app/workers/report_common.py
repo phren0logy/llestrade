@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from src.app.core.placeholders.system import system_placeholder_map
+from src.app.core.report_prompt_context import build_report_base_placeholders
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.report_inputs import category_display_name
 from src.app.core.secure_settings import SecureSettings
@@ -62,13 +62,12 @@ class ReportWorkerBase(DashboardWorker):
     # Placeholder helpers
     # ------------------------------------------------------------------
     def _placeholder_map(self) -> Dict[str, str]:
-        placeholders = dict(self._base_placeholders)
-        system_values = system_placeholder_map(
+        return build_report_base_placeholders(
+            base_placeholders=self._base_placeholders,
             project_name=self._project_name,
+            project_dir=self._project_dir,
             timestamp=self._run_timestamp,
         )
-        placeholders.update(system_values)
-        return placeholders
 
     # ------------------------------------------------------------------
     # Input aggregation

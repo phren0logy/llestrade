@@ -13,16 +13,14 @@ from src.app.core.bulk_analysis_runner import _metadata_context  # type: ignore[
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.prompt_placeholders import get_prompt_spec, format_prompt
-from src.app.core.placeholders.system import (
-    SourceFileContext,
-    system_placeholder_map,
-)
+from src.app.core.placeholders.system import SourceFileContext
 from src.app.core.bulk_paths import (
     iter_map_outputs,
     iter_map_outputs_under,
     normalize_map_relative,
     resolve_map_output_path,
 )
+from src.app.core.bulk_prompt_context import build_bulk_placeholders
 
 
 class PromptPreviewError(RuntimeError):
@@ -83,32 +81,44 @@ def generate_prompt_preview(
     if operation != "combined":
         source_context = _extract_primary_source(project_dir, preview_path, doc_metadata, document_name)
 
-    base_values: dict[str, str] = dict(placeholder_values or {})
-    for key, value in metadata_context.items():
-        base_values.setdefault(key, value)
+    base_placeholder_values: dict[str, str] = dict(placeholder_values or {})
+
+    effective_project_name = (
+        (placeholder_values or {}).get("project_name")
+        or (metadata.case_name if metadata and metadata.case_name else None)
+        or (group.name if getattr(group, "name", None) else None)
+        or project_dir.name
+    )
 
     if operation == "combined":
         # Rebuild reduce contexts if we haven't already (combined path might be None earlier)
         if "reduce_contexts" not in locals():
             reduce_contexts = _build_reduce_contexts(project_dir, [])
         source_context = None  # Combined runs don't set per-document source placeholders
-    system_samples = system_placeholder_map(
-        project_name=metadata.case_name if metadata else base_values.get("project_name"),
+
+    system_placeholders = build_bulk_placeholders(
+        base_placeholders=base_placeholder_values,
+        project_name=effective_project_name,
+        reduce_sources=reduce_contexts,
+    )
+    system_context = dict(metadata_context)
+    system_context.update(system_placeholders)
+    system_rendered = format_prompt(bundle.system_template, system_context)
+
+    document_placeholders = build_bulk_placeholders(
+        base_placeholders=base_placeholder_values,
+        project_name=effective_project_name,
         source=source_context,
         reduce_sources=reduce_contexts,
     )
-    base_values.update(system_samples)
-
-    system_values = dict(base_values)
-    system_rendered = format_prompt(bundle.system_template, system_values)
-
-    user_context = dict(base_values)
+    user_context = dict(metadata_context)
     user_context.update(
         {
             "document_name": document_name,
             "document_content": truncated_content,
         }
     )
+    user_context.update(document_placeholders)
     user_rendered = format_prompt(bundle.user_template, user_context)
 
     required: set[str] = set()
@@ -122,7 +132,8 @@ def generate_prompt_preview(
         required.update(user_spec.required)
         optional.update(user_spec.optional)
 
-    values = {**system_values, **user_context}
+    values = dict(system_context)
+    values.update(user_context)
 
     return PromptPreview(
         system_template=bundle.system_template,

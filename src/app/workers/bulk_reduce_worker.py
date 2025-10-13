@@ -44,7 +44,8 @@ from src.app.core.bulk_analysis_runner import (
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.secure_settings import SecureSettings
-from src.app.core.placeholders.system import SourceFileContext, system_placeholder_map
+from src.app.core.placeholders.system import SourceFileContext
+from src.app.core.bulk_prompt_context import build_bulk_placeholders
 from .base import DashboardWorker
 
 LOGGER = logging.getLogger(__name__)
@@ -194,15 +195,13 @@ class BulkReduceWorker(DashboardWorker):
         source: Optional[SourceFileContext] = None,
         reduce_sources: Optional[Sequence[SourceFileContext]] = None,
     ) -> Dict[str, str]:
-        placeholders = dict(self._base_placeholders)
-        system_values = system_placeholder_map(
+        return build_bulk_placeholders(
+            base_placeholders=self._base_placeholders,
             project_name=self._project_name,
             timestamp=self._run_timestamp,
             source=source,
             reduce_sources=reduce_sources,
         )
-        placeholders.update(system_values)
-        return placeholders
 
     def _enforce_placeholder_requirements(
         self,

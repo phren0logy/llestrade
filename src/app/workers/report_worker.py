@@ -19,6 +19,10 @@ from src.app.core.refinement_prompt import (
     validate_refinement_prompt,
 )
 from src.app.core.report_template_sections import TemplateSection, load_template_sections
+from src.app.core.report_prompt_context import (
+    build_report_generation_placeholders,
+    build_report_refinement_placeholders,
+)
 from src.common.markdown import (
     PromptReference,
     apply_frontmatter,
@@ -256,15 +260,14 @@ class DraftReportWorker(ReportWorkerBase):
 
         total = len(sections)
         for index, section in enumerate(sections, start=1):
-            context = {
-                "template_section": section.body.strip(),
-                "transcript": transcript_text,
-                "additional_documents": additional_documents,
-                "document_content": additional_documents,
-                "section_title": section.title,
-            }
-            context.update(placeholder_map)
-            prompt = format_prompt(user_prompt_template, context)
+            generation_placeholders = build_report_generation_placeholders(
+                base_placeholders=placeholder_map,
+                template_section=section.body.strip(),
+                section_title=section.title or "",
+                transcript=transcript_text,
+                additional_documents=additional_documents,
+            )
+            prompt = format_prompt(user_prompt_template, generation_placeholders)
 
             pct = 5 + int(60 * index / max(total, 1))
             self.progress.emit(pct, f"Generating section {index} of {total}: {section.title}")
@@ -487,16 +490,15 @@ class ReportRefinementWorker(ReportWorkerBase):
             if self._transcript_path:
                 transcript_raw = self._transcript_path.read_text(encoding="utf-8")
 
-            refine_prompt_context = {
-                "draft_report": draft_content,
-                "template": template_raw,
-                "transcript": transcript_raw,
-            }
-            refine_prompt_context.update(placeholder_map)
-
             self.log_message.emit("Refining draft report…")
             self.progress.emit(30, "Refining draft…")
-            refine_prompt = format_prompt(refinement_user_prompt, refine_prompt_context)
+            refinement_placeholders = build_report_refinement_placeholders(
+                base_placeholders=placeholder_map,
+                draft_report=draft_content,
+                template=template_raw,
+                transcript=transcript_raw,
+            )
+            refine_prompt = format_prompt(refinement_user_prompt, refinement_placeholders)
             refined_content, reasoning_content = self._run_refinement(
                 prompt=refine_prompt,
                 system_prompt=refinement_system_prompt,

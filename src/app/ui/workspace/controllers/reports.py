@@ -31,7 +31,12 @@ from src.app.core.report_inputs import (
     ReportInputDescriptor,
     category_display_name,
 )
-from src.app.core.report_prompt_context import build_report_preview_placeholders
+from src.app.core.report_prompt_context import (
+    build_report_base_placeholders,
+    build_report_generation_placeholders,
+    build_report_refinement_placeholders,
+)
+from src.app.core.report_template_sections import load_template_sections
 from src.app.ui.workspace.qt_flags import ITEM_IS_TRISTATE, ITEM_IS_USER_CHECKABLE
 from src.app.ui.workspace.reports_tab import ReportsTab
 from src.app.ui.workspace.services import (
@@ -688,24 +693,62 @@ class ReportsController:
         system_template = self._read_prompt_file(system_prompt_path) if system_prompt_path else ""
         user_template = self._read_prompt_file(prompt_path) if prompt_path else ""
 
+        template_path = self._optional_path(self._tab.template_edit.text())
+        transcript_path = self._optional_path(self._tab.transcript_edit.text())
+        draft_path = self._optional_path(self._tab.refine_draft_edit.text())
+
         selected_descriptors = [
             descriptor
             for descriptor in self._collect_report_inputs()
             if descriptor.key() in self._selected_inputs
         ]
 
-        placeholder_values = build_report_preview_placeholders(
-            project_manager=manager,
-            metadata=manager.metadata,
-            template_path=self._optional_path(self._tab.template_edit.text()),
-            transcript_path=self._optional_path(self._tab.transcript_edit.text()),
-            draft_path=self._optional_path(self._tab.refine_draft_edit.text()),
-            selected_inputs=selected_descriptors,
+        base_inputs = manager.project_placeholder_values()
+        project_dir = Path(manager.project_dir) if manager.project_dir else None
+        base_placeholders = build_report_base_placeholders(
+            base_placeholders=base_inputs,
+            project_name=manager.project_name,
+            project_dir=project_dir,
         )
 
-        values = placeholder_values
-        system_rendered = format_prompt(system_template, values) if system_template else ""
-        user_rendered = format_prompt(user_template, values) if user_template else ""
+        system_rendered = ""
+        if system_template:
+            system_rendered = format_prompt(system_template, base_placeholders)
+
+        user_placeholders = dict(base_placeholders)
+        user_rendered = ""
+
+        if prompt_spec_key == "report_generation_user_prompt":
+            template_section, section_title = self._preview_template_section(template_path)
+            additional_documents = self._preview_additional_documents(selected_descriptors)
+            transcript_text = self._safe_read_text(transcript_path)
+            user_placeholders = build_report_generation_placeholders(
+                base_placeholders=base_placeholders,
+                template_section=template_section,
+                section_title=section_title,
+                transcript=transcript_text,
+                additional_documents=additional_documents,
+            )
+            if user_template:
+                user_rendered = format_prompt(user_template, user_placeholders)
+        elif prompt_spec_key == "refinement_prompt":
+            draft_text = self._safe_read_text(draft_path)
+            template_text = self._safe_read_text(template_path)
+            transcript_text = self._safe_read_text(transcript_path)
+            user_placeholders = build_report_refinement_placeholders(
+                base_placeholders=base_placeholders,
+                draft_report=draft_text,
+                template=template_text,
+                transcript=transcript_text,
+            )
+            if user_template:
+                user_rendered = format_prompt(user_template, user_placeholders)
+        else:
+            if user_template:
+                user_rendered = format_prompt(user_template, user_placeholders)
+
+        values = dict(base_placeholders)
+        values.update(user_placeholders)
 
         required: set[str] = set()
         optional: set[str] = set()
@@ -761,6 +804,46 @@ class ReportsController:
             except Exception:
                 continue
         return ""
+
+    def _safe_read_text(self, path: Optional[Path]) -> str:
+        if not path:
+            return ""
+        try:
+            return path.expanduser().read_text(encoding="utf-8")
+        except Exception:
+            return ""
+
+    def _preview_template_section(self, template_path: Optional[Path]) -> tuple[str, str]:
+        if not template_path:
+            return "", ""
+        try:
+            sections = load_template_sections(template_path)
+        except Exception:
+            return "", ""
+        if not sections:
+            return "", ""
+        first = sections[0]
+        return first.body.strip(), first.title or ""
+
+    def _preview_additional_documents(self, descriptors: Sequence[ReportInputDescriptor]) -> str:
+        manager = self._project_manager
+        if not manager or not manager.project_dir:
+            return ""
+        project_dir = Path(manager.project_dir)
+        lines: list[str] = []
+        for descriptor in descriptors:
+            candidate = (project_dir / descriptor.relative_path).resolve()
+            if not candidate.exists() or not candidate.is_file():
+                continue
+            if candidate.suffix.lower() not in {".md", ".txt"}:
+                continue
+            try:
+                content = candidate.read_text(encoding="utf-8").strip()
+            except Exception:
+                continue
+            header = f"# {descriptor.label} ({descriptor.category})"
+            lines.extend(["<!-- preview: report-input -->", header, content, ""])
+        return "\n".join(lines).strip()
 
     # ------------------------------------------------------------------
     # Job orchestration

@@ -52,6 +52,7 @@ def test_prompt_preview_populates_source_placeholders(tmp_path: Path) -> None:
     assert preview.values["source_pdf_absolute_url"] == expected_url
     assert preview.values["source_pdf_absolute_path"] == pdf_path.resolve().as_posix()
     assert preview.values["source_pdf_filename"] == pdf_path.name
+    assert "Heading" in preview.values["document_content"]
     # Preview content should include actual document body
     assert "Body" in preview.user_rendered
 
