@@ -31,6 +31,7 @@ from src.app.core.report_inputs import (
     ReportInputDescriptor,
     category_display_name,
 )
+from src.app.core.report_prompt_context import build_report_preview_placeholders
 from src.app.ui.workspace.qt_flags import ITEM_IS_TRISTATE, ITEM_IS_USER_CHECKABLE
 from src.app.ui.workspace.reports_tab import ReportsTab
 from src.app.ui.workspace.services import (
@@ -687,7 +688,22 @@ class ReportsController:
         system_template = self._read_prompt_file(system_prompt_path) if system_prompt_path else ""
         user_template = self._read_prompt_file(prompt_path) if prompt_path else ""
 
-        values = manager.placeholder_mapping()
+        selected_descriptors = [
+            descriptor
+            for descriptor in self._collect_report_inputs()
+            if descriptor.key() in self._selected_inputs
+        ]
+
+        placeholder_values = build_report_preview_placeholders(
+            project_manager=manager,
+            metadata=manager.metadata,
+            template_path=self._optional_path(self._tab.template_edit.text()),
+            transcript_path=self._optional_path(self._tab.transcript_edit.text()),
+            draft_path=self._optional_path(self._tab.refine_draft_edit.text()),
+            selected_inputs=selected_descriptors,
+        )
+
+        values = placeholder_values
         system_rendered = format_prompt(system_template, values) if system_template else ""
         user_rendered = format_prompt(user_template, values) if user_template else ""
 
