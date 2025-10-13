@@ -5,18 +5,63 @@ from __future__ import annotations
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QProgressBar,
+    QSizePolicy,
     QSpinBox,
     QTextEdit,
+    QToolButton,
     QTreeWidget,
     QVBoxLayout,
     QWidget,
 )
+
+
+class CollapsibleGroupBox(QWidget):
+    """Simple collapsible container with a caption row and framed body."""
+
+    def __init__(self, title: str, *, parent: QWidget | None = None, collapsed: bool = False) -> None:
+        super().__init__(parent)
+
+        self._toggle = QToolButton(self)
+        self._toggle.setText(title)
+        self._toggle.setCheckable(True)
+        self._toggle.setChecked(not collapsed)
+        self._toggle.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self._toggle.setArrowType(Qt.DownArrow if not collapsed else Qt.RightArrow)
+        self._toggle.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._toggle.setStyleSheet("QToolButton { border: none; font-weight: 600; }")
+
+        self._content = QFrame(self)
+        self._content.setFrameShape(QFrame.StyledPanel)
+        self._content.setFrameShadow(QFrame.Plain)
+        self._content.setVisible(not collapsed)
+
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setContentsMargins(12, 8, 12, 12)
+        self._content_layout.setSpacing(6)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+        layout.addWidget(self._toggle)
+        layout.addWidget(self._content)
+
+        self._toggle.toggled.connect(self._on_toggled)
+
+    def content_layout(self) -> QVBoxLayout:
+        """Expose the layout hosting the section contents."""
+
+        return self._content_layout
+
+    def _on_toggled(self, checked: bool) -> None:
+        self._toggle.setArrowType(Qt.DownArrow if checked else Qt.RightArrow)
+        self._content.setVisible(checked)
 
 
 class ReportsTab(QWidget):
@@ -54,15 +99,12 @@ class ReportsTab(QWidget):
 
         self.generation_system_prompt_edit = QLineEdit()
         self.generation_system_prompt_browse = QPushButton("Browse…")
-        self.generation_system_prompt_preview = QPushButton("Preview generation system prompt")
-
         self.refinement_user_prompt_edit = QLineEdit()
         self.refinement_user_prompt_browse = QPushButton("Browse…")
         self.refinement_user_prompt_preview = QPushButton("Preview refinement prompt")
 
         self.refinement_system_prompt_edit = QLineEdit()
         self.refinement_system_prompt_browse = QPushButton("Browse…")
-        self.refinement_system_prompt_preview = QPushButton("Preview refinement system prompt")
 
         self.refine_draft_edit = QLineEdit()
         self.refine_draft_browse_button = QPushButton("Browse…")
@@ -145,60 +187,78 @@ class ReportsTab(QWidget):
         transcript_row.addWidget(self.transcript_browse_button)
         config_layout.addLayout(transcript_row)
 
-        generation_user_label = QLabel("Generation user prompt:")
-        config_layout.addWidget(generation_user_label)
-        generation_user_row = QHBoxLayout()
-        generation_user_row.setContentsMargins(0, 0, 0, 0)
-        generation_user_row.addWidget(self.generation_user_prompt_edit)
-        generation_user_row.addWidget(self.generation_user_prompt_browse)
-        config_layout.addLayout(generation_user_row)
-        config_layout.addWidget(self.generation_user_prompt_preview)
+        generation_group = CollapsibleGroupBox("Generate Draft", parent=self)
+        generation_layout = generation_group.content_layout()
 
         generation_system_label = QLabel("Generation system prompt:")
-        config_layout.addWidget(generation_system_label)
+        generation_layout.addWidget(generation_system_label)
         generation_system_row = QHBoxLayout()
         generation_system_row.setContentsMargins(0, 0, 0, 0)
         generation_system_row.addWidget(self.generation_system_prompt_edit)
         generation_system_row.addWidget(self.generation_system_prompt_browse)
-        config_layout.addLayout(generation_system_row)
-        config_layout.addWidget(self.generation_system_prompt_preview)
+        generation_layout.addLayout(generation_system_row)
 
-        refinement_user_label = QLabel("Refinement user prompt:")
-        config_layout.addWidget(refinement_user_label)
-        refinement_user_row = QHBoxLayout()
-        refinement_user_row.setContentsMargins(0, 0, 0, 0)
-        refinement_user_row.addWidget(self.refinement_user_prompt_edit)
-        refinement_user_row.addWidget(self.refinement_user_prompt_browse)
-        config_layout.addLayout(refinement_user_row)
-        config_layout.addWidget(self.refinement_user_prompt_preview)
+        generation_user_label = QLabel("Generation user prompt:")
+        generation_layout.addWidget(generation_user_label)
+        generation_user_row = QHBoxLayout()
+        generation_user_row.setContentsMargins(0, 0, 0, 0)
+        generation_user_row.addWidget(self.generation_user_prompt_edit)
+        generation_user_row.addWidget(self.generation_user_prompt_browse)
+        generation_layout.addLayout(generation_user_row)
+        generation_layout.addWidget(self.generation_user_prompt_preview)
+
+        generation_button_row = QHBoxLayout()
+        generation_button_row.setContentsMargins(0, 0, 0, 0)
+        generation_button_row.addWidget(self.generate_draft_button)
+        generation_button_row.addStretch()
+        generation_layout.addLayout(generation_button_row)
+
+        config_layout.addWidget(generation_group)
+
+        refinement_group = CollapsibleGroupBox("Refine Draft", parent=self)
+        refinement_layout = refinement_group.content_layout()
 
         refinement_system_label = QLabel("Refinement system prompt:")
-        config_layout.addWidget(refinement_system_label)
+        refinement_layout.addWidget(refinement_system_label)
         refinement_system_row = QHBoxLayout()
         refinement_system_row.setContentsMargins(0, 0, 0, 0)
         refinement_system_row.addWidget(self.refinement_system_prompt_edit)
         refinement_system_row.addWidget(self.refinement_system_prompt_browse)
-        config_layout.addLayout(refinement_system_row)
-        config_layout.addWidget(self.refinement_system_prompt_preview)
+        refinement_layout.addLayout(refinement_system_row)
+
+        refinement_user_label = QLabel("Refinement user prompt:")
+        refinement_layout.addWidget(refinement_user_label)
+        refinement_user_row = QHBoxLayout()
+        refinement_user_row.setContentsMargins(0, 0, 0, 0)
+        refinement_user_row.addWidget(self.refinement_user_prompt_edit)
+        refinement_user_row.addWidget(self.refinement_user_prompt_browse)
+        refinement_layout.addLayout(refinement_user_row)
+        refinement_layout.addWidget(self.refinement_user_prompt_preview)
 
         refinement_draft_label = QLabel("Existing draft for refinement:")
-        config_layout.addWidget(refinement_draft_label)
+        refinement_layout.addWidget(refinement_draft_label)
         refinement_draft_row = QHBoxLayout()
         refinement_draft_row.setContentsMargins(0, 0, 0, 0)
         refinement_draft_row.addWidget(self.refine_draft_edit)
         refinement_draft_row.addWidget(self.refine_draft_browse_button)
-        config_layout.addLayout(refinement_draft_row)
+        refinement_layout.addLayout(refinement_draft_row)
+
+        refinement_button_row = QHBoxLayout()
+        refinement_button_row.setContentsMargins(0, 0, 0, 0)
+        refinement_button_row.addWidget(self.run_refinement_button)
+        refinement_button_row.addStretch()
+        refinement_layout.addLayout(refinement_button_row)
+
+        config_layout.addWidget(refinement_group)
 
         top_layout.addWidget(config_group, 1)
         layout.addLayout(top_layout)
 
-        button_row = QHBoxLayout()
-        button_row.setContentsMargins(0, 0, 0, 0)
-        button_row.addWidget(self.generate_draft_button)
-        button_row.addWidget(self.run_refinement_button)
-        button_row.addWidget(self.open_reports_button)
-        button_row.addStretch()
-        layout.addLayout(button_row)
+        open_row = QHBoxLayout()
+        open_row.setContentsMargins(0, 0, 0, 0)
+        open_row.addWidget(self.open_reports_button)
+        open_row.addStretch()
+        layout.addLayout(open_row)
 
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.log_text)
