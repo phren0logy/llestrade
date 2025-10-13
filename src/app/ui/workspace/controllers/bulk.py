@@ -364,6 +364,13 @@ class BulkAnalysisController:
 
         values = manager.placeholder_mapping()
 
+        metadata = getattr(manager, "metadata", None)
+        if metadata:
+            values.setdefault("subject_name", metadata.subject_name or metadata.case_name or "")
+            values.setdefault("subject_dob", metadata.date_of_birth or "")
+            values.setdefault("case_info", metadata.case_description or "")
+            values.setdefault("case_name", metadata.case_name or "")
+
         required: set[str] = set()
         optional: set[str] = set()
         if group.placeholder_requirements:
@@ -385,6 +392,10 @@ class BulkAnalysisController:
         if group.operation == "per_document":
             required.add("document_content")
             values.setdefault("document_content", "<document>")
+            if group.files:
+                values.setdefault("document_name", group.files[0])
+            else:
+                values.setdefault("document_name", "<document>")
         else:
             optional.update({
                 "reduce_source_list",

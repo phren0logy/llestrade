@@ -112,7 +112,8 @@ def test_bulk_worker_force_rerun_reprocesses(tmp_path: Path, qtbot, monkeypatch:
 
     def fake_process(self, *_args, **_kwargs):
         call_count["value"] += 1
-        return "summary", {"chunk_count": 1, "chunking": False, "token_count": 10, "max_tokens": 4000}
+        placeholders = {"document_name": "folder/doc.md"}
+        return "summary", {"chunk_count": 1, "chunking": False, "token_count": 10, "max_tokens": 4000}, placeholders
 
     monkeypatch.setattr(BulkAnalysisWorker, "_process_document", fake_process)
 

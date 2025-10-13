@@ -53,12 +53,13 @@ def system_placeholder_map(
 
     ts = timestamp or datetime.now(timezone.utc)
     reduce_sources = list(reduce_sources or [])
+    primary_source = source or (reduce_sources[0] if reduce_sources else None)
 
     source_values = {
-        "source_pdf_filename": source.filename if source else "",
-        "source_pdf_relative_path": source.relative_path if source else "",
-        "source_pdf_absolute_path": source.absolute_path.as_posix() if source else "",
-        "source_pdf_absolute_url": _encode_path(source.absolute_path) if source else "",
+        "source_pdf_filename": primary_source.filename if primary_source else "",
+        "source_pdf_relative_path": primary_source.relative_path if primary_source else "",
+        "source_pdf_absolute_path": primary_source.absolute_path.as_posix() if primary_source else "",
+        "source_pdf_absolute_url": _encode_path(primary_source.absolute_path) if primary_source else "",
     }
 
     reduce_values = _build_reduce_placeholders(reduce_sources)

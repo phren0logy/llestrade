@@ -4,15 +4,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping, Optional
+from typing import Iterable, Mapping, Optional, Sequence
 
-from src.app.core.bulk_analysis_runner import (
-    load_prompts,
-)
+import frontmatter
+
+from src.app.core.bulk_analysis_runner import load_prompts
 from src.app.core.bulk_analysis_runner import _metadata_context  # type: ignore[attr-defined]
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.prompt_placeholders import get_prompt_spec, format_prompt
+from src.app.core.placeholders.system import (
+    SourceFileContext,
+    system_placeholder_map,
+)
+from src.app.core.bulk_paths import (
+    iter_map_outputs,
+    iter_map_outputs_under,
+    normalize_map_relative,
+    resolve_map_output_path,
+)
 
 
 class PromptPreviewError(RuntimeError):
@@ -47,16 +57,15 @@ def generate_prompt_preview(
     bundle = load_prompts(project_dir, group, metadata)
     metadata_context = _metadata_context(metadata)
 
-    base_values: dict[str, str] = dict(placeholder_values or {})
-    for key, value in metadata_context.items():
-        base_values.setdefault(key, value)
-
-    system_values = dict(base_values)
-    system_rendered = format_prompt(bundle.system_template, system_values)
-
     operation = getattr(group, "operation", "per_document") or "per_document"
+    source_context: SourceFileContext | None = None
+    reduce_contexts: list[SourceFileContext] = []
+
     if operation == "combined":
-        preview_path = _resolve_first_combined_input(project_dir, group)
+        combined_inputs = _resolve_combined_inputs(project_dir, group, limit=5)
+        preview_path = combined_inputs[0] if combined_inputs else None
+        reduce_contexts = _build_reduce_contexts(project_dir, combined_inputs)
+        source_context = None
         document_name = group.name or "Combined"
     else:
         preview_path, document_name = _resolve_first_per_document_input(project_dir, group)
@@ -65,11 +74,34 @@ def generate_prompt_preview(
         raise PromptPreviewError("No converted files are available for this group.")
 
     try:
-        content = preview_path.read_text(encoding="utf-8")
+        body, doc_metadata = _read_document(preview_path)
     except FileNotFoundError as exc:  # pragma: no cover - filesystem race
         raise PromptPreviewError(f"Preview source missing: {preview_path}") from exc
 
-    truncated_content = _truncate_markdown(content, max_content_lines)
+    truncated_content = _truncate_markdown(body, max_content_lines)
+
+    if operation != "combined":
+        source_context = _extract_primary_source(project_dir, preview_path, doc_metadata, document_name)
+
+    base_values: dict[str, str] = dict(placeholder_values or {})
+    for key, value in metadata_context.items():
+        base_values.setdefault(key, value)
+
+    if operation == "combined":
+        # Rebuild reduce contexts if we haven't already (combined path might be None earlier)
+        if "reduce_contexts" not in locals():
+            reduce_contexts = _build_reduce_contexts(project_dir, [])
+        source_context = None  # Combined runs don't set per-document source placeholders
+    system_samples = system_placeholder_map(
+        project_name=metadata.case_name if metadata else base_values.get("project_name"),
+        source=source_context,
+        reduce_sources=reduce_contexts,
+    )
+    base_values.update(system_samples)
+
+    system_values = dict(base_values)
+    system_rendered = format_prompt(bundle.system_template, system_values)
+
     user_context = dict(base_values)
     user_context.update(
         {
@@ -148,18 +180,34 @@ def _resolve_first_per_document_input(
     return file_map[first_relative], first_relative
 
 
-def _resolve_first_combined_input(project_dir: Path, group: BulkAnalysisGroup) -> Optional[Path]:
+def _truncate_markdown(content: str, max_lines: int) -> str:
+    lines = content.splitlines()
+    if len(lines) <= max_lines:
+        return content
+    truncated = lines[:max_lines]
+    truncated.append("…")
+    return "\n".join(truncated)
+
+
+def _resolve_combined_inputs(project_dir: Path, group: BulkAnalysisGroup, *, limit: Optional[int] = None) -> list[Path]:
     conv_root = project_dir / "converted_documents"
-    ba_root = project_dir / "bulk_analysis"
+    items: list[Path] = []
+
+    def _add(path: Path) -> None:
+        if not path.exists() or not path.is_file():
+            return
+        if path in items:
+            return
+        items.append(path)
 
     # Explicit converted files
     for rel in group.combine_converted_files or []:
         rel = rel.strip("/")
         if not rel:
             continue
-        candidate = conv_root / rel
-        if candidate.exists():
-            return candidate
+        _add(conv_root / rel)
+        if limit and len(items) >= limit:
+            return _apply_order(items, group)
 
     # Converted directories
     for rel_dir in group.combine_converted_directories or []:
@@ -169,21 +217,22 @@ def _resolve_first_combined_input(project_dir: Path, group: BulkAnalysisGroup) -
         base = conv_root / rel_dir
         if not base.exists():
             continue
-        candidates = sorted(p for p in base.rglob("*.md") if p.is_file())
-        if candidates:
-            return candidates[0]
+        for candidate in sorted(p for p in base.rglob("*.md") if p.is_file()):
+            _add(candidate)
+            if limit and len(items) >= limit:
+                return _apply_order(items, group)
 
-    # Entire groups under bulk_analysis/<slug>/outputs
+    # Entire map groups
     for slug in group.combine_map_groups or []:
         slug = slug.strip()
         if not slug:
             continue
-        outputs = ba_root / slug / "outputs"
-        candidates = sorted(p for p in outputs.rglob("*.md") if p.is_file())
-        if candidates:
-            return candidates[0]
+        for path, _ in iter_map_outputs(project_dir, slug):
+            _add(path)
+            if limit and len(items) >= limit:
+                return _apply_order(items, group)
 
-    # Specific directories under map outputs
+    # Map directories
     for rel_dir in group.combine_map_directories or []:
         rel_dir = rel_dir.strip("/")
         if not rel_dir:
@@ -192,10 +241,14 @@ def _resolve_first_combined_input(project_dir: Path, group: BulkAnalysisGroup) -
         if len(parts) != 2:
             continue
         slug, remainder = parts
-        base = ba_root / slug / "outputs" / remainder
-        candidates = sorted(p for p in base.rglob("*.md") if p.is_file())
-        if candidates:
-            return candidates[0]
+        slug = slug.strip()
+        if not slug:
+            continue
+        normalized = normalize_map_relative(remainder)
+        for path, _ in iter_map_outputs_under(project_dir, slug, normalized):
+            _add(path)
+            if limit and len(items) >= limit:
+                return _apply_order(items, group)
 
     # Explicit map files
     for rel in group.combine_map_files or []:
@@ -206,22 +259,125 @@ def _resolve_first_combined_input(project_dir: Path, group: BulkAnalysisGroup) -
         if len(parts) != 2:
             continue
         slug, remainder = parts
-        candidate = ba_root / slug / "outputs" / remainder
-        if candidate.exists():
-            return candidate
+        slug = slug.strip()
+        if not slug:
+            continue
+        normalized = normalize_map_relative(remainder)
+        if not normalized:
+            continue
+        _add(resolve_map_output_path(project_dir, slug, normalized))
+        if limit and len(items) >= limit:
+            return _apply_order(items, group)
 
-    # Fallback to first converted document
+    # Fallback to first per-document converted file
     path, _ = _resolve_first_per_document_input(project_dir, group)
-    return path
+    if path:
+        _add(path)
+
+    return _apply_order(items, group)
 
 
-def _truncate_markdown(content: str, max_lines: int) -> str:
-    lines = content.splitlines()
-    if len(lines) <= max_lines:
-        return content
-    truncated = lines[:max_lines]
-    truncated.append("…")
-    return "\n".join(truncated)
+def _apply_order(paths: Sequence[Path], group: BulkAnalysisGroup) -> list[Path]:
+    order = (group.combine_order or "path").lower()
+    if order == "mtime":
+        return sorted(paths, key=lambda p: p.stat().st_mtime if p.exists() else 0)
+    return sorted(paths, key=lambda p: p.as_posix())
+
+
+def _read_document(path: Path) -> tuple[str, dict[str, object]]:
+    raw = path.read_text(encoding="utf-8")
+    try:
+        post = frontmatter.loads(raw)
+    except Exception:
+        return raw, {}
+    content = post.content or ""
+    metadata = dict(post.metadata or {})
+    return content, metadata
+
+
+def _extract_primary_source(
+    project_dir: Path,
+    path: Path,
+    metadata: Mapping[str, object],
+    fallback_relative: str,
+) -> SourceFileContext | None:
+    contexts = _extract_source_contexts(project_dir, path, metadata, fallback_relative)
+    return contexts[0] if contexts else None
+
+
+def _build_reduce_contexts(project_dir: Path, paths: Iterable[Path]) -> list[SourceFileContext]:
+    contexts: list[SourceFileContext] = []
+    seen: set[str] = set()
+    for path in paths:
+        fallback_rel = _project_relative(project_dir, path)
+        _, metadata = _read_document(path)
+        for ctx in _extract_source_contexts(project_dir, path, metadata, fallback_rel):
+            if ctx.relative_path in seen:
+                continue
+            seen.add(ctx.relative_path)
+            contexts.append(ctx)
+    return contexts
+
+
+def _extract_source_contexts(
+    project_dir: Path,
+    path: Path,
+    metadata: Mapping[str, object],
+    fallback_relative: str,
+) -> list[SourceFileContext]:
+    sources = metadata.get("sources")
+    if not sources and isinstance(metadata.get("metadata"), dict):
+        nested = metadata["metadata"]
+        if isinstance(nested, Mapping):
+            sources = nested.get("sources")
+
+    contexts: list[SourceFileContext] = []
+    if isinstance(sources, Iterable):
+        for entry in sources:
+            if not isinstance(entry, Mapping):
+                continue
+            context = _resolve_source_context(project_dir, entry, fallback_relative)
+            if context:
+                contexts.append(context)
+
+    if contexts:
+        return contexts
+    absolute = path.resolve()
+    relative = fallback_relative or absolute.name
+    return [SourceFileContext(absolute_path=absolute, relative_path=relative)]
+
+
+def _resolve_source_context(
+    project_dir: Path,
+    entry: Mapping[str, object],
+    fallback_relative: str,
+) -> SourceFileContext | None:
+    rel_raw = str(entry.get("relative", "") or "").strip()
+    path_raw = str(entry.get("path", "") or "").strip()
+
+    absolute: Path
+    if path_raw:
+        candidate = Path(path_raw).expanduser()
+        if not candidate.is_absolute():
+            candidate = (project_dir / candidate).resolve()
+        absolute = candidate
+    else:
+        absolute = (project_dir / fallback_relative).resolve()
+
+    if not rel_raw:
+        try:
+            rel_raw = absolute.relative_to(project_dir).as_posix()
+        except Exception:
+            rel_raw = absolute.name
+
+    return SourceFileContext(absolute_path=absolute, relative_path=rel_raw)
+
+
+def _project_relative(project_dir: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(project_dir).as_posix()
+    except Exception:
+        return path.name
 
 
 __all__ = [

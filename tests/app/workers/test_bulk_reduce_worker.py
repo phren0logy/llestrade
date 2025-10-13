@@ -89,7 +89,7 @@ def test_bulk_reduce_worker_applies_placeholder_values(tmp_path: Path, monkeypat
     project_dir = tmp_path
     converted_dir = project_dir / "converted_documents"
     converted_dir.mkdir(parents=True, exist_ok=True)
-    pdf_path = project_dir / "sources" / "doc.pdf"
+    pdf_path = project_dir / "sources" / "doc space.pdf"
     pdf_path.parent.mkdir(parents=True, exist_ok=True)
     pdf_path.write_text("pdf", encoding="utf-8")
 
@@ -109,7 +109,7 @@ def test_bulk_reduce_worker_applies_placeholder_values(tmp_path: Path, monkeypat
         "load_prompts",
         lambda *_args, **_kwargs: reduce_module.PromptBundle(
             "System for {project_name}",
-            "Combined {reduce_source_list} {client_name}",
+            "Combined {reduce_source_list} {client_name} {source_pdf_absolute_url}",
         ),
     )
     monkeypatch.setattr(
@@ -150,5 +150,10 @@ def test_bulk_reduce_worker_applies_placeholder_values(tmp_path: Path, monkeypat
     assert captured["system"], "expected system prompt captured"
     assert captured["user"], "expected user prompt captured"
     assert captured["system"][0] == "System for Case Project"
-    assert "doc.pdf" in captured["user"][0]
-    assert "ACME" in captured["user"][0]
+    user_prompt = captured["user"][0]
+    assert "doc space.pdf" in user_prompt
+    assert "ACME" in user_prompt
+    from urllib.parse import quote
+
+    expected_url = quote(pdf_path.resolve().as_posix(), safe="/:")
+    assert expected_url in user_prompt

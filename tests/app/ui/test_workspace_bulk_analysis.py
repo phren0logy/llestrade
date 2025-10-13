@@ -7,6 +7,8 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QObject, QRunnable, Signal
 from PySide6.QtWidgets import QApplication, QPushButton
 
+from src.app.core.bulk_analysis_runner import PromptBundle
+
 from src.app.core.file_tracker import FileTracker
 from src.app.core.project_manager import ProjectManager, ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
@@ -223,5 +225,43 @@ def test_workspace_cancel_updates_status_and_cleans_state(tmp_path: Path, qt_app
     refreshed_cancel = _find_button(refreshed_widget, "Cancel")
     assert refreshed_run.isEnabled()
     assert not refreshed_cancel.isEnabled()
+
+    workspace.deleteLater()
+
+
+def test_placeholder_analysis_includes_metadata_values(
+    tmp_path: Path,
+    qt_app: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert qt_app is not None
+
+    manager, group = _create_project_with_group(tmp_path)
+    metadata = manager.metadata
+    assert metadata is not None
+    metadata.subject_name = "Jane Roe"
+    metadata.date_of_birth = "1970-01-01"
+    metadata.case_description = "Sample case description."
+
+    bundle = PromptBundle(
+        system_template="System uses {subject_name} and {case_info}",
+        user_template="User prompt for {subject_name} born {subject_dob}",
+    )
+    monkeypatch.setattr(
+        "src.app.ui.workspace.controllers.bulk.load_prompts",
+        lambda *_args, **_kwargs: bundle,
+    )
+
+    workspace = ProjectWorkspace()
+    workspace.set_project(manager)
+    controller = workspace.bulk_controller
+    assert controller is not None
+
+    analysis, missing_required, missing_optional = controller._analyse_placeholders(group)
+    assert analysis is not None
+    assert "subject_name" not in missing_optional
+    assert "subject_dob" not in missing_optional
+    assert "case_info" not in missing_optional
+    assert "document_name" not in missing_optional
 
     workspace.deleteLater()
