@@ -7,7 +7,7 @@ Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing Do
 
 ## Features
 
-- **Multiple LLM Providers**: Support for Anthropic Claude (cloud & AWS Bedrock), Google Gemini, and Azure OpenAI GPT-4
+- **Multiple LLM Providers**: Support for Anthropic Claude (cloud & AWS Bedrock), Google Gemini, and Azure OpenAI models
 - **Document Processing**: Convert PDFs to markdown and analyze forensic psychological reports
 - **Smart Chunking**: Markdown-aware document chunking for large files
 - **Batch Processing**: Process multiple documents with progress tracking
@@ -32,32 +32,15 @@ Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing Do
    cd forensic-report-drafter
    ```
 
-2. **Install dependencies using uv** (recommended)
+2. **Install dependencies using uv**
 
    ```bash
    uv sync
    ```
 
-   Or using pip:
-
-   ```bash
-   pip install -r pyproject.toml
-   ```
-
 3. **Configure API keys**
 
    ```bash
-   # Copy the template
-   cp config.template.env .env
-
-   # Edit .env and add your API keys:
-   # ANTHROPIC_API_KEY=sk-ant-...
-   # GEMINI_API_KEY=AIza...
-   # AZURE_OPENAI_API_KEY=...
-   # AZURE_OPENAI_ENDPOINT=https://...
-   # AZURE_OPENAI_DEPLOYMENT_NAME=gpt-5-mini
-   ```
-
 4. **Run the application**
 
    ```bash
@@ -67,43 +50,16 @@ Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing Do
    uv run main.py --debug
    ```
 
-### Migrating from Forensic Report Drafter
-
-If you used the previous app name and paths (~/.forensic_report_drafter), run the one-time migration script to move data to the new locations and update the keyring namespace:
-
-```bash
-uv run scripts/migrate_llestrade_from_legacy.py --yes
-```
-
-This will move `prompts/`, `config/`, `logs/`, and `crashes/` under `~/Documents/llestrade/` and copy API keys in your system keychain from the legacy service name (`ForensicReportDrafter`) to `Llestrade`.
-
-## Quick Start
-
-### Interactive Setup
-
-For first-time users, run the interactive setup:
-
-```bash
-uv run scripts/setup_env.py
-```
-
-This will:
-
-- Create your `.env` file
-- Guide you through API key configuration
-- Test your LLM connections
-- Run a sample analysis
+## Quick Star
 
 ### Basic Workflow
-
-1. **PDF Processing** (optional)
 
    - Use the PDF Processing tab to convert PDF reports to markdown
    - Select input PDFs and choose an output directory
 
 2. **Project Placeholders & Document Analysis**
 
-   - The new project wizard lets you pick or author placeholder lists (e.g., client name, case number). These values surface on the Bulk Analysis and Reports tabs and are substituted into prompts at runtime.
+   - The new project wizard lets you pick or author placeholder lists (e.g., name, case number). These values surface on the Bulk Analysis and Reports tabs and are substituted into prompts at runtime.
    - In the Analysis tab, select folders containing markdown documents
    - Enter subject information / adjust placeholders in Project Settings as needed
    - Click "Run Pending" to create per-document bulk analysis outputs
@@ -118,10 +74,6 @@ This will:
 4. **Report Generation**
    - Use the Prompts tab to generate final report sections
    - Apply templates for standardized formatting
-
-## Legacy UI Reference
-
-The original tabbed UI has been removed from the repository as of commit 6401a40cd1c4fead93e72b4e7dbfda916bf1cb99. If you need to inspect that implementation for historical reference, check out that revision (or any earlier one) and review the `src/legacy/` package in that commit.
 
 ## Project Structure
 
@@ -289,11 +241,11 @@ The application stores settings in `var/app_settings.json` (created on first run
     },
     "gemini": {
       "enabled": true,
-      "default_model": "gemini-1.5-pro"
+      "default_model": "gemini.5-pro"
     },
     "azure_openai": {
       "enabled": true,
-      "default_deployment_name": "gpt-4"
+      "default_deployment_name": "gpt-5-chat"
     }
   }
 }
@@ -443,7 +395,27 @@ See `pyproject.toml` for complete dependency list.
 
 ## License
 
-[Your License Here]
+MIT License
+
+Copyright (c) 2025 Andrew Nanton
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 ## Support
 
@@ -453,24 +425,7 @@ For detailed documentation, see the `docs/` directory and `CLAUDE.md` for AI ass
 
 ## Project Status
 
-### Current Implementation
-
-The application has two UIs running in parallel:
-
-1. **Legacy UI** (default) - Fully functional tab-based interface
-   - Run with: `uv run main.py`
-2. **New UI** (in development) - Modern stage-based workflow
-   - Run with: `uv run main.py --new-ui`
-   - 6 of 7 stages complete:
-     - ✅ Welcome & Project Management
-     - ✅ Project Setup (case information)
-     - ✅ Document Import (drag & drop)
-     - ✅ Document Processing (PDF/Word/Text conversion)
-     - ✅ Analysis (LLM summarization)
-     - ✅ Report Generation (integrated analysis)
-     - ❌ Refinement & Export (not implemented)
-
-The new UI addresses memory issues through single-stage architecture and provides a project-based workflow with `.frpd` files.
+This project is being adapted into a more general-purpose tool for working with large, variable, unstructured documents.
 
 ## Documentation
 

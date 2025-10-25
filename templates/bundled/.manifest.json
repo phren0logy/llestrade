@@ -1,0 +1,17 @@
+{
+  "synced_at": "2025-10-25T16:36:28.627445+00:00",
+  "repo_digest": {
+    "timestamp": "2025-10-25T16:36:28.627385+00:00",
+    "entries": {
+      "report-objective-data.md": "f55f249a74e12b70c45bb1484829aae56dc647f0ef08f5e79a182bc4ed73bca7"
+    },
+    "digest": "2366c72bd339b9e5ce30240d2b6bb393b1310d941e7b2e57c877f84b363de20c"
+  },
+  "copied": [
+    "report-objective-data.md"
+  ],
+  "updated": [],
+  "skipped": [],
+  "same": [],
+  "previous_manifest": {}
+}
