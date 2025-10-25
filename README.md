@@ -1,14 +1,15 @@
-# Llestrade (formerly Forensic Psych Report Drafter)
+# Llestrade
 
-Just as Inspector Lestrade was not the main character, AI should also be in a support role. Poor Lestrade was diligent but unimagniative, explifying the type of roles where LLMs can be useful without getting in the way of human expertise and creativity. Hence, "Llestrade." 
+Just as Inspector Lestrade was not the main character, AI should also be in a support role. Poor Lestrade was diligent but unimaginative, exemplifying the type of roles where LLMs can be useful without getting in the way of human expertise and creativity. Hence, "Llestrade." 
 
 Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing Documents using multiple LLM providers (Anthropic Claude, Anthropic Claude via AWS Bedrock, Google Gemini, Azure OpenAI).
 
+Note: This project is in pre-alpha status, and should be used by those with a good understanding of the strengths and limitations of LLMs. 
 
 ## Features
 
 - **Multiple LLM Providers**: Support for Anthropic Claude (cloud & AWS Bedrock), Google Gemini, and Azure OpenAI models
-- **Document Processing**: Convert PDFs to markdown and analyze forensic psychological reports
+- **Document Processing**: Convert PDFs to markdown and analyze forensic psychological reports, with consistent page numbers for provenance tracking
 - **Smart Chunking**: Markdown-aware document chunking for large files
 - **Batch Processing**: Process multiple documents with progress tracking
 - **Integrated Analysis**: Combine multiple reports into comprehensive bulk analysis outputs
@@ -28,8 +29,8 @@ Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing Do
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/your-username/forensic-report-drafter.git
-   cd forensic-report-drafter
+   git clone https://github.com/phren0logy/Llestrade
+   cd llestrade
    ```
 
 2. **Install dependencies using uv**
@@ -241,7 +242,7 @@ The application stores settings in `var/app_settings.json` (created on first run
     },
     "gemini": {
       "enabled": true,
-      "default_model": "gemini.5-pro"
+      "default_model": "gemini-2.5-pro"
     },
     "azure_openai": {
       "enabled": true,
@@ -270,7 +271,7 @@ DEBUG=true uv run main.py
 Debug mode features:
 
 - Debug Dashboard with real-time monitoring
-- Detailed logging to `~/Documents/llestrade/logs/` (previously `~/.forensic_report_drafter/logs/`)
+- Detailed logging to `~/Documents/llestrade/logs/` or platform-appropriate equivalent
 - System resource tracking
 - Operation timing and performance metrics
 
