@@ -1,4 +1,4 @@
-# Llestrade
+# LLestrade
 
 Just as Inspector Lestrade was not the main character, AI should also be in a support role. Poor Lestrade was diligent but unimaginative, exemplifying the type of roles where LLMs can be useful without getting in the way of human expertise and creativity. Hence, LLM + Lestrade = "LLestrade." 
 
