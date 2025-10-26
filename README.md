@@ -9,7 +9,7 @@ Note: This project is in pre-alpha status, and should be used by those with a go
 ## Features
 
 - **Multiple LLM Providers**: Support for Anthropic Claude (cloud & AWS Bedrock), Google Gemini, and Azure OpenAI models
-- **Document Processing**: Convert PDFs to markdown and analyze forensic psychological reports, with consistent page numbers for provenance tracking
+- **Document Processing**: Convert PDFs to markdown and analyze documents with consistent page numbers for provenance tracking
 - **Smart Chunking**: Markdown-aware document chunking for large files
 - **Batch Processing**: Process multiple documents with progress tracking
 - **Integrated Analysis**: Combine multiple reports into comprehensive bulk analysis outputs
