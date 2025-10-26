@@ -4,7 +4,7 @@ Just as Inspector Lestrade was not the main character, AI should also be in a su
 
 LLestrade is a PySide6 (Qt) desktop application for analyzing and summarizing Documents using multiple LLM providers (Anthropic Claude, Anthropic Claude via AWS Bedrock, Google Gemini, Azure OpenAI).
 
-Note: This project is in pre-alpha status, and should be used by those with a good understanding of the strengths and limitations of LLMs. 
+Note: This project is in pre-alpha status, and should be used by those with a good understanding of the strengths and limitations of LLMs. No support is provided. You will need accounts with Azure, AWS, and Google Gemini to use all availble features.
 
 ## Features
 
@@ -41,7 +41,8 @@ Note: This project is in pre-alpha status, and should be used by those with a go
 
 3. **Configure API keys**
 
-   ```bash
+These can be configured in application settings.
+
 4. **Run the application**
 
    ```bash
@@ -51,14 +52,14 @@ Note: This project is in pre-alpha status, and should be used by those with a go
    uv run main.py --debug
    ```
 
-## Quick Star
+## Quick Start
 
 ### Basic Workflow
 
-   - Use the PDF Processing tab to convert PDF reports to markdown
+   - Use the PDF Processing tab to convert PDF source documents to markdown
    - Select input PDF "source" folder (which LLestrade will treat as read-only) and choose an output directory
    - New files in the source folder will be monitored, and prompt the user for conversion
-   - If you update a PDF with highlights, those highlights can be extracted both by document, and aggregated across documents by color
+   - If you update a PDF with highlights, those highlights can be extracted both by document, and also aggregated across documents by color
 
 2. **Project Placeholders & Document Analysis**
 
@@ -275,7 +276,7 @@ Debug mode features:
 - Debug Dashboard with real-time monitoring
 - Detailed logging to `~/Documents/llestrade/logs/` or platform-appropriate equivalent
 - System resource tracking
-- Operation timing and performance metrics
+- Operation timing and performance metrics, including evals via Arize Phoenix
 
 ## Advanced Features
 
