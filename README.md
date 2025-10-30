@@ -1,7 +1,6 @@
 # Llestrade
 
-Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing forensic psychological reports using multiple LLM providers (Anthropic Claude, Anthropic Claude via AWS Bedrock, Google Gemini, Azure OpenAI).
-Note: The application was previously named “Forensic Psych Report Drafter.”
+Llestrade is a PySide6 (Qt) desktop application for analyzing and summarizing complex and variable documents using multiple LLM providers (Anthropic Claude, Anthropic Claude via AWS Bedrock, Google Gemini, Azure OpenAI).
 
 ## Features
 
