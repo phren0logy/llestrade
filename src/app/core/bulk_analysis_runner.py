@@ -217,6 +217,198 @@ def combine_chunk_summaries(
     prompt = format_prompt(base_template, context)
     return prompt, context
 
+def combine_chunk_summaries_hierarchical(
+    summaries: List[str],
+    *,
+    document_name: str,
+    metadata: Optional[ProjectMetadata],
+    placeholder_values: Mapping[str, str] | None = None,
+    provider_id: str,
+    model: Optional[str] = None,
+    invoke_fn,
+    is_cancelled_fn = None,
+) -> str:
+    """
+    Hierarchically combine summaries using multi-level reduction when needed.
+
+    This function attempts single-pass combination first (for backward compatibility
+    with small documents), then falls back to hierarchical batching if the combined
+    prompt would exceed the model's context window.
+
+    Args:
+        summaries: List of summary strings to combine
+        document_name: Name of the document being processed
+        metadata: Project metadata for context
+        placeholder_values: Additional placeholder values
+        provider_id: LLM provider identifier
+        model: Model name for token counting
+        invoke_fn: Callable that takes a prompt string and returns LLM response
+        is_cancelled_fn: Optional callable that returns True if operation should cancel
+
+    Returns:
+        Final combined summary string
+
+    Raises:
+        BulkAnalysisCancelled: If is_cancelled_fn returns True during processing
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Check for cancellation
+    if is_cancelled_fn and is_cancelled_fn():
+        raise BulkAnalysisCancelled("Operation cancelled before hierarchical reduction")
+
+    # Calculate threshold: 65% of model's context window
+    context_window = TokenCounter.get_model_context_window(model or provider_id)
+    max_combine_tokens = int(context_window * 0.65)
+
+    logger.info(
+        f"Hierarchical reduction starting: {len(summaries)} summaries, "
+        f"max_combine_tokens={max_combine_tokens} (65% of {context_window})"
+    )
+
+    # Step 1: Try single-pass combination (existing behavior for small documents)
+    prompt, context = combine_chunk_summaries(
+        summaries,
+        document_name=document_name,
+        metadata=metadata,
+        placeholder_values=placeholder_values,
+    )
+
+    # Count tokens in the combined prompt
+    token_info = TokenCounter.count(text=prompt, provider=provider_id, model=model)
+    prompt_tokens = token_info.get("token_count") if token_info.get("success") else len(prompt) // 4
+
+    logger.info(f"Single-pass prompt: {prompt_tokens} tokens")
+
+    # If under threshold, use single-pass (fast path)
+    if prompt_tokens <= max_combine_tokens:
+        logger.info("Single-pass combination fits within limit, invoking provider")
+        return invoke_fn(prompt)
+
+    # Step 2: Multi-level hierarchical reduction required
+    logger.warning(
+        f"Single-pass prompt exceeds limit ({prompt_tokens} > {max_combine_tokens}), "
+        f"switching to hierarchical reduction"
+    )
+
+    # Process summaries hierarchically
+    current_level_summaries = list(summaries)
+    level = 0
+
+    while len(current_level_summaries) > 1:
+        level += 1
+        logger.info(f"Hierarchical level {level}: processing {len(current_level_summaries)} summaries")
+
+        # Check for cancellation
+        if is_cancelled_fn and is_cancelled_fn():
+            raise BulkAnalysisCancelled(f"Operation cancelled during hierarchical level {level}")
+
+        # Dynamically determine batch size by testing token counts
+        batches = []
+        current_batch = []
+        current_batch_tokens = 0
+
+        for idx, summary in enumerate(current_level_summaries):
+            # Check cancellation periodically
+            if is_cancelled_fn and is_cancelled_fn():
+                raise BulkAnalysisCancelled(f"Operation cancelled at summary {idx} in level {level}")
+
+            # Count tokens in this summary
+            token_info = TokenCounter.count(text=summary, provider=provider_id, model=model)
+            summary_tokens = token_info.get("token_count") if token_info.get("success") else len(summary) // 4
+
+            # Calculate tokens if we add this summary to current batch
+            # Include overhead for separators and prompt template (~500 tokens)
+            test_batch = current_batch + [summary]
+            test_prompt, _ = combine_chunk_summaries(
+                test_batch,
+                document_name=document_name,
+                metadata=metadata,
+                placeholder_values=placeholder_values,
+            )
+            test_token_info = TokenCounter.count(text=test_prompt, provider=provider_id, model=model)
+            test_tokens = test_token_info.get("token_count") if test_token_info.get("success") else len(test_prompt) // 4
+
+            # If adding this summary would exceed limit, finalize current batch
+            if test_tokens > max_combine_tokens and current_batch:
+                batches.append(current_batch)
+                logger.info(
+                    f"Level {level}, batch {len(batches)}: {len(current_batch)} summaries, "
+                    f"~{current_batch_tokens} tokens"
+                )
+                current_batch = [summary]
+                current_batch_tokens = summary_tokens
+            else:
+                # Add to current batch
+                current_batch.append(summary)
+                current_batch_tokens = test_tokens
+
+        # Add final batch
+        if current_batch:
+            batches.append(current_batch)
+            logger.info(
+                f"Level {level}, batch {len(batches)}: {len(current_batch)} summaries, "
+                f"~{current_batch_tokens} tokens"
+            )
+
+        logger.info(f"Level {level}: created {len(batches)} batches")
+
+        # Combine each batch
+        next_level_summaries = []
+        for batch_idx, batch in enumerate(batches):
+            # Check cancellation
+            if is_cancelled_fn and is_cancelled_fn():
+                raise BulkAnalysisCancelled(
+                    f"Operation cancelled at batch {batch_idx + 1}/{len(batches)} in level {level}"
+                )
+
+            logger.info(
+                f"Level {level}, combining batch {batch_idx + 1}/{len(batches)} "
+                f"({len(batch)} summaries)"
+            )
+
+            # Create prompt for this batch
+            batch_prompt, _ = combine_chunk_summaries(
+                batch,
+                document_name=document_name,
+                metadata=metadata,
+                placeholder_values=placeholder_values,
+            )
+
+            # Invoke LLM to combine this batch
+            try:
+                batch_result = invoke_fn(batch_prompt)
+                next_level_summaries.append(batch_result)
+                logger.info(f"Level {level}, batch {batch_idx + 1} completed successfully")
+            except Exception as e:
+                # Wrap error with context
+                logger.error(
+                    f"Level {level}, batch {batch_idx + 1} failed: {e}",
+                    exc_info=True
+                )
+                raise Exception(
+                    f"Hierarchical reduction failed at level {level}, "
+                    f"batch {batch_idx + 1}/{len(batches)}: {e}"
+                ) from e
+
+        # Move to next level
+        current_level_summaries = next_level_summaries
+        logger.info(
+            f"Level {level} complete: reduced {len(batches)} batches to "
+            f"{len(next_level_summaries)} summaries"
+        )
+
+    # Final result
+    final_summary = current_level_summaries[0]
+    logger.info(
+        f"Hierarchical reduction complete after {level} levels, "
+        f"final summary: {len(final_summary)} characters"
+    )
+
+    return final_summary
+
+
 def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:
     if not path_str:
         return ""
@@ -289,6 +481,7 @@ __all__ = [
     "BulkAnalysisDocument",
     "PromptBundle",
     "combine_chunk_summaries",
+    "combine_chunk_summaries_hierarchical",
     "generate_chunks",
     "load_prompts",
     "prepare_documents",

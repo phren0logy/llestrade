@@ -35,6 +35,7 @@ from src.app.core.bulk_analysis_runner import (
     BulkAnalysisCancelled,
     PromptBundle,
     combine_chunk_summaries,
+    combine_chunk_summaries_hierarchical,
     generate_chunks,
     load_prompts,
     render_system_prompt,
@@ -437,13 +438,23 @@ class BulkReduceWorker(DashboardWorker):
                         )
                         summary = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
                         chunk_summaries.append(summary)
-                    combine_prompt, _ = combine_chunk_summaries(
+
+                    # Use hierarchical reduction to combine chunk summaries
+                    # This handles large documents that would exceed token limits
+                    def invoke_combine(prompt: str) -> str:
+                        """Wrapper for provider invocation during hierarchical reduction."""
+                        return self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
+
+                    result = combine_chunk_summaries_hierarchical(
                         chunk_summaries,
                         document_name=self._group.name,
                         metadata=self._metadata,
                         placeholder_values=placeholders_global,
+                        provider_id=provider_cfg.provider_id,
+                        model=provider_cfg.model,
+                        invoke_fn=invoke_combine,
+                        is_cancelled_fn=self.is_cancelled,
                     )
-                    result = self._invoke_provider(provider, provider_cfg, combine_prompt, system_prompt)
 
             # Persist
             output_path, run_manifest_path = self._output_paths()
