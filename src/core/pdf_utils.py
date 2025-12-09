@@ -1,5 +1,5 @@
 """
-PDF utility functions for Llestrade (formerly Forensic Psych Report Drafter).
+PDF utility functions for Llestrade
 Handles PDF file operations like splitting and merging.
 """
 
@@ -71,13 +71,13 @@ def split_large_pdf(pdf_path, output_dir, max_pages=1750, overlap=10):
 
         # Create a new document for this segment
         new_doc = fitz.open()
-        
+
         # Add the relevant pages to the new document
-        new_doc.insert_pdf(doc, from_page=start_page, to_page=end_page-1)
+        new_doc.insert_pdf(doc, from_page=start_page, to_page=end_page - 1)
 
         # Determine output filename for this segment
         output_filename = (
-            f"{filename_base}_part{i+1:03d}_{start_page+1:05d}-{end_page:05d}{ext}"
+            f"{filename_base}_part{i + 1:03d}_{start_page + 1:05d}-{end_page:05d}{ext}"
         )
         output_path = os.path.join(output_dir, output_filename)
 
@@ -151,22 +151,16 @@ def extract_text_from_pdf(pdf_path):
     try:
         doc = fitz.open(pdf_path)
         text = []
-        
+
         for page_num, page in enumerate(doc):
             page_text = page.get_text()
             text.append(f"--- Page {page_num + 1} ---\n{page_text}")
-        
+
         doc.close()
-        
-        return {
-            "success": True,
-            "text": "\n\n".join(text)
-        }
+
+        return {"success": True, "text": "\n\n".join(text)}
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def extract_text_from_pdf_with_azure(pdf_path, endpoint=None, key=None):
@@ -185,34 +179,28 @@ def extract_text_from_pdf_with_azure(pdf_path, endpoint=None, key=None):
         # Use a temporary output directory
         temp_dir = os.path.join(os.path.dirname(pdf_path), "temp_azure_extraction")
         os.makedirs(temp_dir, exist_ok=True)
-        
+
         # Process with Azure
         try:
             json_path, markdown_path = process_pdf_with_azure(
                 pdf_path, temp_dir, endpoint=endpoint, key=key
             )
-            
+
             # Read the markdown content
             with open(markdown_path, "r", encoding="utf-8") as f:
                 markdown_content = f.read()
-            
+
             # Clean up temporary files
             shutil.rmtree(temp_dir, ignore_errors=True)
-            
-            return {
-                "success": True,
-                "text": markdown_content
-            }
+
+            return {"success": True, "text": markdown_content}
         except Exception as e:
             # If Azure fails, fall back to local processing
             shutil.rmtree(temp_dir, ignore_errors=True)
             return extract_text_from_pdf(pdf_path)
-            
+
     except Exception as e:
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        return {"success": False, "error": str(e)}
 
 
 def process_pdf_with_azure(
@@ -256,7 +244,7 @@ def process_pdf_with_azure(
     # Create output directories if needed
     if not markdown_dir:
         markdown_dir = os.path.join(output_dir, "markdown")
-    
+
     if json_dir is not None:
         os.makedirs(json_dir, exist_ok=True)
     os.makedirs(markdown_dir, exist_ok=True)
@@ -266,13 +254,17 @@ def process_pdf_with_azure(
     base_name = os.path.splitext(file_name)[0]
 
     # Define output file paths
-    json_path = os.path.join(json_dir, f"{base_name}.json") if json_dir is not None else None
+    json_path = (
+        os.path.join(json_dir, f"{base_name}.json") if json_dir is not None else None
+    )
     markdown_path = os.path.join(markdown_dir, f"{base_name}.md")
 
     # Skip if both files already exist
     if json_path is not None:
         if os.path.exists(json_path) and os.path.exists(markdown_path):
-            print(f"Skipping {file_name} - already converted (found {base_name}.json and {base_name}.md)")
+            print(
+                f"Skipping {file_name} - already converted (found {base_name}.json and {base_name}.md)"
+            )
             return json_path, markdown_path
     else:
         if os.path.exists(markdown_path):
@@ -282,10 +274,12 @@ def process_pdf_with_azure(
     # Initialize the Document Intelligence client with retry mechanism
     max_retries = 3
     retry_delay = 2  # seconds
-    
+
     for attempt in range(1, max_retries + 1):
         try:
-            print(f"Attempt {attempt}/{max_retries} to connect to Azure Document Intelligence")
+            print(
+                f"Attempt {attempt}/{max_retries} to connect to Azure Document Intelligence"
+            )
             document_intelligence_client = DocumentIntelligenceClient(
                 endpoint=endpoint, credential=AzureKeyCredential(key)
             )
@@ -295,7 +289,9 @@ def process_pdf_with_azure(
                 raise Exception(
                     f"Failed to initialize Azure Document Intelligence client after {max_retries} attempts: {str(e)}"
                 )
-            print(f"Connection attempt {attempt} failed: {str(e)}. Retrying in {retry_delay} seconds...")
+            print(
+                f"Connection attempt {attempt} failed: {str(e)}. Retrying in {retry_delay} seconds..."
+            )
             time.sleep(retry_delay)
             retry_delay *= 2  # Exponential backoff
 
@@ -341,7 +337,7 @@ def process_pdf_with_azure(
         )
 
     # If page count exceeds Azure's 1000 page limit, process in ranges with overlap and combine
-    if 'page_count' in locals() and page_count is not None and page_count > 1000:
+    if "page_count" in locals() and page_count is not None and page_count > 1000:
         combined = _azure_markdown_chunked(
             client=document_intelligence_client,
             pdf_path=pdf_path,
@@ -364,7 +360,7 @@ def process_pdf_with_azure(
             # Add retry mechanism for processing operations
             max_proc_retries = 3
             proc_retry_delay = 3  # seconds
-            
+
             # Process for markdown with retries
             markdown_result = None
             for attempt in range(1, max_proc_retries + 1):
@@ -374,28 +370,38 @@ def process_pdf_with_azure(
                     print(
                         f"Starting Azure Document Intelligence processing for {os.path.basename(pdf_path)} in Markdown format"
                     )
-                    markdown_poller = document_intelligence_client.begin_analyze_document(
-                        "prebuilt-layout",
-                        file,
-                        output_content_format=DocumentContentFormat.MARKDOWN,
+                    markdown_poller = (
+                        document_intelligence_client.begin_analyze_document(
+                            "prebuilt-layout",
+                            file,
+                            output_content_format=DocumentContentFormat.MARKDOWN,
+                        )
                     )
-                    
+
                     # Get the markdown results with timeout handling
-                    print(f"Waiting for Azure Document Intelligence Markdown results...")
-                    markdown_result = markdown_poller.result(timeout=1800)  # 30 minute timeout
+                    print(
+                        f"Waiting for Azure Document Intelligence Markdown results..."
+                    )
+                    markdown_result = markdown_poller.result(
+                        timeout=1800
+                    )  # 30 minute timeout
                     print(f"Received Azure Document Intelligence Markdown results")
                     break  # Success, exit the retry loop
                 except Exception as e:
                     if attempt == max_proc_retries:
-                        raise Exception(f"Failed to process PDF for Markdown after {max_proc_retries} attempts: {str(e)}")
-                    print(f"Markdown processing attempt {attempt} failed: {str(e)}. Retrying in {proc_retry_delay} seconds...")
+                        raise Exception(
+                            f"Failed to process PDF for Markdown after {max_proc_retries} attempts: {str(e)}"
+                        )
+                    print(
+                        f"Markdown processing attempt {attempt} failed: {str(e)}. Retrying in {proc_retry_delay} seconds..."
+                    )
                     time.sleep(proc_retry_delay)
                     proc_retry_delay *= 1.5  # Increase delay for next attempt
                     file.seek(0)  # Reset file pointer for next attempt
-            
+
             # Reset file pointer for JSON processing
             file.seek(0)
-            
+
         json_result = None
         if json_path is not None:
             proc_retry_delay = 3
@@ -451,7 +457,14 @@ def process_pdf_with_azure(
         raise Exception(f"Error processing {pdf_path} with Azure: {str(e)}")
 
 
-def _azure_markdown_chunked(*, client: DocumentIntelligenceClient, pdf_path: str, total_pages: int, max_pages: int, overlap: int) -> str:
+def _azure_markdown_chunked(
+    *,
+    client: DocumentIntelligenceClient,
+    pdf_path: str,
+    total_pages: int,
+    max_pages: int,
+    overlap: int,
+) -> str:
     """Return combined Markdown by analyzing the PDF in page ranges with overlap.
 
     - Uses the `pages` parameter if supported; otherwise falls back to pre-splitting the PDF.
@@ -472,7 +485,9 @@ def _azure_markdown_chunked(*, client: DocumentIntelligenceClient, pdf_path: str
 
     def _split_pages(markdown: str) -> list[str]:
         # Split by explicit Azure page breaks, preserving content segments per page
-        pat = re.compile(r"^\s*<!--\s*PageBreak\s*-->\s*$", re.IGNORECASE | re.MULTILINE)
+        pat = re.compile(
+            r"^\s*<!--\s*PageBreak\s*-->\s*$", re.IGNORECASE | re.MULTILINE
+        )
         # Normalize endings
         md = markdown.replace("\r\n", "\n")
         parts = pat.split(md)
@@ -480,7 +495,7 @@ def _azure_markdown_chunked(*, client: DocumentIntelligenceClient, pdf_path: str
 
     combined_segments: list[str] = []
     first = True
-    for (rs, re_) in ranges:
+    for rs, re_ in ranges:
         use_pages_param = True
         content = None
         try:
@@ -502,10 +517,13 @@ def _azure_markdown_chunked(*, client: DocumentIntelligenceClient, pdf_path: str
         if not use_pages_param:
             # Fallback: render only the page range via temporary sub-PDF
             import fitz
+
             doc = fitz.open(pdf_path)
             sub = fitz.open()
             sub.insert_pdf(doc, from_page=rs - 1, to_page=re_ - 1)
-            tmp_path = os.path.join(os.path.dirname(pdf_path), f".__tmp_azure_{rs}_{re_}.pdf")
+            tmp_path = os.path.join(
+                os.path.dirname(pdf_path), f".__tmp_azure_{rs}_{re_}.pdf"
+            )
             try:
                 sub.save(tmp_path)
                 sub.close()
