@@ -333,7 +333,7 @@ class BulkAnalysisWorker(DashboardWorker):
             )
             slug = getattr(self._group, "slug", None) or self._group.folder_name
             checkpoint_mgr = CheckpointManager(
-                self._project_dir / "bulk_analysis" / slug / "reduce" / "checkpoints"
+                self._project_dir / "bulk_analysis" / slug / "map" / "checkpoints"
             )
             signature = {
                 "prompt_hash": prompt_hash,

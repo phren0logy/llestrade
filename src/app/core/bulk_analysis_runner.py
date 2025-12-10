@@ -227,7 +227,7 @@ def combine_chunk_summaries_hierarchical(
     placeholder_values: Mapping[str, str] | None = None,
     provider_id: str,
     model: Optional[str] = None,
-    invoke_fn=None,
+    invoke_fn,
     is_cancelled_fn=None,
     load_batch_fn=None,
     save_batch_fn=None,
