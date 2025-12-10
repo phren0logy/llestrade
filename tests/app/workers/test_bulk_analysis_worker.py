@@ -5,6 +5,8 @@ from typing import Sequence
 
 import pytest
 
+from src.app.workers.checkpoint_manager import CheckpointManager
+
 from src.app.core.bulk_analysis_runner import PromptBundle
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
@@ -38,7 +40,8 @@ def test_manifest_roundtrip(tmp_path: Path) -> None:
     path = _manifest_path(tmp_path, group)
 
     manifest = {
-        "version": 1,
+        "version": 2,
+        "signature": None,
         "documents": {
             "doc.md": {
                 "source_mtime": 1.23,
@@ -205,6 +208,11 @@ def test_bulk_worker_applies_placeholder_values(tmp_path: Path, monkeypatch: pyt
     system_prompt = worker_module.render_system_prompt(
         bundle, metadata, placeholder_values=global_placeholders
     )
+    checkpoint_mgr = CheckpointManager(project_dir / "bulk_analysis" / "group" / "map" / "checkpoints")
+    manifest: dict[str, object] = {"version": 2, "signature": {"prompt_hash": "hash", "placeholders": {}}, "documents": {}}
+    prompt_hash = "hash"
+    manifest_path = worker_module._manifest_path(project_dir, group)
+
     worker._process_document(
         provider=object(),
         provider_config=provider_config,
@@ -212,6 +220,10 @@ def test_bulk_worker_applies_placeholder_values(tmp_path: Path, monkeypatch: pyt
         system_prompt=system_prompt,
         document=document,
         global_placeholders=global_placeholders,
+        checkpoint_mgr=checkpoint_mgr,
+        manifest=manifest,
+        prompt_hash=prompt_hash,
+        manifest_path=manifest_path,
     )
 
     assert captured["system"][0] == "System for Project XYZ"
