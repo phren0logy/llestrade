@@ -42,10 +42,10 @@ uv sync
 uv run main.py
 
 # Run targeted tests (headless Qt)
-QT_QPA_PLATFORM=offscreen uv run python -m pytest tests/app/ui/test_workspace_bulk_analysis.py
+QT_QPA_PLATFORM=offscreen scripts/run_pytest.sh tests/app/ui/test_workspace_bulk_analysis.py
 
 # Run the whole suite (requires provider credentials for Gemini/Azure tests)
-QT_QPA_PLATFORM=offscreen uv run python -m pytest
+QT_QPA_PLATFORM=offscreen scripts/run_pytest.sh
 ```
 
 ## Coding Notes

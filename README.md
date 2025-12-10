@@ -373,13 +373,13 @@ Crash reports are saved to:
 
 ```bash
 # Run all tests
-uv run pytest tests/
+scripts/run_pytest.sh tests/
 
 # Run specific test file
-uv run pytest tests/test_gemini.py -v
+scripts/run_pytest.sh tests/test_gemini.py -v
 
 # Run with coverage
-uv run pytest --cov=. tests/
+scripts/run_pytest.sh --cov=. tests/
 ```
 
 ### Code Style

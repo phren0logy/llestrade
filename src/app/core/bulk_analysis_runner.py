@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -9,11 +10,12 @@ from typing import Dict, Iterable, List, Mapping, Optional, Sequence
 
 from src.common.llm.chunking import ChunkingStrategy
 from src.common.llm.tokens import TokenCounter
-from src.config.prompt_store import get_custom_dir, get_bundled_dir
 from src.config.paths import app_base_dir, app_resource_root
-from .prompt_manager import PromptManager
-from .project_manager import ProjectMetadata
+from src.config.prompt_store import get_bundled_dir, get_custom_dir
+
 from .bulk_analysis_groups import BulkAnalysisGroup
+from .project_manager import ProjectMetadata
+from .prompt_manager import PromptManager
 from .prompt_placeholders import ensure_required_placeholders, format_prompt
 
 LOGGER = logging.getLogger(__name__)
@@ -225,8 +227,10 @@ def combine_chunk_summaries_hierarchical(
     placeholder_values: Mapping[str, str] | None = None,
     provider_id: str,
     model: Optional[str] = None,
-    invoke_fn,
-    is_cancelled_fn = None,
+    invoke_fn=None,
+    is_cancelled_fn=None,
+    load_batch_fn=None,
+    save_batch_fn=None,
 ) -> str:
     """
     Hierarchically combine summaries using multi-level reduction when needed.
@@ -368,6 +372,17 @@ def combine_chunk_summaries_hierarchical(
                 f"({len(batch)} summaries)"
             )
 
+            # Determine checksum for this batch to enable checkpoint reuse
+            batch_input_checksum = _batch_checksum(batch)
+            if load_batch_fn:
+                cached = load_batch_fn(level, batch_idx + 1, batch_input_checksum)
+                if cached:
+                    next_level_summaries.append(cached)
+                    logger.info(
+                        f"Level {level}, batch {batch_idx + 1} reused cached result (checkpoint)"
+                    )
+                    continue
+
             # Create prompt for this batch
             batch_prompt, _ = combine_chunk_summaries(
                 batch,
@@ -379,6 +394,16 @@ def combine_chunk_summaries_hierarchical(
             # Invoke LLM to combine this batch
             try:
                 batch_result = invoke_fn(batch_prompt)
+                if save_batch_fn:
+                    try:
+                        save_batch_fn(level, batch_idx + 1, batch_input_checksum, batch_result)
+                    except Exception:
+                        logger.debug(
+                            "Level %s, batch %s failed to persist checkpoint",
+                            level,
+                            batch_idx + 1,
+                            exc_info=True,
+                        )
                 next_level_summaries.append(batch_result)
                 logger.info(f"Level {level}, batch {batch_idx + 1} completed successfully")
             except Exception as e:
@@ -407,6 +432,12 @@ def combine_chunk_summaries_hierarchical(
     )
 
     return final_summary
+
+
+def _batch_checksum(batch: List[str]) -> str:
+    """Return a stable checksum for a batch of summaries."""
+    joined = "\n\n---\n\n".join(batch)
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
 
 
 def _read_prompt_file(project_dir: Path, path_str: str | None) -> str:

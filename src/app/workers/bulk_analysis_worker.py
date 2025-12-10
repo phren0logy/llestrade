@@ -11,19 +11,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import frontmatter
-
 from PySide6.QtCore import Signal
 
-from src.common.llm.base import BaseLLMProvider
-from src.common.llm.factory import create_provider
-from src.common.markdown import (
-    PromptReference,
-    SourceReference,
-    apply_frontmatter,
-    build_document_metadata,
-    compute_file_checksum,
-    infer_project_path,
-)
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.bulk_analysis_runner import (
     BulkAnalysisCancelled,
     BulkAnalysisDocument,
@@ -36,12 +26,23 @@ from src.app.core.bulk_analysis_runner import (
     render_user_prompt,
     should_chunk,
 )
-from src.app.core.placeholders.system import SourceFileContext
 from src.app.core.bulk_prompt_context import build_bulk_placeholders
+from src.app.core.placeholders.system import SourceFileContext
 from src.app.core.project_manager import ProjectMetadata
 from src.app.core.secure_settings import SecureSettings
-from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
+from src.common.llm.base import BaseLLMProvider
+from src.common.llm.factory import create_provider
+from src.common.markdown import (
+    PromptReference,
+    SourceReference,
+    apply_frontmatter,
+    build_document_metadata,
+    compute_file_checksum,
+    infer_project_path,
+)
+
 from .base import DashboardWorker
+from .checkpoint_manager import CheckpointManager, _sha256
 
 
 @dataclass(frozen=True)
@@ -52,7 +53,7 @@ class ProviderConfig:
 
 
 
-_MANIFEST_VERSION = 1
+_MANIFEST_VERSION = 2
 _MTIME_TOLERANCE = 1e-6
 
 _DYNAMIC_GLOBAL_KEYS: frozenset[str] = frozenset(
@@ -87,7 +88,7 @@ def _manifest_path(project_dir: Path, group: BulkAnalysisGroup) -> Path:
 
 
 def _default_manifest() -> Dict[str, object]:
-    return {"version": _MANIFEST_VERSION, "documents": {}}
+    return {"version": _MANIFEST_VERSION, "signature": None, "documents": {}}
 
 
 def _load_manifest(path: Path) -> Dict[str, object]:
@@ -107,6 +108,7 @@ def _load_manifest(path: Path) -> Dict[str, object]:
 
     return {
         "version": data.get("version", _MANIFEST_VERSION),
+        "signature": data.get("signature"),
         "documents": documents,
     }
 
@@ -114,6 +116,7 @@ def _load_manifest(path: Path) -> Dict[str, object]:
 def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
     payload = {
         "version": _MANIFEST_VERSION,
+        "signature": manifest.get("signature"),
         "documents": manifest.get("documents", {}),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -328,8 +331,20 @@ class BulkAnalysisWorker(DashboardWorker):
                 self._metadata,
                 placeholder_values=self._base_placeholders,
             )
+            slug = getattr(self._group, "slug", None) or self._group.folder_name
+            checkpoint_mgr = CheckpointManager(
+                self._project_dir / "bulk_analysis" / slug / "reduce" / "checkpoints"
+            )
+            signature = {
+                "prompt_hash": prompt_hash,
+                "placeholders": self._serialise_placeholders(global_placeholders),
+            }
             manifest_path = _manifest_path(self._project_dir, self._group)
             manifest = _load_manifest(manifest_path)
+            if manifest.get("version") != _MANIFEST_VERSION or manifest.get("signature") != signature:
+                checkpoint_mgr.clear_all()
+                manifest = _default_manifest()
+            manifest["signature"] = signature
             entries = manifest.setdefault("documents", {})  # type: ignore[arg-type]
 
             for index, document in enumerate(documents, start=1):
@@ -367,6 +382,10 @@ class BulkAnalysisWorker(DashboardWorker):
                         system_prompt,
                         document,
                         global_placeholders,
+                        checkpoint_mgr,
+                        manifest,
+                        prompt_hash,
+                        manifest_path,
                     )
                 except BulkAnalysisCancelled:
                     raise
@@ -444,6 +463,10 @@ class BulkAnalysisWorker(DashboardWorker):
         system_prompt: str,
         document: BulkAnalysisDocument,
         global_placeholders: Dict[str, str],
+        checkpoint_mgr: CheckpointManager,
+        manifest: Dict[str, object],
+        prompt_hash: str,
+        manifest_path: Path,
     ) -> tuple[str, Dict[str, object], Dict[str, str]]:
         if self.is_cancelled():
             raise BulkAnalysisCancelled
@@ -520,27 +543,80 @@ class BulkAnalysisWorker(DashboardWorker):
             result = self._invoke_provider(provider, provider_config, prompt, system_prompt)
             return result, run_details, doc_placeholders
 
-        chunk_summaries: List[str] = []
+        documents = manifest.setdefault("documents", {})  # type: ignore[assignment]
+        entry: Dict[str, object] = dict(documents.get(document.relative_path, {}) or {})
+        source_checksum = _sha256(body)
         total_chunks = len(chunks)
+        needs_reset = (
+            entry.get("source_checksum") != source_checksum
+            or entry.get("prompt_hash") != prompt_hash
+            or entry.get("chunk_count") != total_chunks
+        )
+        if needs_reset:
+            checkpoint_mgr.clear_map_document(document.relative_path)
+            entry = {"chunks_done": [], "checksums": {}}
+
+        entry["source_checksum"] = source_checksum
+        entry["prompt_hash"] = prompt_hash
+        entry["chunk_count"] = total_chunks
+        entry.setdefault("chunks_done", [])
+        entry.setdefault("checksums", {})
+        documents[document.relative_path] = entry
+
+        chunk_summaries: List[str] = []
         run_details["chunk_count"] = total_chunks
+        done_set = set(entry.get("chunks_done") or [])
+        checksums: Dict[str, str] = dict(entry.get("checksums") or {})
+
         for idx, chunk in enumerate(chunks, start=1):
             if self.is_cancelled():
                 raise BulkAnalysisCancelled
-            chunk_prompt = render_user_prompt(
-                bundle,
-                self._metadata,
-                document.relative_path,
-                chunk,
-                chunk_index=idx,
-                chunk_total=total_chunks,
-                placeholder_values=doc_placeholders,
-            )
-            summary = self._invoke_provider(
-                provider,
-                provider_config,
-                chunk_prompt,
-                system_prompt,
-            )
+
+            chunk_checksum = _sha256(chunk)
+            cached = checkpoint_mgr.load_map_chunk(document.relative_path, idx)
+            cached_content = None
+            if (
+                cached
+                and cached.get("input_checksum") == chunk_checksum
+                and cached.get("content")
+                and cached.get("content_checksum") == _sha256(cached.get("content"))
+                and checksums.get(str(idx)) == chunk_checksum
+            ):
+                cached_content = cached.get("content")
+
+            if cached_content:
+                summary = cached_content
+                self.log_message.emit(
+                    f"Reusing chunk {idx}/{total_chunks} for {document.relative_path} from checkpoint"
+                )
+            else:
+                chunk_prompt = render_user_prompt(
+                    bundle,
+                    self._metadata,
+                    document.relative_path,
+                    chunk,
+                    chunk_index=idx,
+                    chunk_total=total_chunks,
+                    placeholder_values=doc_placeholders,
+                )
+                summary = self._invoke_provider(
+                    provider,
+                    provider_config,
+                    chunk_prompt,
+                    system_prompt,
+                )
+                checkpoint_mgr.save_map_chunk(document.relative_path, idx, summary, chunk_checksum)
+
+            checksums[str(idx)] = chunk_checksum
+            done_set.add(idx)
+            entry["checksums"] = checksums
+            entry["chunks_done"] = sorted(done_set)
+            documents[document.relative_path] = entry
+            try:
+                _save_manifest(manifest_path, manifest)
+            except Exception:
+                self.logger.debug("Failed to persist map chunk manifest update", exc_info=True)
+
             chunk_summaries.append(summary)
 
         combine_prompt, _ = combine_chunk_summaries(
@@ -550,6 +626,13 @@ class BulkAnalysisWorker(DashboardWorker):
             placeholder_values=doc_placeholders,
         )
         result = self._invoke_provider(provider, provider_config, combine_prompt, system_prompt)
+        entry["status"] = "complete"
+        entry["ran_at"] = datetime.now(timezone.utc).isoformat()
+        documents[document.relative_path] = entry
+        try:
+            _save_manifest(manifest_path, manifest)
+        finally:
+            checkpoint_mgr.clear_map_document(document.relative_path)
         return result, run_details, doc_placeholders
 
     def _invoke_provider(

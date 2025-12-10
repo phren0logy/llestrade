@@ -12,25 +12,9 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import frontmatter
-
 from PySide6.QtCore import Signal
 
-from src.common.llm.base import BaseLLMProvider
-from src.common.llm.factory import create_provider
-from src.common.markdown import (
-    PromptReference,
-    SourceReference,
-    apply_frontmatter,
-    build_document_metadata,
-    compute_file_checksum,
-    infer_project_path,
-)
-from src.app.core.bulk_paths import (
-    iter_map_outputs,
-    iter_map_outputs_under,
-    normalize_map_relative,
-    resolve_map_output_path,
-)
+from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
 from src.app.core.bulk_analysis_runner import (
     BulkAnalysisCancelled,
     PromptBundle,
@@ -42,17 +26,34 @@ from src.app.core.bulk_analysis_runner import (
     render_user_prompt,
     should_chunk,
 )
-from src.app.core.project_manager import ProjectMetadata
-from src.app.core.bulk_analysis_groups import BulkAnalysisGroup
-from src.app.core.secure_settings import SecureSettings
-from src.app.core.placeholders.system import SourceFileContext
+from src.app.core.bulk_paths import (
+    iter_map_outputs,
+    iter_map_outputs_under,
+    normalize_map_relative,
+    resolve_map_output_path,
+)
 from src.app.core.bulk_prompt_context import build_bulk_placeholders
+from src.app.core.placeholders.system import SourceFileContext
+from src.app.core.project_manager import ProjectMetadata
+from src.app.core.secure_settings import SecureSettings
+from src.common.llm.base import BaseLLMProvider
+from src.common.llm.factory import create_provider
+from src.common.markdown import (
+    PromptReference,
+    SourceReference,
+    apply_frontmatter,
+    build_document_metadata,
+    compute_file_checksum,
+    infer_project_path,
+)
+
 from .base import DashboardWorker
+from .checkpoint_manager import CheckpointManager, _sha256
 
 LOGGER = logging.getLogger(__name__)
 
 
-_MANIFEST_VERSION = 1
+_MANIFEST_VERSION = 2
 
 _DYNAMIC_REDUCE_KEYS: frozenset[str] = frozenset(
     {
@@ -69,7 +70,13 @@ def _manifest_path(project_dir: Path, group: BulkAnalysisGroup) -> Path:
 
 
 def _default_manifest() -> Dict[str, object]:
-    return {"version": _MANIFEST_VERSION, "signature": None}
+    return {
+        "version": _MANIFEST_VERSION,
+        "signature": None,
+        "chunks": {"count": 0, "done": [], "checksums": {}},
+        "batches": {},
+        "finalized": False,
+    }
 
 
 def _load_manifest(path: Path) -> Dict[str, object]:
@@ -81,10 +88,15 @@ def _load_manifest(path: Path) -> Dict[str, object]:
         return _default_manifest()
     if not isinstance(data, dict):
         return _default_manifest()
+    chunks = data.get("chunks") if isinstance(data.get("chunks"), dict) else {"count": 0, "done": [], "checksums": {}}
+    batches = data.get("batches") if isinstance(data.get("batches"), dict) else {}
     return {
         "version": data.get("version", _MANIFEST_VERSION),
         "signature": data.get("signature"),
         "placeholders": data.get("placeholders"),
+        "chunks": chunks,
+        "batches": batches,
+        "finalized": bool(data.get("finalized", False)),
     }
 
 
@@ -93,6 +105,9 @@ def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
         "version": _MANIFEST_VERSION,
         "signature": manifest.get("signature"),
         "placeholders": manifest.get("placeholders"),
+        "chunks": manifest.get("chunks", {"count": 0, "done": [], "checksums": {}}),
+        "batches": manifest.get("batches", {}),
+        "finalized": bool(manifest.get("finalized", False)),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
@@ -350,9 +365,34 @@ class BulkReduceWorker(DashboardWorker):
             signature_inputs = _inputs_signature(inputs)
             state_manifest_path = _manifest_path(self._project_dir, self._group)
             previous = _load_manifest(state_manifest_path)
-            current_signature = {"prompt_hash": prompt_hash, "inputs": signature_inputs}
+            signature = {
+                "prompt_hash": prompt_hash,
+                "inputs": signature_inputs,
+                "placeholders": self._serialise_placeholders(placeholders_global),
+            }
 
-            if not self._force_rerun and previous.get("signature") == current_signature:
+            slug = getattr(self._group, "slug", None) or self._group.folder_name
+            checkpoint_mgr = CheckpointManager(
+                self._project_dir / "bulk_analysis" / slug / "reduce" / "checkpoints"
+            )
+
+            # Reset checkpoints if signature changed or version mismatch
+            if previous.get("version") != _MANIFEST_VERSION or previous.get("signature") != signature:
+                checkpoint_mgr.clear_reduce()
+                previous = _default_manifest()
+
+            current_manifest = previous
+            current_manifest["signature"] = signature
+            current_manifest.setdefault("chunks", {"count": 0, "done": [], "checksums": {}})
+            current_manifest.setdefault("batches", {})
+            current_manifest["finalized"] = False
+            manifest = current_manifest
+
+            if (
+                not self._force_rerun
+                and previous.get("signature") == signature
+                and previous.get("finalized")
+            ):
                 self.log_message.emit("Combined inputs unchanged; skipping run.")
                 self.finished.emit(0, 0)
                 return
@@ -407,6 +447,10 @@ class BulkReduceWorker(DashboardWorker):
                 )
                 result = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
                 run_details["chunk_count"] = 1
+                chunk_state = current_manifest.get("chunks", {"count": 0, "done": [], "checksums": {}})
+                chunk_state["count"] = 1
+                chunk_state["done"] = [1]
+                current_manifest["chunks"] = chunk_state
             else:
                 chunks = generate_chunks(combined_content, max_tokens)
                 if not chunks:
@@ -424,19 +468,50 @@ class BulkReduceWorker(DashboardWorker):
                     chunk_summaries = []
                     total_chunks = len(chunks)
                     run_details["chunk_count"] = total_chunks
+                    chunk_state = current_manifest.get("chunks", {"count": 0, "done": [], "checksums": {}})
+                    chunk_state["count"] = total_chunks
+                    done_set = set(chunk_state.get("done") or [])
+
                     for idx, chunk in enumerate(chunks, start=1):
                         if self.is_cancelled():
                             raise BulkAnalysisCancelled
-                        prompt = render_user_prompt(
-                            bundle,
-                            self._metadata,
-                            self._group.name,
-                            chunk,
-                            chunk_index=idx,
-                            chunk_total=total_chunks,
-                            placeholder_values=placeholders_global,
-                        )
-                        summary = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
+
+                        chunk_checksum = _sha256(chunk)
+                        cached = checkpoint_mgr.load_reduce_chunk(idx)
+                        cached_content = None
+                        if (
+                            cached
+                            and cached.get("input_checksum") == chunk_checksum
+                            and cached.get("content")
+                            and chunk_state.get("checksums", {}).get(str(idx)) == chunk_checksum
+                        ):
+                            cached_content = cached.get("content")
+
+                        if cached_content:
+                            summary = cached_content
+                            self.log_message.emit(f"Reuse chunk {idx}/{total_chunks} from checkpoint")
+                        else:
+                            prompt = render_user_prompt(
+                                bundle,
+                                self._metadata,
+                                self._group.name,
+                                chunk,
+                                chunk_index=idx,
+                                chunk_total=total_chunks,
+                                placeholder_values=placeholders_global,
+                            )
+                            summary = self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
+                            checkpoint_mgr.save_reduce_chunk(idx, summary, chunk_checksum)
+
+                        chunk_state.setdefault("checksums", {})[str(idx)] = chunk_checksum
+                        done_set.add(idx)
+                        chunk_state["done"] = sorted(done_set)
+                        current_manifest["chunks"] = chunk_state
+                        try:
+                            _save_manifest(state_manifest_path, current_manifest)
+                        except Exception:
+                            self.logger.debug("Failed to persist chunk manifest update", exc_info=True)
+
                         chunk_summaries.append(summary)
 
                     # Use hierarchical reduction to combine chunk summaries
@@ -444,6 +519,24 @@ class BulkReduceWorker(DashboardWorker):
                     def invoke_combine(prompt: str) -> str:
                         """Wrapper for provider invocation during hierarchical reduction."""
                         return self._invoke_provider(provider, provider_cfg, prompt, system_prompt)
+
+                    def load_batch(level: int, batch_index: int, checksum: str) -> Optional[str]:
+                        cached = checkpoint_mgr.load_reduce_batch(level, batch_index)
+                        if (
+                            cached
+                            and cached.get("input_checksum") == checksum
+                            and cached.get("content")
+                            and current_manifest.get("batches", {}).get(f"{level}:{batch_index}") == checksum
+                        ):
+                            return cached.get("content")
+                        return None
+
+                    def save_batch(level: int, batch_index: int, checksum: str, content: str) -> None:
+                        checkpoint_mgr.save_reduce_batch(level, batch_index, content, checksum)
+                        batches = current_manifest.setdefault("batches", {})
+                        batches[f"{level}:{batch_index}"] = checksum
+                        current_manifest["batches"] = batches
+                        _save_manifest(state_manifest_path, current_manifest)
 
                     result = combine_chunk_summaries_hierarchical(
                         chunk_summaries,
@@ -454,6 +547,8 @@ class BulkReduceWorker(DashboardWorker):
                         model=provider_cfg.model,
                         invoke_fn=invoke_combine,
                         is_cancelled_fn=self.is_cancelled,
+                        load_batch_fn=load_batch,
+                        save_batch_fn=save_batch,
                     )
 
             # Persist
@@ -473,8 +568,12 @@ class BulkReduceWorker(DashboardWorker):
             output_path.write_text(updated, encoding="utf-8")
             run_manifest = self._build_run_manifest(inputs, provider_cfg, placeholders_global)
             run_manifest_path.write_text(json.dumps(run_manifest, indent=2), encoding="utf-8")
-            state_manifest = self._build_state_manifest(current_signature, placeholders_global)
-            _save_manifest(state_manifest_path, state_manifest)
+            current_manifest["finalized"] = True
+            current_manifest["ran_at"] = written_at.isoformat()
+            current_manifest["group_id"] = self._group.group_id
+            current_manifest["group_slug"] = getattr(self._group, "slug", None) or self._group.folder_name
+            _save_manifest(state_manifest_path, current_manifest)
+            checkpoint_mgr.clear_reduce()
 
             self.progress.emit(1, 1, "Completed")
             self.finished.emit(1, 0)
@@ -740,20 +839,6 @@ class BulkReduceWorker(DashboardWorker):
         out_md = out_dir / name
         out_manifest = out_md.with_suffix(".manifest.json")
         return out_md, out_manifest
-
-    def _build_state_manifest(
-        self,
-        signature: dict[str, object],
-        placeholders: Mapping[str, str],
-    ) -> dict:
-        return {
-            "version": _MANIFEST_VERSION,
-            "group_id": self._group.group_id,
-            "group_slug": getattr(self._group, "slug", None) or self._group.folder_name,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "signature": signature,
-            "placeholders": self._serialise_placeholders(placeholders),
-        }
 
     def _build_run_manifest(
         self,

@@ -20,6 +20,7 @@ Successfully implemented hybrid threshold-based hierarchical reduction to solve 
 ### Original Issue
 
 When processing large documents (e.g., 1336 files → 2.2M tokens), the system:
+
 1. Split documents into chunks (39 chunks in the reported case)
 2. Processed each chunk successfully → 39 individual summaries
 3. **FAILED** when combining all 39 summaries into final result
@@ -31,6 +32,7 @@ When processing large documents (e.g., 1336 files → 2.2M tokens), the system:
 The `combine_chunk_summaries()` function at `src/app/core/bulk_analysis_runner.py:184-218` blindly concatenated all summaries without checking if the combined prompt exceeded the model's context window.
 
 **Calculation**:
+
 - 39 chunks × ~5K tokens each = ~195K tokens
 - Add prompt template overhead (~5K tokens) = ~200K tokens
 - Exceeds Claude's 200K limit ❌
@@ -44,12 +46,14 @@ The `combine_chunk_summaries()` function at `src/app/core/bulk_analysis_runner.p
 After analyzing three approaches (see `HIERARCHICAL_REDUCTION_OPTIONS.md`), selected the hybrid approach for:
 
 **Advantages**:
+
 - ✅ **Best of both worlds**: Fast for small docs, reliable for large docs
 - ✅ **Backward compatible**: Small documents unchanged, no regression risk
 - ✅ **Cost efficient**: Only pays for extra LLM calls when necessary (~20% vs ~100%)
 - ✅ **Gradual transition**: Smoothly handles documents of any size
 
 **Key Parameters**:
+
 - **Threshold**: 65% of model's context window (matches existing chunking strategy)
 - **Claude safe window**: 130K tokens (65% of 200K)
 - **Triggers hierarchical**: When combined prompt > 84.5K tokens
@@ -73,6 +77,7 @@ WHILE more than 1 summary remains:
 ```
 
 **Example**: 39 summaries requiring hierarchical reduction
+
 - Level 1: 39 summaries → 7 batches → 7 intermediate summaries
 - Level 2: 7 intermediate summaries → 1 batch → 1 final summary
 - **Total**: 8 LLM calls (7 for level 1 + 1 for level 2)
@@ -86,6 +91,7 @@ WHILE more than 1 summary remains:
 **Location**: `src/app/core/bulk_analysis_runner.py:220-409`
 
 **Signature**:
+
 ```python
 def combine_chunk_summaries_hierarchical(
     summaries: List[str],
@@ -101,6 +107,7 @@ def combine_chunk_summaries_hierarchical(
 ```
 
 **Key Features**:
+
 - **Hybrid approach**: Single-pass first, hierarchical fallback
 - **Token counting**: Uses `TokenCounter.count()` and `TokenCounter.get_model_context_window()`
 - **Dynamic batching**: Tests token counts to determine optimal batch sizes
@@ -151,11 +158,13 @@ while len(current_level_summaries) > 1:
 **Location**: `src/app/workers/bulk_reduce_worker.py:442-457`
 
 **Changes**:
+
 1. Added import: `combine_chunk_summaries_hierarchical`
 2. Replaced single combine call with hierarchical version
 3. Created wrapper function for provider invocation
 
 **Implementation**:
+
 ```python
 # Old approach (single-pass only)
 combine_prompt, _ = combine_chunk_summaries(
@@ -184,6 +193,7 @@ result = combine_chunk_summaries_hierarchical(
 ```
 
 **Why this works**:
+
 - `invoke_combine` closure captures `provider`, `provider_cfg`, and `system_prompt`
 - Hierarchical function can invoke provider multiple times transparently
 - Cancellation callback `self.is_cancelled` propagates through all levels
@@ -195,16 +205,19 @@ result = combine_chunk_summaries_hierarchical(
 **Added 4 comprehensive tests**:
 
 1. **`test_combine_chunk_summaries_hierarchical_uses_single_pass_for_small_docs`**
+
    - Verifies fast path for small documents
    - 3 small summaries → 1 invoke call
    - Confirms backward compatibility
 
 2. **`test_combine_chunk_summaries_hierarchical_batches_large_docs`**
+
    - Verifies hierarchical batching triggers for large documents
    - 40 summaries × 10K chars = ~100K tokens > 84K threshold
    - Confirms multiple invoke calls (hierarchical reduction)
 
 3. **`test_combine_chunk_summaries_hierarchical_respects_cancellation`**
+
    - Verifies cancellation detection during hierarchical processing
    - Sets cancel flag after first batch
    - Confirms `BulkAnalysisCancelled` exception raised
@@ -229,6 +242,7 @@ result = combine_chunk_summaries_hierarchical(
 ### Large Documents (Hierarchical Path)
 
 **39 chunk example** (the original failure case):
+
 - **Before**: FAILED (token overflow)
 - **After**:
   - Level 1: 39 → 7 batches → 7 LLM calls
@@ -241,6 +255,7 @@ result = combine_chunk_summaries_hierarchical(
 ### Token Counting Performance
 
 The implementation performs token counting multiple times:
+
 - Once for initial single-pass check
 - Per-summary during batching (with caching)
 - Per-batch before combining
@@ -252,20 +267,24 @@ The implementation performs token counting multiple times:
 ## Files Modified
 
 ### Core Implementation
+
 - ✅ `src/app/core/bulk_analysis_runner.py`
   - Lines 220-409: New `combine_chunk_summaries_hierarchical()` function
   - Line 484: Added to `__all__` exports
 
 ### Worker Integration
+
 - ✅ `src/app/workers/bulk_reduce_worker.py`
   - Line 38: Added import
   - Lines 442-457: Replaced combine logic with hierarchical version
 
 ### Test Coverage
+
 - ✅ `tests/app/core/test_bulk_analysis_runner.py`
   - Lines 62-181: Added 4 new comprehensive tests
 
 ### Supporting Files (No Changes Required)
+
 - `src/common/llm/tokens.py` - Token counting (existing implementation sufficient)
 - `src/common/llm/chunking.py` - Document chunking (used by existing code)
 
@@ -274,10 +293,12 @@ The implementation performs token counting multiple times:
 ## Git Commits
 
 1. **`07b2ffb`** - Refactor: Clean up code formatting in pdf_utils.py
+
    - Normalized whitespace and formatting
    - Preparatory cleanup before main changes
 
 2. **`c465e83`** - feat: Implement hierarchical reduction for large documents
+
    - Core hierarchical function
    - Worker integration
    - Comprehensive logging and error handling
@@ -296,15 +317,15 @@ The implementation performs token counting multiple times:
 
 ```bash
 # Core tests
-QT_QPA_PLATFORM=offscreen uv run python -m pytest tests/app/core/test_bulk_analysis_runner.py -v
+QT_QPA_PLATFORM=offscreen scripts/run_pytest.sh tests/app/core/test_bulk_analysis_runner.py -v
 # Result: ✅ 7 passed
 
 # Worker tests
-QT_QPA_PLATFORM=offscreen uv run python -m pytest tests/app/workers/ -k "reduce" -v
+QT_QPA_PLATFORM=offscreen scripts/run_pytest.sh tests/app/workers/ -k "reduce" -v
 # Result: ✅ 2 passed
 
 # All core tests (regression check)
-QT_QPA_PLATFORM=offscreen uv run python -m pytest tests/app/core/ -v
+QT_QPA_PLATFORM=offscreen scripts/run_pytest.sh tests/app/core/ -v
 # Result: ✅ 27 passed
 ```
 
@@ -339,6 +360,7 @@ The original plan included a comprehensive checkpoint/resume system that is **NO
 #### Planned Components
 
 1. **CheckpointManager Class** (~150 lines)
+
    - **Purpose**: Manage progressive checkpointing for bulk reduce operations
    - **Location**: `src/app/workers/bulk_reduce_worker.py`
    - **Features**:
@@ -349,6 +371,7 @@ The original plan included a comprehensive checkpoint/resume system that is **NO
      - Atomic manifest updates
 
    **Key Methods**:
+
    ```python
    class CheckpointManager:
        def has_chunk(self, index: int) -> bool
@@ -360,6 +383,7 @@ The original plan included a comprehensive checkpoint/resume system that is **NO
    ```
 
 2. **Manifest Schema Migration (v1 → v2)**
+
    - **Current**: Map operation checkpoints only (v1 manifest)
    - **Planned**: Unified checkpoints for both map and reduce operations
    - **New Fields**:
@@ -368,16 +392,17 @@ The original plan included a comprehensive checkpoint/resume system that is **NO
        "version": 2,
        "reduce_run_id": "abc123",
        "reduce_checkpoints": {
-         "chunks": {"0": "checksum", "1": "checksum"},
+         "chunks": { "0": "checksum", "1": "checksum" },
          "hierarchical": {
-           "1": {"0": "checksum", "1": "checksum"},
-           "2": {"0": "checksum"}
+           "1": { "0": "checksum", "1": "checksum" },
+           "2": { "0": "checksum" }
          }
        }
      }
      ```
 
 3. **Worker Integration**
+
    - Modify `_run()` at lines 349-357 for checkpoint detection
    - Modify chunk processing loop (lines 426-439) with save/load
    - Pass `checkpoint_manager` to hierarchical function
@@ -385,6 +410,7 @@ The original plan included a comprehensive checkpoint/resume system that is **NO
    - Keep checkpoints on failure (for manual inspection/recovery)
 
 4. **Corruption Recovery**
+
    - Detect corrupted checkpoint files via checksum validation
    - Remove corrupted items from manifest
    - Reprocess affected chunks/batches
@@ -416,16 +442,19 @@ The original plan included a comprehensive checkpoint/resume system that is **NO
 **Estimated Effort**: 1-2 days
 
 1. **Reduce Token Counting Frequency**
+
    - Current: Tests every summary during batching
    - Optimization: Use estimated batch sizes, only validate final batch
    - **Benefit**: ~30% reduction in token counting overhead
 
 2. **Optimize Initial Chunking**
+
    - Current: 50% of context window (conservative)
    - Proposed: Increase to 65-70% for initial chunks
    - **Benefit**: Fewer chunks generated → less hierarchical reduction needed
 
 3. **Parallel Batch Processing**
+
    - Current: Sequential batch processing (one at a time)
    - Proposed: Process independent batches in parallel
    - **Benefit**: ~40% reduction in wall-clock time for large documents
@@ -464,21 +493,25 @@ INFO - Hierarchical reduction complete after 2 levels, final summary: 5234 chara
 ### Metrics to Monitor
 
 1. **Hierarchical Reduction Frequency**
+
    - Track: `WARNING - Single-pass prompt exceeds limit` in logs
    - **Expected**: ~5-10% of bulk analysis operations
    - **Alert if**: >30% (may indicate need for chunking optimization)
 
 2. **Level Depth**
+
    - Track: `Hierarchical reduction complete after N levels` in logs
    - **Expected**: 2-3 levels for most large documents
    - **Alert if**: >4 levels (extremely large document, may need manual intervention)
 
 3. **Batch Count per Level**
+
    - Track: `Level N: created M batches` in logs
    - **Expected**: 5-10 batches at level 1, 1-2 batches at level 2+
    - **Alert if**: >20 batches at level 1 (may indicate chunking issues)
 
 4. **Error Rates**
+
    - Track: `Hierarchical reduction failed at level N, batch M` in logs
    - **Expected**: <1% failure rate
    - **Alert if**: >5% (provider instability or prompt issues)
@@ -493,9 +526,11 @@ INFO - Hierarchical reduction complete after 2 levels, final summary: 5234 chara
 If checkpoint system is implemented:
 
 **Without Checkpoints** (current):
+
 - No additional disk usage beyond final output
 
 **With Checkpoints** (future):
+
 - **39 chunk example**: ~780KB for checkpoints (39 chunks × ~20KB each)
 - **Cleanup**: Checkpoints deleted on successful completion
 - **Retention**: Checkpoints kept on failure for debugging
@@ -510,6 +545,7 @@ If checkpoint system is implemented:
 **Cause**: Provider error during batch combination
 
 **Resolution**:
+
 1. Check provider logs for specific error (rate limit, timeout, etc.)
 2. Review batch size - may be hitting provider limits
 3. Consider reducing `max_combine_tokens` threshold if recurring
@@ -520,6 +556,7 @@ If checkpoint system is implemented:
 **Cause**: Initial chunking too aggressive or threshold too conservative
 
 **Resolution**:
+
 1. Review chunking strategy at `bulk_analysis_runner.py:174-181`
 2. Consider increasing initial chunk size from 50% to 60%
 3. Or keep threshold at 65% but accept higher hierarchical usage
@@ -529,6 +566,7 @@ If checkpoint system is implemented:
 **Cause**: Prompt template overhead exceeds estimates
 
 **Resolution**:
+
 1. Check actual token counts in logs
 2. Reduce threshold from 65% to 60% at `bulk_analysis_runner.py:263`
 3. Verify `TokenCounter.get_model_context_window()` returns correct values
@@ -538,6 +576,7 @@ If checkpoint system is implemented:
 **Cause**: Provider latency or extremely large document
 
 **Resolution**:
+
 1. Check provider response times in logs
 2. Consider implementing parallel batch processing (future optimization)
 3. Review document size - may need manual splitting for documents >10M tokens
@@ -590,6 +629,7 @@ If checkpoint system is implemented:
 The current implementation is **production ready** and solves the immediate token overflow problem. The checkpoint system can be implemented in a future sprint as an enhancement, but is not blocking for deployment.
 
 **Next Steps**:
+
 1. Deploy to production
 2. Monitor hierarchical reduction frequency and error rates
 3. Gather real-world performance data
