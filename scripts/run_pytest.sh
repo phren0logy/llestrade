@@ -5,5 +5,6 @@ set -euo pipefail
 # (e.g., phoenix) from spawning background services and hanging test runs.
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 
-exec uv run pytest "$@"
+# Explicitly load pytest-qt so fixtures like `qtbot` remain available.
+exec uv run pytest -p pytestqt.plugin "$@"
 

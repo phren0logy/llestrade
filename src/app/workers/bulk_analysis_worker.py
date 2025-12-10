@@ -123,6 +123,11 @@ def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _stable_placeholders(placeholders: Mapping[str, str]) -> Dict[str, str]:
+    """Filter out volatile placeholder values that should not affect rerun signatures."""
+    return {k: v for k, v in placeholders.items() if k != "timestamp"}
+
+
 def _compute_prompt_hash(
     bundle: PromptBundle,
     provider_config: ProviderConfig,
@@ -337,7 +342,7 @@ class BulkAnalysisWorker(DashboardWorker):
             )
             signature = {
                 "prompt_hash": prompt_hash,
-                "placeholders": self._serialise_placeholders(global_placeholders),
+                "placeholders": _stable_placeholders(self._serialise_placeholders(global_placeholders)),
             }
             manifest_path = _manifest_path(self._project_dir, self._group)
             manifest = _load_manifest(manifest_path)

@@ -113,6 +113,11 @@ def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
+def _stable_placeholders(placeholders: Mapping[str, str]) -> Dict[str, str]:
+    """Filter out volatile placeholder values that should not affect rerun signatures."""
+    return {k: v for k, v in placeholders.items() if k != "timestamp"}
+
+
 def _compute_prompt_hash(
     bundle: PromptBundle,
     provider_cfg: ProviderConfig,
@@ -368,7 +373,7 @@ class BulkReduceWorker(DashboardWorker):
             signature = {
                 "prompt_hash": prompt_hash,
                 "inputs": signature_inputs,
-                "placeholders": self._serialise_placeholders(placeholders_global),
+                "placeholders": _stable_placeholders(self._serialise_placeholders(placeholders_global)),
             }
 
             slug = getattr(self._group, "slug", None) or self._group.folder_name
