@@ -115,7 +115,17 @@ def _save_manifest(path: Path, manifest: Dict[str, object]) -> None:
 
 def _stable_placeholders(placeholders: Mapping[str, str]) -> Dict[str, str]:
     """Filter out volatile placeholder values that should not affect rerun signatures."""
-    return {k: v for k, v in placeholders.items() if k != "timestamp"}
+
+    def _keep(key: str) -> bool:
+        if key == "timestamp":
+            return False
+        if key.startswith("source_pdf_") and key != "source_pdf_filename":
+            return False
+        if key.startswith("reduce_source_") and key not in {"reduce_source_count"}:
+            return False
+        return True
+
+    return {k: v for k, v in placeholders.items() if _keep(k)}
 
 
 def _compute_prompt_hash(
@@ -156,18 +166,10 @@ def _inputs_signature(inputs: Sequence[tuple[str, Path, str]]) -> list[dict[str,
     signature: list[dict[str, object]] = []
     for kind, path, rel in inputs:
         try:
-            stat_result = path.stat()
-            mtime = float(stat_result.st_mtime)
-            mtime_ns = getattr(stat_result, "st_mtime_ns", None)
-        except OSError:
-            mtime = 0.0
-            mtime_ns = None
-        entry: dict[str, object] = {"kind": kind, "path": rel, "mtime": round(mtime, 6)}
-        if mtime_ns is not None:
-            try:
-                entry["mtime_ns"] = int(mtime_ns)
-            except (TypeError, ValueError):
-                pass
+            checksum = compute_file_checksum(path)
+        except Exception:
+            checksum = ""
+        entry: dict[str, object] = {"kind": kind, "path": rel, "checksum": checksum}
         signature.append(entry)
     signature.sort(key=lambda item: (item["kind"], item["path"]))
     return signature
@@ -370,10 +372,11 @@ class BulkReduceWorker(DashboardWorker):
             signature_inputs = _inputs_signature(inputs)
             state_manifest_path = _manifest_path(self._project_dir, self._group)
             previous = _load_manifest(state_manifest_path)
+            signature_placeholders = _stable_placeholders(self._serialise_placeholders(placeholders_global))
             signature = {
                 "prompt_hash": prompt_hash,
                 "inputs": signature_inputs,
-                "placeholders": _stable_placeholders(self._serialise_placeholders(placeholders_global)),
+                "placeholders": signature_placeholders,
             }
 
             slug = getattr(self._group, "slug", None) or self._group.folder_name
@@ -381,11 +384,23 @@ class BulkReduceWorker(DashboardWorker):
                 self._project_dir / "bulk_analysis" / slug / "reduce" / "checkpoints"
             )
 
-            # Reset checkpoints if signature changed or version mismatch
-            if previous.get("version") != _MANIFEST_VERSION or previous.get("signature") != signature:
+            previous_sig = previous.get("signature") or {}
+            def _paths(sig: dict[str, object]) -> list[tuple[str, str]]:
+                inputs_list = sig.get("inputs") or []
+                return [(item.get("kind"), item.get("path")) for item in inputs_list if isinstance(item, dict)]
+
+            same_inputs = (
+                previous.get("version") == _MANIFEST_VERSION
+                and previous_sig.get("prompt_hash") == prompt_hash
+                and _paths(previous_sig) == _paths({"inputs": signature_inputs})
+            )
+
+            # Reset checkpoints if version mismatch or inputs/prompt changed
+            if previous.get("version") != _MANIFEST_VERSION or not same_inputs:
                 checkpoint_mgr.clear_reduce()
                 previous = _default_manifest()
 
+            was_finalized = bool(previous.get("finalized"))
             current_manifest = previous
             current_manifest["signature"] = signature
             current_manifest.setdefault("chunks", {"count": 0, "done": [], "checksums": {}})
@@ -393,11 +408,7 @@ class BulkReduceWorker(DashboardWorker):
             current_manifest["finalized"] = False
             manifest = current_manifest
 
-            if (
-                not self._force_rerun
-                and previous.get("signature") == signature
-                and previous.get("finalized")
-            ):
+            if not self._force_rerun and same_inputs and was_finalized:
                 self.log_message.emit("Combined inputs unchanged; skipping run.")
                 self.finished.emit(0, 0)
                 return

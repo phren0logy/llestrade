@@ -35,3 +35,11 @@ dev = [
     "rich>=13.0.0",
     "pyinstaller>=6.11.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+qt_api = "pyside6"
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore:'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated:DeprecationWarning:phoenix.server.api.routers",
+]
